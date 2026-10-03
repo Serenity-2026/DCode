@@ -1,13 +1,26 @@
-import type { Attachment, Conversation, ProviderProfile, ReasoningEffort } from './types'
+import type { Attachment, Conversation, ModelDetails, ReasoningEffort } from './types'
 
 /** 推理档位白名单供 Models 解析元数据、Store 校验输入、界面生成滑块共用。 */
-export const reasoningEfforts: ReasoningEffort[] = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+export const reasoningEfforts: ReasoningEffort[] = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']
+/** 界面固定五档；旧的 minimal / xhigh 仅保留在磁盘与服务元数据兼容白名单中。 */
+export const strengthLevels = ['low', 'medium', 'high', 'max', 'ultra'] as const
+export type Strength = typeof strengthLevels[number]
 /** 附件文本总量上限，在文件读取、IPC 校验及界面添加时使用同一限制。 */
 export const attachmentByteLimit = 512 * 1024
 
-/** 优先采用服务返回的档位；缺少元数据的兼容服务按低、中、高提供选择。 */
-export function modelEfforts(provider: ProviderProfile | undefined, model: string | null): ReasoningEffort[] {
-  return model ? provider?.modelDetails?.[model]?.reasoningEfforts ?? ['low', 'medium', 'high'] : []
+/** Store 和界面共用旧账号档位迁移规则，缺省使用 medium。 */
+export function normalizeEffort(value: ReasoningEffort | null | undefined): Strength {
+  return value === 'minimal' ? 'low' : value === 'xhigh' ? 'max' : value || 'medium'
+}
+
+/** Models 与界面共用请求映射：优先实际元数据，避免把五档偏好当成服务都支持的参数。 */
+export function resolveEffort(value: ReasoningEffort | null | undefined, detail?: ModelDetails): ReasoningEffort | null {
+  const requested = normalizeEffort(value)
+  const supported = detail?.reasoningEfforts
+  if (!supported) return requested === 'ultra' ? 'max' : requested
+  if (supported.includes(requested)) return requested
+  const ranked = [...supported].sort((a, b) => strengthLevels.indexOf(normalizeEffort(a)) - strengthLevels.indexOf(normalizeEffort(b)))
+  return ranked.find(level => strengthLevels.indexOf(normalizeEffort(level)) >= strengthLevels.indexOf(requested)) || ranked.at(-1) || null
 }
 
 /** 校验附件快照，拒绝无效或超量 IPC 输入；Store 同样用于验证磁盘消息。 */

@@ -4,7 +4,7 @@ export type Theme = 'light' | 'dark'
 export type MessageStatus = 'streaming' | 'complete' | 'stopped' | 'error'
 
 /** Models 从服务元数据确认的推理档位，Store 保存账号选择，streamModel 发送实际参数。 */
-export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra'
 
 /** 系统选择器读取的文本快照，由 Chat 随消息保存，界面只展示名称与文件数。 */
 export interface Attachment { id: string; name: string; kind: 'file' | 'folder'; fileCount: number; content: string }

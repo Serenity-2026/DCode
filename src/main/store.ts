@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { constants, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { Action, Attachment, Conversation, Message, ProviderProfile, ReasoningEffort, Snapshot, Theme, User } from '../shared/types'
-import { modelEfforts, reasoningEfforts, validateAttachments } from '../shared/context'
+import { normalizeEffort, reasoningEfforts, strengthLevels, validateAttachments } from '../shared/context'
 export { contextMessages } from '../shared/context'
 
 /** 校验并去除文本两端空白，供 Store 的用户名称、会话标题和问题输入共用。 */
@@ -135,6 +135,7 @@ export class Store {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error('无法读取本地数据，请备份数据文件后检查格式。')
       this.state = { schemaVersion: 3, users: [], activeUserId: null, activeConversationId: null, conversations: [], session: null }
     }
+    for (const user of this.state.users) user.reasoningEffort = normalizeEffort(user.reasoningEffort)
     for (const c of this.state.conversations) {
       for (const m of c.messages) if (m.status === 'streaming') m.status = 'stopped'
     }
@@ -203,7 +204,7 @@ export class Store {
       theme: user?.theme || 'light', legacyUsers: user ? [] : this.state.users.filter(u => !u.username).map(publicUser),
       providers: user?.providers.map(({ encryptedApiKey: _secret, ...profile }) => profile) || [],
       activeProviderId: user?.activeProviderId || null, selectedModel: user?.selectedModel || null, fastMode: user?.fastMode || false,
-      reasoningEffort: user?.reasoningEffort || null,
+      reasoningEffort: user ? normalizeEffort(user.reasoningEffort) : null,
       config: { baseUrl: selected?.baseUrl || '', model: user?.selectedModel || '', configured: Boolean(selected?.encryptedApiKey && selected.availableModels.includes(user?.selectedModel || '')) }
     })
   }
@@ -233,14 +234,13 @@ export class Store {
           if (!currentUser.providers.some(p => p.id === action.providerId && p.availableModels.includes(action.model))) throw new Error('模型不存在或不属于当前账号。')
           currentUser.activeProviderId = action.providerId
           currentUser.selectedModel = action.model
-          if (currentUser.reasoningEffort && !modelEfforts(currentUser.providers.find(p => p.id === action.providerId), action.model).includes(currentUser.reasoningEffort)) currentUser.reasoningEffort = null
           break
         case 'fast-mode':
           if (typeof action.enabled !== 'boolean') throw new Error('无效快速模式状态。')
           currentUser.fastMode = action.enabled
           break
         case 'reasoning-effort':
-          if (action.effort !== null && (!reasoningEfforts.includes(action.effort) || !modelEfforts(currentUser.providers.find(p => p.id === currentUser.activeProviderId), currentUser.selectedModel).includes(action.effort))) throw new Error('该模型不支持此强度，请选择其他档位。')
+          if (!strengthLevels.includes(action.effort as typeof strengthLevels[number])) throw new Error('模型强度无效，请选择 low / medium / high / max / ultra。')
           currentUser.reasoningEffort = action.effort
           break
         case 'conversation:select':

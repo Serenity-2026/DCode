@@ -1,10 +1,8 @@
-import { useEffect, useState, type ReactNode } from 'react'
-import { Button, Dropdown, Progress, Slider, Tooltip } from 'antd'
+import { type ReactNode } from 'react'
+import { Button, Dropdown, Progress, Tooltip } from 'antd'
 import { DownOutlined, PlusOutlined, FileOutlined, FolderOpenOutlined, ReloadOutlined, SettingOutlined, ThunderboltFilled, ThunderboltOutlined } from '@ant-design/icons'
 import type { ReasoningEffort, Snapshot } from '../../shared/types'
-import { modelEfforts } from '../../shared/context'
-
-const effortLabels: Record<ReasoningEffort, string> = { minimal: '最轻', low: '轻量', medium: '标准', high: '深入', xhigh: '更高', max: '极致' }
+import { EffortControl } from './EffortControl'
 
 /** 输入框工具栏，依赖 Workspace 的账号快照与操作回调，Ant Design 提供菜单、圆环和强度滑块。 */
 export function ComposerTools({ snapshot, busy, modelsLoading, usedTokens, onAdd, onModel, onRefresh, onSettings, onFastMode, onEffort, sendButton }: {
@@ -14,20 +12,9 @@ export function ComposerTools({ snapshot, busy, modelsLoading, usedTokens, onAdd
   onEffort: (effort: ReasoningEffort | null) => Promise<boolean>; sendButton: ReactNode
 }): ReactNode {
   const provider = snapshot.providers.find(item => item.id === snapshot.activeProviderId)
-  const efforts = modelEfforts(provider, snapshot.selectedModel)
-  const levels: (ReasoningEffort | null)[] = [null, ...efforts]
-  const [effort, setEffort] = useState<ReasoningEffort | null>(snapshot.reasoningEffort)
-  useEffect(() => setEffort(snapshot.reasoningEffort), [snapshot.reasoningEffort, snapshot.selectedModel, snapshot.activeProviderId])
-  const effortIndex = Math.max(0, levels.indexOf(effort))
   const contextWindow = snapshot.selectedModel ? provider?.modelDetails?.[snapshot.selectedModel]?.contextWindow : undefined
   const percent = contextWindow ? Math.min(100, usedTokens / contextWindow * 100) : undefined
   const choices = snapshot.providers.flatMap(item => item.availableModels.map(model => ({ key: JSON.stringify([item.id, model]), providerId: item.id, model })))
-
-  /** 滑动时仅更新动画，结束后由 Store 保存；失败恢复真实快照，避免界面出现未保存的强度。 */
-  async function saveEffort(index: number): Promise<void> {
-    const selected = levels[index]
-    if (!await onEffort(selected)) setEffort(snapshot.reasoningEffort)
-  }
 
   return <div className="composer-tools">
     <Dropdown disabled={busy} trigger={['click']} placement="topLeft" menu={{ items: [{ key: 'add', type: 'group', label: '添加', children: [
@@ -62,10 +49,7 @@ export function ComposerTools({ snapshot, busy, modelsLoading, usedTokens, onAdd
       <Tooltip title={`${snapshot.fastMode ? '关闭' : '开启'}快速模式 · 仅对支持加速的模型生效`}>
         <Button className="speed-button" style={snapshot.fastMode ? { color: '#1677ff' } : undefined} type="text" disabled={busy} icon={snapshot.fastMode ? <ThunderboltFilled /> : <ThunderboltOutlined />} aria-label="快速模式" aria-pressed={snapshot.fastMode} onClick={onFastMode} />
       </Tooltip>
-      <div className="effort-control" data-level={effort || 'auto'}>
-        <Slider className="effort-slider" classNames={{ rail: 'effort-rail', track: 'effort-track', handle: 'effort-handle' }} min={0} max={Math.max(1, levels.length - 1)} step={1} value={effortIndex} disabled={busy || !snapshot.config.configured || !efforts.length} ariaLabelForHandle="模型强度" ariaValueTextFormatterForHandle={value => value ? effortLabels[levels[value]!] : '自动'} tooltip={{ formatter: value => value ? effortLabels[levels[value]!] : '自动' }} onChange={index => setEffort(levels[index])} onChangeComplete={index => void saveEffort(index)} />
-        <span className="effort-label">{effort ? effortLabels[effort] : '自动'}</span>
-      </div>
+      <EffortControl value={snapshot.reasoningEffort} detail={snapshot.selectedModel ? provider?.modelDetails?.[snapshot.selectedModel] : undefined} theme={snapshot.theme} disabled={busy || !snapshot.config.configured} onSave={onEffort} />
       {sendButton}
     </div>
   </div>

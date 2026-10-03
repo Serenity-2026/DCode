@@ -1,6 +1,8 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { listModels } from '../../src/main/models'
 import { create, cleanup } from './helpers'
+import { normalizeEffort, resolveEffort, strengthLevels } from '../../src/shared/context'
+import { Store } from '../../src/main/store'
 
 const draft = { name: '自定义服务', baseUrl: 'https://another.example.com/v1', apiKey: 'new-private-key' }
 /** 用真实 /models 的 data[].id 格式构造服务目录，不替代生产中的模型发现。 */
@@ -42,7 +44,7 @@ it('deduplicates actual model IDs without inventing default models', async () =>
   expect((await listModels(draft)).ids).toEqual(['vendor/custom', 'another-model'])
 })
 
-it('reads verified context and effort metadata and resets unsupported strength on model switches', async () => {
+it('reads verified metadata and maps five-level preferences without rejecting model switches', async () => {
   const { models, store } = await create()
   vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => Response.json({ data: [
     { id: 'detailed', context_window: 1048576, effort: { supported_levels: ['low', 'high', 'max', 'invented', 'max'] } },
@@ -52,9 +54,15 @@ it('reads verified context and effort metadata and resets unsupported strength o
   expect(snapshot.providers[1].modelDetails).toEqual({ detailed: { contextWindow: 1048576, reasoningEfforts: ['low', 'high', 'max'] }, plain: { reasoningEfforts: [] } })
   store.apply({ type: 'reasoning-effort', effort: 'max' })
   expect(await models.selected()).toMatchObject({ reasoningEffort: 'max' })
-  expect(() => store.apply({ type: 'reasoning-effort', effort: 'medium' })).toThrow('不支持此强度')
+  for (const [effort, wire] of [['low', 'low'], ['medium', 'high'], ['high', 'high'], ['max', 'max'], ['ultra', 'max']] as const) {
+    store.apply({ type: 'reasoning-effort', effort })
+    expect(store.snapshot().reasoningEffort).toBe(effort)
+    expect((await models.selected()).reasoningEffort).toBe(wire)
+  }
+  expect(() => store.apply({ type: 'reasoning-effort', effort: 'invented' as never })).toThrow('模型强度无效')
   store.apply({ type: 'model:select', providerId: snapshot.activeProviderId!, model: 'plain' })
-  expect(store.snapshot().reasoningEffort).toBeNull()
+  expect(store.snapshot().reasoningEffort).toBe('ultra')
+  expect((await models.selected()).reasoningEffort).toBeNull()
 })
 
 it('times out model discovery and leaves the original service unchanged', async () => {
@@ -113,4 +121,39 @@ it('switches only between models returned for an owned service and rejects cross
   expect(store.snapshot()).toMatchObject({ providers: [], fastMode: false })
   expect(() => store.apply({ type: 'model:select', providerId: oldId, model: 'test' })).toThrow('模型不存在')
   await expect(models.testAndSave({ ...draft, id: oldId })).rejects.toThrow('不存在')
+})
+
+
+it('reads window aliases, ignores invalid values and retains verified metadata when a refresh omits it', async () => {
+  const { models, store } = await create()
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ data: [
+    { id: 'window', context_window: 65536 },
+    { id: 'length', context_window: -1, context_length: 131072 },
+    { id: 'nested', top_provider: { context_length: 262144 } },
+    { id: 'unknown', context_length: '32768' }
+  ] })))
+  const snapshot = await models.testAndSave(draft)
+  expect(snapshot.providers[1].modelDetails).toEqual({ window: { contextWindow: 65536 }, length: { contextWindow: 131072 }, nested: { contextWindow: 262144 }, unknown: {} })
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => response(['window', 'length', 'nested', 'unknown'])))
+  await models.refresh()
+  expect(store.snapshot().providers[1].modelDetails).toEqual(snapshot.providers[1].modelDetails)
+})
+
+it('migrates old preferences, restores five levels and resolves catalogs with native ultra', async () => {
+  const { store, path } = await create()
+  for (const [old, expected] of [[null, 'medium'], ['minimal', 'low'], ['xhigh', 'max']] as const) {
+    store.requireUser().reasoningEffort = old
+    store.save()
+    const restored = new Store(path)
+    expect(restored.state.users[0].reasoningEffort).toBe(expected)
+    expect(normalizeEffort(old)).toBe(expected)
+  }
+  for (const effort of strengthLevels) {
+    store.apply({ type: 'reasoning-effort', effort })
+    expect(new Store(path).state.users[0].reasoningEffort).toBe(effort)
+    expect(resolveEffort(effort, { reasoningEfforts: [...strengthLevels] })).toBe(effort)
+  }
+  expect(resolveEffort('ultra')).toBe('max')
+  expect(resolveEffort('medium')).toBe('medium')
+  expect(resolveEffort('high', { reasoningEfforts: [] })).toBeNull()
 })
