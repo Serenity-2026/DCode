@@ -472,6 +472,84 @@ test('composer attachments, context meter, reasoning strength and responsive too
   await expect(resumedInput).toHaveValue('取消后保留的草稿')
 })
 
+test('welcome cloud animation and unrestricted folder selection, replacement and sending', async () => {
+  await launch()
+  await authenticate('workspace', true)
+  const cloud = page.getByRole('button', { name: '旋转云朵', exact: true })
+  const turn = page.locator('.welcome-cloud-turn')
+  const heading = page.getByRole('heading', { level: 1 })
+  const input = page.getByRole('textbox', { name: '消息', exact: true })
+  await expect(heading).toHaveText('今天想写点什么？')
+  await expect(page.locator('.welcome .brand-icon')).toHaveCount(0)
+  const before = await turn.evaluate(element => getComputedStyle(element).transform)
+  await cloud.click()
+  await expect.poll(() => turn.evaluate(element => getComputedStyle(element).transform)).not.toBe(before)
+  await expect(turn).toHaveCSS('transition-duration', '0.95s')
+  await expect(page.locator('.welcome-cloud-ripple')).toHaveCSS('animation-name', 'cloud-ripple')
+  await turn.evaluate(async element => { await Promise.all(element.getAnimations().map(animation => animation.finished)) })
+  await cloud.press('Enter')
+  await expect(turn).toHaveAttribute('style', 'transform: rotate(720deg);')
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await cloud.click()
+  await expect(turn).toHaveCSS('transition-duration', '0s')
+  await expect(page.locator('.welcome-cloud-float')).toHaveCSS('animation-name', 'none')
+  await expect(page.locator('.welcome-cloud-ripple')).toHaveCSS('animation-name', 'none')
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+
+  const project = join(directory, 'sample-project')
+  const replacement = join(directory, '另一个工作目录')
+  const empty = join(directory, '空目录')
+  const source = join(directory, 'standalone.ts')
+  for (const folder of [project, replacement, empty]) mkdirSync(folder)
+  for (let index = 0; index < 60; index++) writeFileSync(join(project, `file-${index}.ts`), `export const value${index} = ${index}`)
+  writeFileSync(join(project, 'large.txt'), 'a'.repeat(600 * 1024) + 'full-folder-end')
+  writeFileSync(join(replacement, 'code.ts'), 'replacement-content')
+  writeFileSync(source, 'standalone-content')
+  await application.evaluate(({ dialog }, paths) => {
+    let index = 0
+    dialog.showOpenDialog = async (...args: unknown[]) => {
+      const options = args.at(-1) as Electron.OpenDialogOptions
+      if (!options.properties?.includes('openDirectory')) return { canceled: false, filePaths: [paths.source] }
+      const path = [paths.project, null, paths.replacement, paths.empty, paths.project][index++]
+      return { canceled: path === null, filePaths: path ? [path] : [] }
+    }
+  }, { project, replacement, empty, source })
+  await input.fill('保留输入并读取目录')
+  const add = page.getByRole('button', { name: '添加附件', exact: true })
+  await add.click(); await page.getByRole('menuitem', { name: /添加文件$/ }).click()
+  await add.click(); await page.getByRole('menuitem', { name: /添加文件夹/ }).click()
+  await expect(heading).toContainText('今天想在 sample-project 中写点什么？')
+  await expect(page.getByText('sample-project · 61 个文件', { exact: true })).toBeVisible()
+  const folderName = page.getByRole('button', { name: '选择工作文件夹', exact: true })
+  await expect(folderName).toHaveCSS('text-decoration-line', 'underline')
+  /** 从标题菜单更换目录，依赖上方主进程选择器 mock；首次取消必须保留草稿。 */
+  async function chooseFolder(): Promise<void> {
+    await folderName.click()
+    await page.getByRole('menuitem', { name: /选择文件夹…$/ }).click()
+    await expect(add).toBeEnabled()
+  }
+  await chooseFolder()
+  await expect(folderName).toHaveText('sample-project')
+  await chooseFolder()
+  await expect(folderName).toHaveText('另一个工作目录')
+  await expect(page.getByRole('button', { name: '移除附件 sample-project', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '移除附件 standalone.ts', exact: true })).toBeVisible()
+  await expect(input).toHaveValue('保留输入并读取目录')
+  await chooseFolder()
+  await expect(folderName).toHaveText('空目录')
+  await expect(page.getByText('空目录 · 0 个文件', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '移除附件 空目录', exact: true }).click()
+  await expect(heading).toHaveText('今天想写点什么？')
+  await add.click(); await page.getByRole('menuitem', { name: /添加文件夹/ }).click()
+  await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(820, 620))
+  expect(await page.evaluate(() => document.documentElement.scrollWidth === innerWidth)).toBe(true)
+  await page.getByRole('button', { name: '发送消息', exact: true }).click()
+  await expect(page.locator('article[data-role="assistant"][data-status="complete"]')).toHaveCount(1)
+  expect(requests.at(-1)?.messages.at(-1)?.content).toContain('full-folder-end')
+  expect(requests.at(-1)?.messages.at(-1)?.content).toContain('value59')
+  expect(requests.at(-1)?.messages.at(-1)?.content).toContain('standalone-content')
+})
+
 test('sidebar resize limits, collapse, toolbar restore and draft preservation', async () => {
   await launch()
   await authenticate('sidebar-user', true)

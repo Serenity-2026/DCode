@@ -2,7 +2,7 @@ import type { Attachment, Conversation, ModelDetails, ProviderProfile, Reasoning
 
 /** 推理档位白名单供 Models 解析元数据、Store 校验输入、界面生成滑块共用。 */
 export const reasoningEfforts: ReasoningEffort[] = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']
-/** 附件文本总量上限，在文件读取、IPC 校验及界面添加时使用同一限制。 */
+/** 独立文件附件文本上限；文件夹不计入此限额，读取、IPC 与草稿校验共用。 */
 export const attachmentByteLimit = 512 * 1024
 
 /** 按标准强度顺序展示模型实际返回的档位，未知或明确不支持时不猜测档位。 */
@@ -24,14 +24,20 @@ export function selectedEffort(provider: ProviderProfile | undefined, model: str
   return model ? resolveEffort(Object.hasOwn(provider?.selectedEfforts || {}, model) ? provider?.selectedEfforts?.[model] : undefined, provider?.modelDetails?.[model]) : null
 }
 
-/** 校验附件快照，拒绝无效或超量 IPC 输入；Store 同样用于验证磁盘消息。 */
+/** 校验附件结构；仅独立文件受数量与大小限额约束，Store 同样用于验证磁盘消息。 */
 export function validateAttachments(value: unknown): Attachment[] {
   if (value === undefined) return []
-  if (!Array.isArray(value) || value.length > 10) throw new Error('每条消息最多添加 10 个附件。')
+  if (!Array.isArray(value)) throw new Error('附件内容无效。')
   let bytes = 0
+  let files = 0
   for (const item of value) {
-    if (!item || typeof item.id !== 'string' || !item.id || item.id.length > 80 || typeof item.name !== 'string' || !item.name.trim() || item.name.length > 256 || !['file', 'folder'].includes(item.kind) || !Number.isInteger(item.fileCount) || item.fileCount < 1 || item.fileCount > 50 || typeof item.content !== 'string' || !item.content.trim()) throw new Error('附件内容无效。')
-    bytes += new TextEncoder().encode(item.content).length
+    if (!item || typeof item.id !== 'string' || !item.id || item.id.length > 80 || typeof item.name !== 'string' || !item.name.trim() || item.name.length > 256 || !['file', 'folder'].includes(item.kind) || !Number.isSafeInteger(item.fileCount) || item.fileCount < 0 || typeof item.content !== 'string') throw new Error('附件内容无效。')
+    if (item.fileCount === 0 ? item.kind !== 'folder' || item.content !== '' : !item.content.trim()) throw new Error('附件内容无效。')
+    if (item.kind === 'file') {
+      if (item.fileCount > 50) throw new Error('附件内容无效。')
+      if (++files > 10) throw new Error('每条消息最多添加 10 个独立文件附件。')
+      bytes += new TextEncoder().encode(item.content).length
+    }
   }
   if (bytes > attachmentByteLimit) throw new Error('附件文本总计不能超过 512 KiB，请减少附件。')
   if (new Set(value.map(item => item.id)).size !== value.length) throw new Error('不能重复添加同一附件。')

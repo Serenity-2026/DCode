@@ -46,10 +46,40 @@ it('reports non-text selections and rejects file count and combined size overflo
   writeFileSync(oversized, 'a'.repeat(128 * 1024 + 1))
   expect(await readAttachments([oversized], 'file')).toEqual({ attachments: [], skipped: 1 })
   for (let index = 0; index < 51; index++) writeFileSync(join(folder, `small-${index}.txt`), 'small')
-  await expect(readAttachments([folder], 'folder')).rejects.toThrow('50 个')
+  await expect(readAttachments(Array.from({ length: 51 }, (_, index) => join(folder, `small-${index}.txt`)), 'file')).rejects.toThrow('50 个')
   const largeFiles = Array.from({ length: 5 }, (_, index) => join(folder, `part-${index}.txt`))
   for (const path of largeFiles) writeFileSync(path, 'a'.repeat(120 * 1024))
   await expect(readAttachments(largeFiles, 'file')).rejects.toThrow('512 KiB')
+})
+
+it('reads folders beyond the former file count, per-file size and total byte limits without truncation', async () => {
+  const folder = fixture()
+  const large = 'a'.repeat(attachmentByteLimit + 1) + 'end-of-large-file'
+  writeFileSync(join(folder, 'large.txt'), large)
+  for (let index = 0; index < 60; index++) writeFileSync(join(folder, `small-${index}.txt`), `file-${index}`)
+  const result = await readAttachments([folder], 'folder')
+  expect(result.skipped).toBe(0)
+  expect(result.attachments[0].fileCount).toBe(61)
+  expect(result.attachments[0].content).toContain(large)
+  expect(result.attachments[0].content).toContain('file-59')
+  expect(validateAttachments(result.attachments)).toEqual(result.attachments)
+  const { store, path } = await create()
+  const first = store.begin('读取目录', false, 'test', result.attachments)
+  expect(contextMessages(first.conversation).at(-1)?.content).toContain(large)
+  expect(new Store(path).state.conversations[0].messages[0].attachments?.[0]).toEqual(result.attachments[0])
+  store.begin('', true, 'test')
+  expect(contextMessages(first.conversation).at(-1)?.content).toContain('file-59')
+})
+
+it('keeps empty folders and excludes folders from independent-file attachment quotas', async () => {
+  const result = await readAttachments([fixture()], 'folder')
+  expect(result.attachments).toHaveLength(1)
+  expect(result.attachments[0]).toMatchObject({ kind: 'folder', fileCount: 0, content: '' })
+  const folders = Array.from({ length: 11 }, (_, index) => ({ ...result.attachments[0], id: String(index) }))
+  expect(validateAttachments(folders)).toEqual(folders)
+  expect(() => validateAttachments([{ ...folders[0], fileCount: -1 }])).toThrow('无效')
+  expect(() => validateAttachments([{ ...folders[0], fileCount: 1 }])).toThrow('无效')
+  expect(() => validateAttachments([{ ...folders[0], kind: 'file' }])).toThrow('无效')
 })
 
 it('rejects a forged IPC attachment or combined drafts that exceed the limit', () => {

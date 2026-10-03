@@ -5,7 +5,7 @@ import {
   ArrowUpOutlined, PlusOutlined, SearchOutlined, MessageOutlined, MoreOutlined,
   SettingOutlined, CodeOutlined, BugOutlined, BranchesOutlined, CopyOutlined,
   ReloadOutlined, StopOutlined, DeleteOutlined, EditOutlined, LogoutOutlined,
-  DownOutlined, RightOutlined
+  DownOutlined, RightOutlined, FolderOpenOutlined
 } from '@ant-design/icons'
 import type { Action, Attachment, Message, ModelRefresh, Result, Snapshot, StreamEvent } from '../../shared/types'
 import { estimateContext, validateAttachments } from '../../shared/context'
@@ -17,6 +17,7 @@ import { AttachmentList } from './AttachmentList'
 import { WorkspaceLayout } from './WorkspaceLayout'
 import { MessageNavigation } from './MessageNavigation'
 import { BrandMark } from './BrandMark'
+import { WelcomeCloud } from './WelcomeCloud'
 
 /**
  * 界面根组件：通过 preload 的 window.dcode 读取 Snapshot，并配置 Ant Design 主题与提示容器。
@@ -65,6 +66,7 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
   const inFlight = useRef(false)
   const user = snapshot.users.find(u => u.id === snapshot.activeUserId)!
   const active = snapshot.conversations.find(c => c.id === snapshot.activeConversationId)
+  const selectedFolder = attachments.find(item => item.kind === 'folder')
   const generating = Boolean(active?.messages.some(m => m.status === 'streaming'))
   const busy = generating || pending || stopping || modelsLoading
 
@@ -161,14 +163,15 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
     finally { inFlight.current = false; setPending(false) }
   }, [installSnapshot, toast])
 
-  /** 打开 preload 附件选择器并合并文本快照，校验总量后显示标签；取消或失败不影响草稿。 */
+  /** 打开 preload 选择器并校验文本快照；文件夹替换原目录并保留独立文件，取消或失败不影响草稿。 */
   async function addAttachments(kind: 'file' | 'folder'): Promise<void> {
     if (busy || inFlight.current) return
     inFlight.current = true; setPending(true)
     try {
       const result = await window.dcode.selectAttachments(kind)
       if (!result.ok) { void toast.error(result.error); return }
-      const next = validateAttachments([...attachments, ...result.value.attachments])
+      const previous = kind === 'folder' && result.value.attachments.length ? attachments.filter(item => item.kind !== 'folder') : attachments
+      const next = validateAttachments([...previous, ...result.value.attachments])
       setAttachments(next)
       if (result.value.skipped) void toast.warning(`已跳过 ${result.value.skipped} 项非文本、隐藏或忽略项。`)
     } catch (error) { void toast.error(error instanceof Error ? error.message : '添加附件失败，请重试。') }
@@ -300,8 +303,10 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
         if (el) follow.current = !jumping.current && el.scrollHeight - el.scrollTop - el.clientHeight < 100
       }}>
         {!active ? <section className="welcome"><div className="welcome-inner">
-          <div className="welcome-symbol"><BrandMark /></div>
-          <h1>今天想写点什么？</h1>
+          <WelcomeCloud />
+          <h1>{selectedFolder ? <>今天想在 <Dropdown disabled={busy} trigger={['click']} placement="bottomLeft" menu={{ items: [{ key: 'folder', label: '选择文件夹…', icon: <FolderOpenOutlined /> }], onClick: () => void addAttachments('folder') }}>
+            <Button className="welcome-folder" type="text" disabled={busy} aria-label="选择工作文件夹">{selectedFolder.name}</Button>
+          </Dropdown> 中写点什么？</> : '今天想写点什么？'}</h1>
           <div className="suggestions">
             {[
               { title: '实现一个功能', icon: <CodeOutlined />, prompt: '我想实现一个新功能，请先帮我梳理需求和实现步骤。' },
