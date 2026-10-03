@@ -17,6 +17,48 @@ export function MessageNavigation({ messages, theme, containerRef, onNavigate }:
   const [previewId, setPreviewId] = useState<string | null>(null)
   const navigation = useRef<HTMLElement>(null)
   const currentIndex = Math.max(0, questionIds.indexOf(currentId || ''))
+  const motion = useRef({ position: currentIndex, target: currentIndex, frame: 0, pointerY: null as number | null, focusIndex: null as number | null })
+
+  /** 依赖导航短线 DOM，以帧间时间平滑追踪峰值；只更新缩放和透明度，不重排布局或重绘 Markdown。 */
+  function animatePeak(target: number): void {
+    const state = motion.current
+    state.target = target
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    if (reduced) { cancelAnimationFrame(state.frame); state.frame = 0; state.position = target }
+    if (state.frame) return
+    let previous = performance.now()
+
+    /** 每帧绘制一个对称峰形；连续鼠标移动只更新目标，沿用正在运行的动画。 */
+    function draw(now: number): void {
+      const elapsed = Math.min(64, now - previous)
+      previous = now
+      state.position += (state.target - state.position) * (1 - Math.exp(-elapsed / 55))
+      const settled = Math.abs(state.target - state.position) < 0.001
+      if (settled) state.position = state.target
+      navigation.current?.querySelectorAll<HTMLElement>('.message-navigation-line').forEach((line, index) => {
+        const weight = Math.exp(-Math.pow(index - state.position, 2) / 3)
+        line.style.transform = `scaleX(${0.25 + 0.75 * weight})`
+        line.style.opacity = String(0.3 + 0.7 * weight)
+      })
+      state.frame = settled ? 0 : requestAnimationFrame(draw)
+    }
+
+    if (reduced) draw(previous)
+    else state.frame = requestAnimationFrame(draw)
+  }
+
+  /** 依赖等高的导航按钮，将鼠标纵坐标转换为连续峰值；离开后恢复键盘焦点或阅读轮次。 */
+  function syncPeak(): void {
+    const state = motion.current
+    const first = navigation.current?.querySelector<HTMLElement>('.message-navigation-entry')
+    if (state.pointerY !== null && first) {
+      const rect = first.getBoundingClientRect()
+      animatePeak(Math.max(0, Math.min(turns.length - 1, (state.pointerY - rect.top) / rect.height - 0.5)))
+    } else animatePeak(state.focusIndex ?? currentIndex)
+  }
+
+  useEffect(() => { syncPeak() }, [currentIndex, idsKey])
+  useEffect(() => () => { cancelAnimationFrame(motion.current.frame); motion.current.frame = 0 }, [])
 
   // 只在问题集合变化时重新订阅；流式文字和分栏尺寸变化由 ResizeObserver 捕获，每帧最多计算一次。
   useEffect(() => {
@@ -59,7 +101,19 @@ export function MessageNavigation({ messages, theme, containerRef, onNavigate }:
   }, [currentId])
 
   if (!turns.length) return null
-  return <nav ref={navigation} className="message-navigation" aria-label="消息导航" onKeyDown={event => {
+  return <nav ref={navigation} className="message-navigation" aria-label="消息导航"
+    onPointerMove={event => {
+      if (event.currentTarget.contains(event.target as Node)) { motion.current.pointerY = event.clientY; syncPeak() }
+      // Popover 的 Portal 事件仍冒泡到 nav，鼠标进入预览时按离开导航处理。
+      else if (motion.current.pointerY !== null) { motion.current.pointerY = null; syncPeak() }
+    }}
+    onPointerLeave={() => { motion.current.pointerY = null; syncPeak() }}
+    onScroll={() => { if (motion.current.pointerY !== null) syncPeak() }}
+    onFocusCapture={event => {
+      const entry = (event.target as HTMLElement).closest<HTMLElement>('.message-navigation-entry')
+      if (entry) { motion.current.focusIndex = Number(entry.dataset.index); syncPeak() }
+    }}
+    onBlurCapture={() => { motion.current.focusIndex = null; syncPeak() }} onKeyDown={event => {
     if (event.key === 'Escape') { setPreviewId(null); event.stopPropagation() }
   }}>
     {turns.map(({ question, answer }, index) => <Popover key={question.id} trigger={['hover', 'focus']} placement="rightBottom" arrow={false}
@@ -72,9 +126,9 @@ export function MessageNavigation({ messages, theme, containerRef, onNavigate }:
         {Boolean(question.attachments?.length) && <div className="message-preview-attachments"><FileOutlined /><span>{question.attachments!.map(item => item.name).join('、')}</span></div>}
         <div className="message-preview-meta"><span>第 {index + 1} 轮</span><time>{new Date(question.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</time></div>
       </div>}>
-      <Button className="message-navigation-entry" type="text" aria-label={`跳转到第 ${index + 1} 轮对话`} aria-current={question.id === currentId ? 'step' : undefined}
+      <Button className="message-navigation-entry" data-index={index} type="text" aria-label={`跳转到第 ${index + 1} 轮对话`} aria-current={question.id === currentId ? 'step' : undefined}
         aria-controls={`message-${question.id}`} onClick={() => { setPreviewId(null); onNavigate(question.id) }}>
-        <span className="message-navigation-line" aria-hidden="true" style={{ width: Math.max(6, 24 - Math.abs(index - currentIndex) * 4) }} />
+        <span className="message-navigation-line" aria-hidden="true" />
       </Button>
     </Popover>)}
   </nav>

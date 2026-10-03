@@ -538,9 +538,51 @@ test('message navigation previews, scroll tracking and streaming history reading
   await expect(preview).toContainText('导航问题 1')
   await expect(preview.locator('.message-preview-answer')).toContainText('这是流式回答')
   expect(Math.abs(await viewport.evaluate(element => element.scrollTop) - historyPosition)).toBeLessThanOrEqual(2)
+  const lines = navigation.locator('.message-navigation-line')
+  await expect.poll(() => lines.first().evaluate(element => element.getBoundingClientRect().width)).toBeLessThanOrEqual(16.1)
+  const middle = navigation.getByRole('button', { name: '跳转到第 6 轮对话', exact: true })
+  await middle.hover()
+  // 检查悬停峰值两侧的实际长度与对称性，阅读位置在末轮时也不能形成第二个长峰。
+  await expect.poll(() => lines.evaluateAll(elements => {
+    const widths = elements.map(element => element.getBoundingClientRect().width)
+    return widths[5] > 15.9 && widths[5] <= 16.1 && widths[4] > widths[3] && widths[3] > widths[2]
+      && widths[6] > widths[7] && widths[7] > widths[8] && Math.abs(widths[4] - widths[6]) < 0.1
+      && widths[10] < widths[8] && widths.every(width => width >= 3.9)
+  })).toBe(true)
+  await expect(last).toHaveAttribute('aria-current', 'step')
+  const middleBounds = (await middle.boundingBox())!
+  await navigation.evaluate(element => { (element as Element & { motionSamples?: Promise<number[]> }).motionSamples = new Promise<number[]>(resolve => {
+    element.addEventListener('pointermove', () => {
+      const widths: number[] = []
+      /** 采集真实浏览器的连续动画帧，确认鼠标在同一按钮内移动时长度逐帧变化。 */
+      function sample(): void {
+        widths.push(element.querySelectorAll('.message-navigation-line')[5].getBoundingClientRect().width)
+        if (widths.length < 8) requestAnimationFrame(sample)
+        else resolve(widths)
+      }
+      requestAnimationFrame(sample)
+    }, { once: true })
+  }) })
+  await page.mouse.move(middleBounds.x + middleBounds.width / 2, middleBounds.y + middleBounds.height * 0.75)
+  const samples = await navigation.evaluate(async element => {
+    const target = element as Element & { motionSamples?: Promise<number[]> }
+    const values = await target.motionSamples!
+    delete target.motionSamples
+    return values
+  })
+  expect(new Set(samples.map(width => width.toFixed(3))).size).toBeGreaterThan(3)
+  expect(samples[0]).toBeGreaterThan(samples.at(-1)!)
+  await expect.poll(() => lines.evaluateAll(elements => elements[5].getBoundingClientRect().width < 15.95
+    && elements[6].getBoundingClientRect().width > elements[4].getBoundingClientRect().width)).toBe(true)
+  await expect(preview).toHaveCount(1)
+  await preview.hover()
+  await expect.poll(() => lines.evaluateAll(elements => elements[10].getBoundingClientRect().width > 15.9
+    && elements[5].getBoundingClientRect().width < 4.1)).toBe(true)
+  await input.hover()
+  await expect(preview).toHaveCount(0)
   await first.focus()
   await first.press('Escape')
-  await expect(preview).not.toBeVisible()
+  await expect(preview).toHaveCount(0)
   await input.fill('导航不会清空的草稿')
   await first.click()
   await expect(first).toHaveAttribute('aria-current', 'step')
@@ -557,7 +599,7 @@ test('message navigation previews, scroll tracking and streaming history reading
   await expect(preview).toBeVisible()
   await first.press('Enter')
   await expect.poll(() => viewport.evaluate(element => element.scrollTop)).toBeLessThan(50)
-  await expect(preview).not.toBeVisible()
+  await expect(preview).toHaveCount(0)
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await second.click()
   await expect(second).toHaveAttribute('aria-current', 'step')
