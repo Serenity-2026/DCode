@@ -59,9 +59,7 @@ button { -webkit-app-region: no-drag; }
 .welcome { min-height: 100%; padding: 38px 42px 48px; display: flex; justify-content: center; align-items: center; }
 .welcome-inner { width: 100%; max-width: 660px; margin-top: -8px; }
 .welcome-symbol { display: flex; width: 48px; height: 48px; align-items: center; justify-content: center; margin-bottom: 26px; border: 1px solid var(--line); border-radius: 15px; color: var(--text); background: var(--panel); box-shadow: 0 4px 12px #00000003; }
-.eyebrow { color: var(--muted); font-size: 10px; letter-spacing: 2.7px; margin-bottom: 14px; font-family: ui-monospace, monospace; }
 .welcome h1 { font-size: clamp(29px, 3vw, 39px); line-height: 1.4; font-weight: 550; margin: 0 0 13px; letter-spacing: -1.2px; }
-.welcome h1 span { color: var(--muted); display: block; }
 .suggestions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 35px; }
 .suggestion { height: auto; min-height: 112px; display: flex; flex-direction: column; align-items: flex-start; gap: 17px; padding: 17px; background: var(--panel); border-color: var(--line); text-align: left; white-space: normal; box-shadow: 0 2px 4px #00000002; }
 .suggestion-icon { color: var(--muted); font-size: 17px; }

@@ -63,4 +63,23 @@ describe('SSE protocol and model requests', () => {
     await vi.advanceTimersByTimeAsync(60_000)
     await assertion
   })
+
+  it('keeps an active connection alive while the provider sends heartbeats', async () => {
+    vi.useFakeTimers()
+    const controller = new AbortController()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(new ReadableStream({ start(stream) {
+      const encoder = new TextEncoder()
+      const heartbeat = setInterval(() => stream.enqueue(encoder.encode(': heartbeat\n\n')), 30_000)
+      setTimeout(() => {
+        clearInterval(heartbeat)
+        stream.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"OK"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'))
+        stream.close()
+      }, 90_000)
+    } }))))
+    const promise = streamModel(config, [], controller, () => {})
+    const assertion = expect(promise).resolves.toBeUndefined()
+    await vi.advanceTimersByTimeAsync(90_000)
+    await assertion
+    expect(controller.signal.aborted).toBe(false)
+  })
 })

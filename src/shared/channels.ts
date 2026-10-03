@@ -4,5 +4,6 @@ export const channels = {
   send: 'dcode:send',
   stop: 'dcode:stop',
   stream: 'dcode:stream',
-  openLink: 'dcode:open-link'
+  openLink: 'dcode:open-link',
+  copyText: 'dcode:copy-text'
 } as const

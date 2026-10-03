@@ -11,7 +11,7 @@ function CodeBlock({ children }: { children?: ReactNode }): ReactNode {
   const language = element?.props.className?.replace('language-', '') || 'text'
   return <div className="code-block">
     <div className="code-header"><span>{language}</span><Button type="text" size="small" icon={<CopyOutlined />} aria-label="复制代码" onClick={() => {
-      void navigator.clipboard.writeText(text).then(() => message.success('已复制')).catch(() => message.error('复制失败。'))
+      void window.dcode.copyText(text).then(result => result.ok ? message.success('已复制') : message.error(result.error)).catch(() => message.error('复制失败。'))
     }}>复制</Button></div>
     <pre>{children}</pre>
   </div>

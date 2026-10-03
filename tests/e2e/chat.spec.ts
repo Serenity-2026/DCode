@@ -54,7 +54,7 @@ test('desktop streaming, stop/retry, users, settings and restart persistence', a
   await launch()
   const errors: string[] = []
   page.on('pageerror', error => errors.push(error.message))
-  await expect(page.getByRole('heading', { name: /从一个想法开始/ })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '今天想写点什么？' })).toBeVisible()
   await page.screenshot({ path: join(tmpdir(), 'dcode-welcome.png') })
   expect(await page.evaluate(() => typeof (window as unknown as { require?: unknown }).require)).toBe('undefined')
   expect(await page.evaluate(async () => JSON.stringify(await window.dcode.getState()))).not.toContain('e2e-local-key')
@@ -71,6 +71,7 @@ test('desktop streaming, stop/retry, users, settings and restart persistence', a
   await expect(page.locator('table')).toContainText('流式')
   await page.getByRole('button', { name: '复制代码', exact: true }).click()
   await expect(page.getByText('已复制', { exact: true })).toBeVisible()
+  expect(await application.evaluate(({ clipboard }) => clipboard.readText())).toBe('const answer = 42')
   await page.screenshot({ path: join(tmpdir(), 'dcode-chat.png') })
 
   await page.getByRole('textbox', { name: '消息', exact: true }).fill('请停止这次生成')
@@ -87,7 +88,7 @@ test('desktop streaming, stop/retry, users, settings and restart persistence', a
   await page.getByRole('button', { name: '管理用户', exact: true }).click()
   await page.getByRole('textbox', { name: '新用户名称', exact: true }).fill('测试用户')
   await page.getByRole('button', { name: '创建', exact: true }).click()
-  await expect(page.getByRole('heading', { name: /从一个想法开始/ })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '今天想写点什么？' })).toBeVisible()
   await expect(page.getByText('暂无对话', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: '管理用户', exact: true }).click()
   await page.getByRole('button', { name: '编辑用户 测试用户', exact: true }).click()
@@ -99,7 +100,7 @@ test('desktop streaming, stop/retry, users, settings and restart persistence', a
   await expect(page.getByText('已停止生成', { exact: true })).toBeVisible()
 
   await page.getByRole('button', { name: '管理对话 实现一个 TypeScript 函数', exact: true }).click()
-  await page.getByRole('menuitem', { name: '重命名', exact: true }).click()
+  await page.getByRole('menuitem', { name: /重命名/ }).click()
   await page.getByRole('textbox', { name: '名称', exact: true }).fill('函数讨论')
   await page.getByRole('button', { name: '保存', exact: true }).click()
   await page.getByRole('textbox', { name: '搜索对话', exact: true }).fill('不存在')
@@ -119,7 +120,7 @@ test('desktop streaming, stop/retry, users, settings and restart persistence', a
   expect(dimensions.width).toBe(dimensions.viewport)
 
   await page.getByRole('button', { name: '管理对话 函数讨论', exact: true }).click()
-  await page.getByRole('menuitem', { name: '删除', exact: true }).click()
+  await page.getByRole('menuitem', { name: /删除/ }).click()
   await page.getByRole('button', { name: '删除', exact: true }).click()
   await expect(page.getByText('暂无对话', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: '管理用户', exact: true }).click()

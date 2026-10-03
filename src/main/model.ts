@@ -2,7 +2,7 @@ import type { ModelConfig } from './config'
 
 export interface Delta { content?: string; reasoning?: string }
 
-export async function consumeSSE(body: ReadableStream<Uint8Array>, onDelta: (delta: Delta) => void): Promise<void> {
+export async function consumeSSE(body: ReadableStream<Uint8Array>, onDelta: (delta: Delta) => void, onActivity: () => void = () => {}): Promise<void> {
   const reader = body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
@@ -24,6 +24,7 @@ export async function consumeSSE(body: ReadableStream<Uint8Array>, onDelta: (del
   try {
     while (!complete) {
       const { value, done } = await reader.read()
+      if (value?.length) onActivity()
       buffer += done ? decoder.decode() : decoder.decode(value, { stream: true })
       buffer = buffer.replace(/\r\n/g, '\n')
       let boundary: number
@@ -82,7 +83,7 @@ export async function streamModel(
       throw new Error(errors[response.status] || `模型服务暂不可用（${response.status}），请稍后重试。`)
     }
     if (!response.body) throw new Error('模型服务没有返回响应内容。')
-    await consumeSSE(response.body, delta => { resetTimeout(); onDelta(delta) })
+    await consumeSSE(response.body, onDelta, resetTimeout)
   } catch (error) {
     if (timedOut) throw new Error('模型响应超时，请重试。')
     if (controller.signal.aborted) throw error

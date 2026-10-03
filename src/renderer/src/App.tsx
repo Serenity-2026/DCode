@@ -26,7 +26,7 @@ export default function Root(): ReactNode {
     }).catch(() => setError('无法连接桌面服务，请重启应用。'))
   }, [])
   const dark = snapshot?.theme === 'dark'
-  return <ConfigProvider locale={zhCN} theme={{
+  return <ConfigProvider locale={zhCN} button={{ autoInsertSpace: false }} theme={{
     algorithm: dark ? theme.darkAlgorithm : theme.defaultAlgorithm,
     token: { colorPrimary: dark ? '#8ac8a3' : '#303b33', borderRadius: 8, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif' }
   }}><AntApp>
@@ -145,9 +145,9 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
       {m.status === 'stopped' && <div className="message-status">已停止生成</div>}
       {m.status !== 'streaming' && <div className="message-actions">
         {m.content && <Button type="text" size="small" icon={<CopyOutlined />} aria-label="复制回复" onClick={() => {
-          void navigator.clipboard.writeText(m.content).then(() => toast.success('已复制')).catch(() => toast.error('复制失败。'))
+          void window.dcode.copyText(m.content).then(result => result.ok ? toast.success('已复制') : toast.error(result.error)).catch(() => toast.error('复制失败。'))
         }} />}
-        {last && <Button type="text" size="small" icon={<ReloadOutlined />} disabled={busy} onClick={() => void send(true)}>重新生成</Button>}
+        {last && <Button type="text" size="small" icon={<ReloadOutlined />} aria-label="重新生成" disabled={busy} onClick={() => void send(true)}>重新生成</Button>}
       </div>}
     </div>
   }
@@ -158,13 +158,13 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
     <aside className="sidebar">
       <div className="window-space" />
       <div className="brand"><span className="brand-mark"><Mark /></span><span className="brand-name">DCode</span><span className="brand-version">0.1</span></div>
-      <Button className="new-chat" icon={<PlusOutlined />} disabled={busy} onClick={() => void act({ type: 'conversation:select', id: null }).then(() => composer.current?.focus())}>新对话 <kbd className="shortcut">⌘ N</kbd></Button>
+      <Button className="new-chat" icon={<PlusOutlined />} aria-label="新对话" disabled={busy} onClick={() => void act({ type: 'conversation:select', id: null }).then(() => composer.current?.focus())}>新对话 <kbd className="shortcut">⌘ N</kbd></Button>
       <Input className="search" prefix={<SearchOutlined />} placeholder="搜索对话" aria-label="搜索对话" variant="borderless" allowClear value={search} onChange={e => setSearch(e.target.value)} />
       <div className="section-label"><span>最近对话</span><span>{snapshot.conversations.length ? snapshot.conversations.length : ''}</span></div>
       <nav className="history" aria-label="会话列表">
         {!conversations.length && <div className="history-empty">{search ? '没有找到对话' : '暂无对话'}</div>}
         {conversations.map(c => <div className={`history-item${c.id === active?.id ? ' selected' : ''}`} key={c.id}>
-          <Button type="text" className="history-button" icon={<MessageOutlined />} disabled={busy} title={c.title} onClick={() => void act({ type: 'conversation:select', id: c.id })}><span className="history-title">{c.title}</span></Button>
+          <Button type="text" className="history-button" icon={<MessageOutlined />} aria-label={c.title} disabled={busy} title={c.title} onClick={() => void act({ type: 'conversation:select', id: c.id })}><span className="history-title">{c.title}</span></Button>
           <Dropdown disabled={busy} trigger={['click']} menu={{ items: [
             { key: 'rename', label: '重命名', icon: <EditOutlined /> }, { key: 'delete', label: '删除', danger: true, icon: <DeleteOutlined /> }
           ], onClick: ({ key }) => key === 'rename' ? setEdit({ type: 'conversation', id: c.id, value: c.title }) : confirmDelete('conversation', c.id, c.title) }}>
@@ -174,7 +174,7 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
       </nav>
       <div className="sidebar-bottom">
         <Button type="text" className="user-button" disabled={busy} aria-label="管理用户" onClick={() => setUsersOpen(true)}><span className="avatar">{user.name.slice(0, 1)}</span><span className="user-info"><span className="user-name">{user.name}</span><span className="user-caption">本地用户</span></span><DownOutlined /></Button>
-        <Button type="text" className="settings-button" icon={<SettingOutlined />} disabled={busy} onClick={() => setSettingsOpen(true)}>设置</Button>
+        <Button type="text" className="settings-button" icon={<SettingOutlined />} aria-label="设置" disabled={busy} onClick={() => setSettingsOpen(true)}>设置</Button>
       </div>
     </aside>
     <main className="main">
@@ -184,8 +184,8 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
         if (el) follow.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100
       }}>
         {!active ? <section className="welcome"><div className="welcome-inner">
-          <div className="welcome-symbol"><Mark /></div><div className="eyebrow">LET’S BUILD SOMETHING.</div>
-          <h1>从一个想法开始。<span>今天想写点什么？</span></h1>
+          <div className="welcome-symbol"><Mark /></div>
+          <h1>今天想写点什么？</h1>
           <div className="suggestions">
             {[
               { title: '实现一个功能', icon: <CodeOutlined />, prompt: '我想实现一个新功能，请先帮我梳理需求和实现步骤。' },
@@ -213,7 +213,7 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
     </Modal>
     <Modal title="本地用户" open={usersOpen} onCancel={() => setUsersOpen(false)} footer={null} width={480}>
       <div className="user-list">{snapshot.users.map(u => <div className="user-list-row" key={u.id}><span className="avatar">{u.name.slice(0, 1)}</span><span className="user-list-name">{u.name}</span>{u.id === user.id ? <CheckOutlined /> : <Button size="small" disabled={busy} onClick={() => void act({ type: 'user:switch', id: u.id }).then(ok => { if (ok) setUsersOpen(false) })}>切换</Button>}<Button type="text" size="small" icon={<EditOutlined />} disabled={busy} aria-label={`编辑用户 ${u.name}`} onClick={() => setEdit({ type: 'user', id: u.id, value: u.name })} /><Button type="text" size="small" icon={<DeleteOutlined />} danger disabled={busy || snapshot.users.length === 1} aria-label={`删除用户 ${u.name}`} onClick={() => confirmDelete('user', u.id, u.name)} /></div>)}</div>
-      <div className="user-create"><Input aria-label="新用户名称" placeholder="新用户名称" maxLength={40} value={newName} disabled={busy} onChange={e => setNewName(e.target.value)} /><Button type="primary" icon={<PlusOutlined />} disabled={busy || !newName.trim()} onClick={() => void act({ type: 'user:create', name: newName }).then(ok => { if (ok) { setNewName(''); setUsersOpen(false) } })}>创建</Button></div>
+      <div className="user-create"><Input aria-label="新用户名称" placeholder="新用户名称" maxLength={40} value={newName} disabled={busy} onChange={e => setNewName(e.target.value)} /><Button type="primary" icon={<PlusOutlined />} aria-label="创建" disabled={busy || !newName.trim()} onClick={() => void act({ type: 'user:create', name: newName }).then(ok => { if (ok) { setNewName(''); setUsersOpen(false) } })}>创建</Button></div>
     </Modal>
     <Modal title={edit?.type === 'user' ? '编辑用户名称' : '重命名对话'} open={Boolean(edit)} onCancel={() => setEdit(null)} okText="保存" cancelText="取消" okButtonProps={{ disabled: busy || !edit?.value.trim() }} confirmLoading={pending} onOk={async () => {
       if (!edit) return

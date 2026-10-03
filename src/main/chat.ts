@@ -19,12 +19,16 @@ export class Chat {
     // 延迟到 invoke 响应之后发事件，同时允许 stop 在请求开始前取消。
     const done = new Promise<void>(resolve => setImmediate(resolve)).then(async () => {
       let lastSave = Date.now()
+      let lastEmit = 0
       try {
         await streamModel(this.config, contextMessages(conversation), controller, delta => {
           message.content += delta.content || ''
           message.reasoning += delta.reasoning || ''
           if (Date.now() - lastSave >= 500) { this.store.save(); lastSave = Date.now() }
-          this.emit({ conversationId: conversation.id, message: structuredClone(message) })
+          if (Date.now() - lastEmit >= 30) {
+            this.emit({ conversationId: conversation.id, message: structuredClone(message) })
+            lastEmit = Date.now()
+          }
         })
         if (!message.content.trim()) throw new Error('模型没有返回文本，请重试。')
         message.status = 'complete'

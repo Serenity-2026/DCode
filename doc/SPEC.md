@@ -1,6 +1,6 @@
 # DCode 基础对话 SPEC
 
-版本：0.1 · 日期：2026-10-02 · 状态：实施基线
+版本：0.1 · 日期：2026-10-02 · 状态：首版已实现，2026-10-03 验收通过
 
 ## 1. 目标与边界
 
@@ -101,3 +101,20 @@ DEEPSEEK_MODEL=<接口可用模型 ID>
 - [Electron 安全与 IPC](https://www.electronjs.org/docs/latest/tutorial/security)
 - [Ant Design CLI](https://ant.design/docs/react/cli/)
 - [DeepSeek Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/)
+
+## 11. 实际验收记录
+
+2026-10-03，在 macOS arm64 / Node.js 24 环境验证：
+
+| 检查 | 结果 |
+| --- | --- |
+| TypeScript 严格类型检查、生产构建 | 通过 |
+| 单元测试 | 19 项通过，涵盖存储、协议、心跳超时、停止及异常断流保存 |
+| 本地服务 Electron E2E | 通过，覆盖流式显示、停止/重试、实际剪贴板、用户与会话管理、主题、820×620 窗口及重启恢复 |
+| 真实 DeepSeek Electron E2E | 通过，使用 deepseek-flash 收到“连接成功” |
+| 开发模式 | 工作台成功显示 |
+| 应用目录打包 | 通过，生成 release/mac-arm64/DCode.app，并验证 packaged 模式启动与环境文件读取 |
+| 凭据检查 | 环境文件权限 0600 且被 Git 忽略；源码、历史、编译输出不包含密钥 |
+| 视觉检查 | 欢迎页、对话页布局与 Markdown 显示通过 |
+
+打包应用未做开发者签名与公证，当前只验证 macOS；Windows/Linux 的原生窗口与打包尚未在对应系统验证。配置与操作说明见 README.md。

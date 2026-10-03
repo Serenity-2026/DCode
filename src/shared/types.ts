@@ -65,4 +65,5 @@ export interface DCodeAPI {
   stop(): Promise<Result<Snapshot>>
   onStream(callback: (event: StreamEvent) => void): () => void
   openLink(url: string): Promise<Result<void>>
+  copyText(text: string): Promise<Result<void>>
 }

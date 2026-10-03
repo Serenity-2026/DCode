@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { channels } from '../shared/channels'
@@ -59,6 +59,10 @@ void app.whenReady().then(() => {
   })
   handle<{ content: string; retry?: boolean }>(channels.send, input => chat.send(input))
   handle(channels.stop, () => chat.stop())
+  handle<string>(channels.copyText, input => {
+    if (typeof input !== 'string' || input.length > 1_000_000) throw new Error('复制内容无效或过长。')
+    return clipboard.writeText(input)
+  })
   handle(channels.openLink, async (input: unknown) => {
     if (typeof input !== 'string') throw new Error('链接无效。')
     const url = new URL(input)
