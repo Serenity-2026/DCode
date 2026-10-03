@@ -12,6 +12,8 @@ import { Secrets } from './secrets'
 import { readAttachments } from './attachments'
 
 const here = dirname(fileURLToPath(import.meta.url))
+// 图标由 electron-builder 的 extraResources 复制；开发模式从项目 build 目录读取。
+const appIcon = app.isPackaged ? join(process.resourcesPath, 'icon.png') : join(here, '../../build/icon.png')
 let window: BrowserWindow | null = null
 let chat: Chat
 let quitting = false
@@ -25,7 +27,7 @@ app.setName('DCode')
 function createWindow(): void {
   window = new BrowserWindow({
     width: 1280, height: 860, minWidth: 820, minHeight: 620,
-    title: 'DCode', backgroundColor: '#fcfcfa', show: false,
+    title: 'DCode', backgroundColor: '#fcfcfa', show: false, icon: appIcon,
     titleBarStyle: 'hiddenInset',
     ...(process.platform === 'darwin' ? { trafficLightPosition: { x: 20, y: 19 } } : { titleBarOverlay: { color: '#fcfcfa', symbolColor: '#292929', height: 48 } }),
     webPreferences: { preload: join(here, '../preload/index.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false }
@@ -51,6 +53,7 @@ function createWindow(): void {
  * 注册 IPC 后调用 createWindow；Chat 的 emit 回调通过 webContents 将流事件交给 preload。
  */
 void app.whenReady().then(async () => {
+  app.dock?.setIcon(appIcon)
   const config = loadConfig(app.getPath('userData'), app.isPackaged)
   const store = new Store(join(app.getPath('userData'), 'state.json'))
   const secrets = new Secrets()
