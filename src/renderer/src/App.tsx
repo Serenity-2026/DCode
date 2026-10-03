@@ -14,6 +14,7 @@ import { AuthScreen } from './AuthScreen'
 import { ModelSettings } from './ModelSettings'
 import { ComposerTools } from './ComposerTools'
 import { AttachmentList } from './AttachmentList'
+import { WorkspaceLayout } from './WorkspaceLayout'
 
 /** 绘制品牌图形，供 Workspace 的侧栏、欢迎页与 assistant 消息共用，不依赖业务类。 */
 function Mark(): ReactNode {
@@ -243,7 +244,8 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
   const conversations = snapshot.conversations.filter(c => `${c.title} ${c.messages.map(m => m.content).join(' ')}`.toLowerCase().includes(search.toLowerCase())).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
   const modelName = snapshot.config.model
   const usedTokens = estimateContext(active, draft, attachments, generating)
-  return <div className="shell" data-theme={snapshot.theme}>
+  return <>
+    <WorkspaceLayout theme={snapshot.theme} sidebar={
     <aside className="sidebar">
       <div className="window-space" />
       <div className="brand"><span className="brand-mark"><Mark /></span><span className="brand-name">DCode</span><span className="brand-version">0.1</span></div>
@@ -270,9 +272,7 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
         </Dropdown>
         <Button type="text" className="settings-button" icon={<SettingOutlined />} aria-label="设置" disabled={busy} onClick={() => setSettingsOpen(true)}>设置</Button>
       </div>
-    </aside>
-    <main className="main">
-      <header className="titlebar"><span className="titlebar-label">工作台</span><span className="titlebar-divider" /><span className="titlebar-title">{active?.title || '新对话'}</span><span className="connection"><i className={`status-dot${snapshot.config.configured ? '' : ' missing'}`} />{snapshot.config.configured ? new URL(snapshot.config.baseUrl).hostname : '未配置模型'}</span></header>
+    </aside>} header={<><span className="titlebar-label">工作台</span><span className="titlebar-divider" /><span className="titlebar-title">{active?.title || '新对话'}</span><span className="connection"><i className={`status-dot${snapshot.config.configured ? '' : ' missing'}`} />{snapshot.config.configured ? new URL(snapshot.config.baseUrl).hostname : '未配置模型'}</span></>}>
       <div className="workspace" ref={scroll} onScroll={() => {
         const el = scroll.current
         if (el) follow.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100
@@ -301,12 +301,12 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
         }} />
         <ComposerTools snapshot={snapshot} busy={busy} modelsLoading={modelsLoading} usedTokens={usedTokens} onAdd={kind => void addAttachments(kind)} onModel={(providerId, model) => void act({ type: 'model:select', providerId, model })} onRefresh={() => void refreshModels()} onSettings={() => setSettingsOpen(true)} onFastMode={() => void act({ type: 'fast-mode', enabled: !snapshot.fastMode })} onEffort={effort => act({ type: 'reasoning-effort', effort })} sendButton={generating ? <Button className="send-button" type="primary" icon={<StopOutlined />} loading={stopping} aria-label="停止生成" onClick={() => void stop()} /> : <Button className="send-button" type="primary" icon={<ArrowUpOutlined />} disabled={busy || (!draft.trim() && !attachments.length) || !snapshot.config.configured} loading={pending} aria-label="发送消息" onClick={() => void send()} />} />
       </div><div className="footer-note"><span>{active ? `${active.messages.filter(m => m.role === 'user').length} 条提问` : 'Shift + Enter 换行'}</span><span>DCode / {active?.model || modelName}</span></div></div>
-    </main>
+    </WorkspaceLayout>
     {settingsOpen && <ModelSettings snapshot={snapshot} busy={busy} onClose={() => setSettingsOpen(false)} onSaved={installSnapshot} onTheme={value => void act({ type: 'theme', theme: value })} />}
     <Modal title={edit?.type === 'user' ? '编辑用户名称' : '重命名对话'} open={Boolean(edit)} onCancel={() => setEdit(null)} okText="保存" cancelText="取消" okButtonProps={{ disabled: busy || !edit?.value.trim() }} confirmLoading={pending} onOk={async () => {
       if (!edit) return
       const ok = await act(edit.type === 'user' ? { type: 'user:rename', id: edit.id, name: edit.value } : { type: 'conversation:rename', id: edit.id, title: edit.value })
       if (ok) setEdit(null)
     }}><Input aria-label="名称" value={edit?.value || ''} maxLength={edit?.type === 'user' ? 40 : 80} onChange={e => setEdit(previous => previous ? { ...previous, value: e.target.value } : null)} /></Modal>
-  </div>
+  </>
 }
