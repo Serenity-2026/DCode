@@ -10,15 +10,21 @@ import {
 import type { Action, Message, Snapshot, StreamEvent } from '../../shared/types'
 import { Markdown } from './Markdown'
 
+/** 绘制品牌图形，供 Workspace 的侧栏、欢迎页与 assistant 消息共用，不依赖业务类。 */
 function Mark(): ReactNode {
   return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
     <path d="m8 6-5 6 5 6m8-12 5 6-5 6M14 4l-4 16" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 }
 
+/**
+ * 界面根组件：通过 preload 的 window.dcode 读取 Snapshot，并配置 Ant Design 主题与提示容器。
+ * 加载成功后渲染 Workspace；只持有界面状态，不直接访问主进程的 Store 或 Chat。
+ */
 export default function Root(): ReactNode {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
   const [error, setError] = useState('')
+  // 首次挂载时取得主进程快照；连接或读取失败时显示错误，不创建虚假的本地状态。
   useEffect(() => {
     void window.dcode.getState().then(result => {
       if (result.ok) setSnapshot(result.value)
@@ -34,6 +40,11 @@ export default function Root(): ReactNode {
   </AntApp></ConfigProvider>
 }
 
+/**
+ * 对话工作台组件，组织会话侧栏、输入框、用户管理和设置弹窗。
+ * 依赖 Root 传入的 Snapshot/setSnapshot、Ant Design 控件与 Markdown 组件；
+ * 所有数据修改和生成操作都通过 window.dcode 间接交给主进程 Store/Chat。
+ */
 function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot: React.Dispatch<React.SetStateAction<Snapshot | null>> }): ReactNode {
   const { message: toast, modal } = AntApp.useApp()
   const [draft, setDraft] = useState('')
@@ -54,11 +65,13 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
   const generating = Boolean(active?.messages.some(m => m.status === 'streaming'))
   const busy = generating || pending || stopping
 
+  /** 合并 IPC 返回的 Snapshot 与已收到的 StreamEvent，避免较早的快照覆盖较新的流式文本。 */
   const installSnapshot = useCallback((next: Snapshot): void => {
     for (const c of next.conversations) c.messages = c.messages.map(m => streamEvents.current.get(m.id)?.message || m)
     setSnapshot(next)
   }, [setSnapshot])
 
+  // 按会话/消息 ID 更新流式回复；effect 返回 preload 提供的退订函数，防止重复监听。
   useEffect(() => window.dcode.onStream(event => {
     streamEvents.current.set(event.message.id, event)
     setSnapshot(previous => previous ? {
@@ -71,10 +84,15 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
     } : previous)
   }), [setSnapshot])
 
+  // 用户仍停留在底部时跟随新消息滚动；向上阅读历史后不强制拉回底部。
   useEffect(() => {
     if (follow.current && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight
   }, [active?.messages, active?.id])
 
+  /**
+   * 通过 window.dcode.action 执行用户/会话/主题操作，并用 installSnapshot 同步界面。
+   * inFlight 防止重复提交；切换上下文时清空草稿，返回成功标志供弹窗决定是否关闭。
+   */
   const act = useCallback(async (action: Action): Promise<boolean> => {
     if (inFlight.current) return false
     inFlight.current = true
@@ -93,6 +111,7 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
   }, [installSnapshot, toast])
 
   useEffect(() => {
+    /** 处理 Cmd/Ctrl+N：生成结束后通过 act 切换到新对话，并聚焦输入框。 */
     const handler = (event: KeyboardEvent): void => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'n') {
         event.preventDefault()
@@ -103,6 +122,10 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
     return () => window.removeEventListener('keydown', handler)
   }, [act, busy])
 
+  /**
+   * 发送草稿或重新生成最后一条回复，依赖 window.dcode.send 调用主进程 Chat。
+   * 通过 installSnapshot 合并初始消息与流事件；发送成功才清空草稿，失败则保留输入。
+   */
   async function send(retry = false): Promise<void> {
     if (busy || inFlight.current || (!retry && !draft.trim())) return
     inFlight.current = true
@@ -117,6 +140,7 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
     finally { inFlight.current = false; setPending(false); composer.current?.focus() }
   }
 
+  /** 请求 window.dcode.stop 等待 Chat 取消并保存，再用 installSnapshot 显示最终回复状态。 */
   async function stop(): Promise<void> {
     if (stopping) return
     setStopping(true)
@@ -128,6 +152,7 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
     finally { setStopping(false) }
   }
 
+  /** 使用 Ant Design modal 确认删除范围，确认后交给 act；业务约束由主进程 Store 检查。 */
   function confirmDelete(type: 'user' | 'conversation', id: string, name: string): void {
     modal.confirm({
       title: type === 'user' ? `删除用户“${name}”？` : '删除这段对话？',
@@ -137,6 +162,10 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
     })
   }
 
+  /**
+   * 将 assistant 的 Message 渲染为 Markdown、推理内容、生成状态及复制/重试操作。
+   * 依赖 Markdown 组件与 Ant Design；复制走 window.dcode.copyText，最后一条回复可调用 send 重试。
+   */
   function renderAssistant(m: Message, last: boolean): ReactNode {
     return <div className="assistant-content">
       {m.reasoning && <details className="reasoning"><summary>思考过程</summary><p>{m.reasoning}</p></details>}

@@ -4,6 +4,7 @@ import { dirname } from 'node:path'
 import type { Action, AppState, Conversation, Message, Snapshot } from '../shared/types'
 import type { ModelConfig } from './config'
 
+/** 校验并去除文本两端空白，供 Store 的用户名称、会话标题和问题输入共用。 */
 export function textInput(value: unknown, max: number): string {
   if (typeof value !== 'string' || !value.trim() || value.trim().length > max) {
     throw new Error(`请输入 1–${max} 个字符。`)
@@ -11,11 +12,13 @@ export function textInput(value: unknown, max: number): string {
   return value.trim()
 }
 
+/** 首次启动时创建默认用户与空会话状态；依赖 Node 的 randomUUID 生成用户 ID。 */
 function initialState(): AppState {
   const user = { id: randomUUID(), name: '开发者', createdAt: new Date().toISOString() }
   return { schemaVersion: 1, users: [user], activeUserId: user.id, activeConversationId: null, conversations: [], theme: 'light' }
 }
 
+/** 校验磁盘 JSON 的结构、ID 唯一性和用户/会话归属，供 Store 构造函数安全恢复 AppState。 */
 function validState(value: unknown): value is AppState {
   if (!value || typeof value !== 'object') return false
   const state = value as AppState
@@ -39,9 +42,18 @@ function validState(value: unknown): value is AppState {
   return state.activeConversationId === null || state.conversations.some(c => c.id === state.activeConversationId && c.userId === state.activeUserId)
 }
 
+/**
+ * 主进程的本地数据仓库，统一管理用户、会话、消息、当前选择与主题。
+ * 依赖 shared/types 中的数据契约及 Node 文件系统/路径/UUID API，无需其他业务类；
+ * Chat 调用它保存生成结果，主进程 IPC 调用它处理管理操作和获取界面快照。
+ */
 export class Store {
   state: AppState
 
+  /**
+   * 从指定 JSON 文件恢复状态；文件不存在时调用 initialState，损坏时拒绝覆盖。
+   * 将上次遗留的 streaming 消息标记为 stopped，再调用 save 保存恢复后的状态。
+   */
   constructor(private readonly path: string) {
     try {
       const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'))
@@ -57,6 +69,7 @@ export class Store {
     this.save()
   }
 
+  /** 通过 Node 文件 API 先写入临时文件，再原子替换数据文件；失败时抛出保存错误。 */
   save(): void {
     mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 })
     const temp = `${this.path}.tmp`
@@ -68,6 +81,7 @@ export class Store {
     }
   }
 
+  /** 执行状态修改并调用 save；修改或保存失败时恢复原内存状态，供 apply 和 begin 使用。 */
   transaction<T>(update: () => T): T {
     const previous = structuredClone(this.state)
     try {
@@ -80,6 +94,10 @@ export class Store {
     }
   }
 
+  /**
+   * 结合 ModelConfig 生成可发送给界面的独立副本，只包含当前用户的会话。
+   * 模型配置只暴露地址、模型名和配置状态，不将 API 密钥传入 renderer。
+   */
   snapshot(config: ModelConfig): Snapshot {
     return structuredClone({
       ...this.state,
@@ -88,12 +106,17 @@ export class Store {
     })
   }
 
+  /** 按 ID 查找当前用户所属的会话；不存在或属于其他用户时拒绝访问。 */
   conversation(id: unknown): Conversation {
     const c = this.state.conversations.find(c => c.id === id && c.userId === this.state.activeUserId)
     if (!c) throw new Error('会话不存在。')
     return c
   }
 
+  /**
+   * 处理 IPC 传入的 Action：用户管理、会话管理或主题修改。
+   * 依赖 transaction 保证失败回滚，textInput 校验文本，conversation 检查会话归属。
+   */
   apply(action: Action): void {
     if (!action || typeof action !== 'object') throw new Error('无效操作。')
     this.transaction(() => {
@@ -147,6 +170,10 @@ export class Store {
     })
   }
 
+  /**
+   * 为 Chat.send 准备一次生成：必要时新建会话，保存问题并添加 streaming 回复占位。
+   * 重试时只替换最后的 assistant 消息；返回仓库内对象的引用，供 Chat 持续追加文本。
+   */
   begin(content: unknown, retry: boolean, model: string): { conversation: Conversation; message: Message } {
     return this.transaction(() => {
       let c = this.state.activeConversationId ? this.conversation(this.state.activeConversationId) : undefined
@@ -172,6 +199,10 @@ export class Store {
   }
 }
 
+/**
+ * 将 Conversation 转成模型请求上下文，供 Chat.send 传给 streamModel。
+ * 保留已完整回答的历史轮次与本次待回答的问题，排除失败或停止的历史轮次。
+ */
 export function contextMessages(conversation: Conversation): { role: 'system' | 'user' | 'assistant'; content: string }[] {
   const result: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
     { role: 'system', content: '你是 DCode，一位严谨、简洁的编程助手。使用用户的语言回答，代码使用带语言标记的 Markdown 代码块。不要声称已经执行代码或访问文件。' }

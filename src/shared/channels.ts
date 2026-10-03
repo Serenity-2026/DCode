@@ -1,3 +1,4 @@
+/** 主进程和 preload 共用的 IPC 通道名称，保证 DCodeAPI 的请求与流事件使用同一套映射。 */
 export const channels = {
   state: 'dcode:state',
   action: 'dcode:action',

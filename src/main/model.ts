@@ -1,13 +1,20 @@
 import type { ModelConfig } from './config'
 
+/** 模型单次增量的文本与推理内容，由 consumeSSE 解析后交给 Chat 追加到消息。 */
 export interface Delta { content?: string; reasoning?: string }
 
+/**
+ * 消费模型响应的 SSE 字节流，用 TextDecoder 处理跨网络分块的 UTF-8 文本。
+ * 通过 onDelta 交付内容增量、onActivity 通知连接活跃；缺少 [DONE] 或异常结束时抛错。
+ * 不依赖 Store/Chat，由 streamModel 调用，便于单独测试流协议。
+ */
 export async function consumeSSE(body: ReadableStream<Uint8Array>, onDelta: (delta: Delta) => void, onActivity: () => void = () => {}): Promise<void> {
   const reader = body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
   let complete = false
   let finish: string | null = null
+  /** 解析一个完整 SSE 帧，跳过心跳，提取 Delta 或记录服务端的结束标记。 */
   const frame = (value: string): void => {
     const data = value.split('\n').filter(line => line.startsWith('data:')).map(line => line.slice(5).trimStart()).join('\n')
     if (!data) return
@@ -48,6 +55,11 @@ export async function consumeSSE(body: ReadableStream<Uint8Array>, onDelta: (del
   }
 }
 
+/**
+ * 使用 ModelConfig 和 fetch 发起流式对话请求，由 consumeSSE 解析响应。
+ * 依赖调用方传入的 AbortController 支持停止，并将 HTTP、网络和空闲超时转为可读错误；
+ * 通过 onDelta 返回增量，不直接修改会话或操作界面。
+ */
 export async function streamModel(
   config: ModelConfig,
   messages: { role: string; content: string }[],
@@ -57,6 +69,7 @@ export async function streamModel(
   if (!config.apiKey) throw new Error('请在环境变量中配置 DEEPSEEK_API_KEY，然后重启应用。')
   let timedOut = false
   let timer: ReturnType<typeof setTimeout>
+  /** 每次收到字节（包括心跳）都刷新空闲计时，连续 60 秒无响应则取消请求。 */
   const resetTimeout = (): void => {
     clearTimeout(timer)
     timer = setTimeout(() => { timedOut = true; controller.abort() }, 60_000)
