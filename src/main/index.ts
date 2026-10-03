@@ -2,10 +2,13 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { channels } from '../shared/channels'
-import type { Action, Result } from '../shared/types'
+import type { Action, AuthInput, ModelDraft, Result } from '../shared/types'
 import { loadConfig } from './config'
 import { Store } from './store'
 import { Chat } from './chat'
+import { Auth } from './auth'
+import { Models } from './models'
+import { Secrets } from './secrets'
 
 const here = dirname(fileURLToPath(import.meta.url))
 let window: BrowserWindow | null = null
@@ -43,15 +46,26 @@ function createWindow(): void {
 }
 
 /**
- * 主进程启动流程：loadConfig 读取配置，Store 恢复数据，Chat 管理生成任务。
+ * 启动流程：Store 恢复数据，Auth/Secrets 验证保持登录，Models 管理账号配置，Chat 管理生成。
  * 注册 IPC 后调用 createWindow；Chat 的 emit 回调通过 webContents 将流事件交给 preload。
  */
-void app.whenReady().then(() => {
+void app.whenReady().then(async () => {
   const config = loadConfig(app.getPath('userData'), app.isPackaged)
   const store = new Store(join(app.getPath('userData'), 'state.json'))
-  chat = new Chat(store, config, event => {
+  const secrets = new Secrets()
+  const models = new Models(store, secrets, config)
+  const auth = new Auth(store, secrets, models)
+  await auth.restore()
+  chat = new Chat(store, event => {
     if (window && !window.webContents.isDestroyed()) window.webContents.send(channels.stream, event)
   })
+  let operationBusy = false
+  /** 串行执行登录、配置测试和状态修改，避免测试期间退出/切换账号及重复发送。 */
+  async function exclusive<T>(operation: () => T | Promise<T>): Promise<T> {
+    if (operationBusy || chat.busy) throw new Error('请等待当前操作完成，或先停止生成。')
+    operationBusy = true
+    try { return await operation() } finally { operationBusy = false }
+  }
   /**
    * 封装 ipcMain.handle：仅接受当前窗口主 frame 的调用，再交给对应业务处理函数。
    * 统一返回 shared/types 的 Result，使 preload/renderer 能按相同方式处理成功与错误。
@@ -65,24 +79,31 @@ void app.whenReady().then(() => {
     })
   }
   // 读取当前用户的界面快照，数据由 Store 提供，配置敏感字段在 snapshot 中过滤。
-  handle(channels.state, () => store.snapshot(config))
+  handle(channels.state, () => store.snapshot())
+  // Auth 负责密码校验、OS 加密会话及主动注销，未登录不允许执行其他账号操作。
+  handle<AuthInput>(channels.register, input => exclusive(() => auth.register(input)))
+  handle<AuthInput>(channels.login, input => exclusive(() => auth.login(input)))
+  handle(channels.logout, () => exclusive(() => auth.logout()))
+  // Models 测试填写的准确配置，成功后保存，失败时不覆盖旧值。
+  handle<ModelDraft>(channels.saveModel, input => exclusive(() => models.testAndSave(input)))
   // 用户、会话与主题操作交给 Store.apply；Chat 生成期间禁止修改会话状态。
-  handle<Action>(channels.action, input => {
-    if (chat.busy) throw new Error('请先停止当前生成。')
+  handle<Action>(channels.action, input => exclusive(() => {
     store.apply(input)
-    return store.snapshot(config)
-  })
+    return store.snapshot()
+  }))
   // 开始/重试生成由 Chat.send 处理，后续内容经独立的 stream 通道推送。
-  handle<{ content: string; retry?: boolean }>(channels.send, input => chat.send(input))
+  handle<{ content: string; retry?: boolean }>(channels.send, input => exclusive(async () => chat.send(input, await models.selected())))
   // 停止生成由 Chat.stop 取消请求并返回保存后的快照。
-  handle(channels.stop, () => chat.stop())
+  handle(channels.stop, () => { store.requireUser(); return chat.stop() })
   // 通过 Electron clipboard 复制文本，界面无需获得通用剪贴板或文件系统权限。
   handle<string>(channels.copyText, input => {
+    store.requireUser()
     if (typeof input !== 'string' || input.length > 1_000_000) throw new Error('复制内容无效或过长。')
     return clipboard.writeText(input)
   })
   // 校验链接协议后使用 Electron shell 在系统浏览器打开，不让工作台跳转到外部网页。
   handle(channels.openLink, async (input: unknown) => {
+    store.requireUser()
     if (typeof input !== 'string') throw new Error('链接无效。')
     const url = new URL(input)
     if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) throw new Error('仅支持 HTTP 或 HTTPS 链接。')

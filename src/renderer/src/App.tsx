@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { Alert, App as AntApp, Button, ConfigProvider, Dropdown, Input, Modal, Segmented, theme } from 'antd'
+import { Alert, App as AntApp, Button, ConfigProvider, Dropdown, Input, Modal, Tooltip, theme } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import {
   ArrowUpOutlined, PlusOutlined, SearchOutlined, MessageOutlined, MoreOutlined,
   SettingOutlined, CodeOutlined, BugOutlined, BranchesOutlined, CopyOutlined,
-  ReloadOutlined, StopOutlined, CheckOutlined, DeleteOutlined, EditOutlined,
+  ReloadOutlined, StopOutlined, DeleteOutlined, EditOutlined, LogoutOutlined,
   DownOutlined, RightOutlined, ThunderboltOutlined
 } from '@ant-design/icons'
 import type { Action, Message, Snapshot, StreamEvent } from '../../shared/types'
 import { Markdown } from './Markdown'
+import { AuthScreen } from './AuthScreen'
+import { ModelSettings } from './ModelSettings'
 
 /** 绘制品牌图形，供 Workspace 的侧栏、欢迎页与 assistant 消息共用，不依赖业务类。 */
 function Mark(): ReactNode {
@@ -19,7 +21,7 @@ function Mark(): ReactNode {
 
 /**
  * 界面根组件：通过 preload 的 window.dcode 读取 Snapshot，并配置 Ant Design 主题与提示容器。
- * 加载成功后渲染 Workspace；只持有界面状态，不直接访问主进程的 Store 或 Chat。
+ * 根据登录快照渲染 AuthScreen 或 Workspace；不直接访问主进程的 Store、Auth 或 Chat。
  */
 export default function Root(): ReactNode {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
@@ -36,13 +38,13 @@ export default function Root(): ReactNode {
     algorithm: dark ? theme.darkAlgorithm : theme.defaultAlgorithm,
     token: { colorPrimary: dark ? '#8ac8a3' : '#303b33', borderRadius: 8, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif' }
   }}><AntApp>
-    {snapshot ? <Workspace snapshot={snapshot} setSnapshot={setSnapshot} /> : error ? <div className="load-error"><Alert title={error} type="error" showIcon /></div> : <div className="loading">正在打开工作台…</div>}
+    {snapshot ? snapshot.activeUserId ? <Workspace key={snapshot.activeUserId} snapshot={snapshot} setSnapshot={setSnapshot} /> : <AuthScreen snapshot={snapshot} onLogin={setSnapshot} /> : error ? <div className="load-error"><Alert title={error} type="error" showIcon /></div> : <div className="loading">正在打开工作台…</div>}
   </AntApp></ConfigProvider>
 }
 
 /**
  * 对话工作台组件，组织会话侧栏、输入框、用户管理和设置弹窗。
- * 依赖 Root 传入的 Snapshot/setSnapshot、Ant Design 控件与 Markdown 组件；
+ * 依赖 Root 的账号快照、Ant Design、Markdown 与 ModelSettings 组件；
  * 所有数据修改和生成操作都通过 window.dcode 间接交给主进程 Store/Chat。
  */
 function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot: React.Dispatch<React.SetStateAction<Snapshot | null>> }): ReactNode {
@@ -52,8 +54,6 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
   const [pending, setPending] = useState(false)
   const [stopping, setStopping] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [usersOpen, setUsersOpen] = useState(false)
-  const [newName, setNewName] = useState('')
   const [edit, setEdit] = useState<{ type: 'user' | 'conversation'; id: string; value: string } | null>(null)
   const streamEvents = useRef(new Map<string, StreamEvent>())
   const scroll = useRef<HTMLDivElement>(null)
@@ -102,7 +102,7 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
       if (!result.ok) { void toast.error(result.error); return false }
       streamEvents.current.clear()
       installSnapshot(result.value)
-      if (['user:create', 'user:switch', 'user:delete', 'conversation:select', 'conversation:delete'].includes(action.type)) {
+      if (['conversation:select', 'conversation:delete'].includes(action.type)) {
         setDraft(''); follow.current = true
       }
       return true
@@ -152,13 +152,24 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
     finally { setStopping(false) }
   }
 
-  /** 使用 Ant Design modal 确认删除范围，确认后交给 act；业务约束由主进程 Store 检查。 */
-  function confirmDelete(type: 'user' | 'conversation', id: string, name: string): void {
+  /** 主动撤销保持登录的令牌并通知 Root 显示登录页，聊天与模型配置留在账号下。 */
+  async function logout(): Promise<void> {
+    if (busy || inFlight.current) return
+    inFlight.current = true; setPending(true)
+    try {
+      const result = await window.dcode.logout()
+      if (result.ok) setSnapshot(result.value)
+      else void toast.error(result.error)
+    } catch { void toast.error('退出失败，请重试。') }
+    finally { inFlight.current = false; setPending(false) }
+  }
+
+  /** 使用 Ant Design modal 确认删除会话，再交给 act 与主进程 Store 检查账号归属。 */
+  function confirmDelete(id: string, name: string): void {
     modal.confirm({
-      title: type === 'user' ? `删除用户“${name}”？` : '删除这段对话？',
-      content: type === 'user' ? '该用户的全部对话也会被删除。' : name,
+      title: '删除这段对话？', content: name,
       okText: '删除', cancelText: '取消', okButtonProps: { danger: true },
-      onOk: async () => { if (!await act({ type: type === 'user' ? 'user:delete' : 'conversation:delete', id })) throw new Error('删除失败') }
+      onOk: async () => { if (!await act({ type: 'conversation:delete', id })) throw new Error('删除失败') }
     })
   }
 
@@ -196,18 +207,23 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
           <Button type="text" className="history-button" icon={<MessageOutlined />} aria-label={c.title} disabled={busy} title={c.title} onClick={() => void act({ type: 'conversation:select', id: c.id })}><span className="history-title">{c.title}</span></Button>
           <Dropdown disabled={busy} trigger={['click']} menu={{ items: [
             { key: 'rename', label: '重命名', icon: <EditOutlined /> }, { key: 'delete', label: '删除', danger: true, icon: <DeleteOutlined /> }
-          ], onClick: ({ key }) => key === 'rename' ? setEdit({ type: 'conversation', id: c.id, value: c.title }) : confirmDelete('conversation', c.id, c.title) }}>
+          ], onClick: ({ key }) => key === 'rename' ? setEdit({ type: 'conversation', id: c.id, value: c.title }) : confirmDelete(c.id, c.title) }}>
             <Button type="text" size="small" className="history-menu" icon={<MoreOutlined />} disabled={busy} aria-label={`管理对话 ${c.title}`} />
           </Dropdown>
         </div>)}
       </nav>
       <div className="sidebar-bottom">
-        <Button type="text" className="user-button" disabled={busy} aria-label="管理用户" onClick={() => setUsersOpen(true)}><span className="avatar">{user.name.slice(0, 1)}</span><span className="user-info"><span className="user-name">{user.name}</span><span className="user-caption">本地用户</span></span><DownOutlined /></Button>
+        <Dropdown disabled={busy} trigger={['click']} menu={{ items: [
+          { key: 'rename', label: '编辑名称', icon: <EditOutlined /> },
+          { key: 'logout', label: '退出登录', icon: <LogoutOutlined /> }
+        ], onClick: ({ key }) => key === 'logout' ? void logout() : setEdit({ type: 'user', id: user.id, value: user.name }) }}>
+          <Button type="text" className="user-button" disabled={busy} aria-label="账号菜单"><span className="avatar">{user.name.slice(0, 1)}</span><span className="user-info"><span className="user-name">{user.name}</span><span className="user-caption">{user.username}</span></span><DownOutlined /></Button>
+        </Dropdown>
         <Button type="text" className="settings-button" icon={<SettingOutlined />} aria-label="设置" disabled={busy} onClick={() => setSettingsOpen(true)}>设置</Button>
       </div>
     </aside>
     <main className="main">
-      <header className="titlebar"><span className="titlebar-label">工作台</span><span className="titlebar-divider" /><span className="titlebar-title">{active?.title || '新对话'}</span><span className="connection"><i className={`status-dot${snapshot.config.configured ? '' : ' missing'}`} />{snapshot.config.configured ? 'DeepSeek' : '未配置密钥'}</span></header>
+      <header className="titlebar"><span className="titlebar-label">工作台</span><span className="titlebar-divider" /><span className="titlebar-title">{active?.title || '新对话'}</span><span className="connection"><i className={`status-dot${snapshot.config.configured ? '' : ' missing'}`} />{snapshot.config.configured ? new URL(snapshot.config.baseUrl).hostname : '未配置模型'}</span></header>
       <div className="workspace" ref={scroll} onScroll={() => {
         const el = scroll.current
         if (el) follow.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100
@@ -233,17 +249,16 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
         <Input.TextArea ref={composer} aria-label="消息" placeholder="描述你的想法，或粘贴代码…" variant="borderless" autoSize={{ minRows: 2, maxRows: 7 }} maxLength={32_000} value={draft} disabled={busy} onChange={e => setDraft(e.target.value)} onKeyDown={event => {
           if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void send() }
         }} />
-        <div className="composer-tools"><span className="model-label"><ThunderboltOutlined />{modelName}</span><span className="composer-hint">{busy ? '正在生成' : 'Shift + Enter 换行'}</span>{generating ? <Button className="send-button" type="primary" icon={<StopOutlined />} loading={stopping} aria-label="停止生成" onClick={() => void stop()} /> : <Button className="send-button" type="primary" icon={<ArrowUpOutlined />} disabled={pending || !draft.trim() || !snapshot.config.configured} loading={pending} aria-label="发送消息" onClick={() => void send()} />}</div>
+        <div className="composer-tools"><Tooltip title="仅对支持加速的模型生效" trigger="click"><Button className="speed-button" type="text" icon={<ThunderboltOutlined />} aria-label="模型加速说明" /></Tooltip>
+          <Dropdown disabled={busy} trigger={['click']} menu={{ selectedKeys: snapshot.activeModelId ? [snapshot.activeModelId] : [], items: [
+            ...snapshot.models.map(m => ({ key: m.id, label: `${m.name} · ${m.model}` })),
+            { key: 'settings', label: '添加或编辑模型', icon: <SettingOutlined /> }
+          ], onClick: ({ key }) => key === 'settings' ? setSettingsOpen(true) : void act({ type: 'model:select', id: key }) }}>
+            <Button className="model-selector" type="text" aria-label="切换模型" disabled={busy}>{modelName || '配置模型'}<DownOutlined /></Button>
+          </Dropdown><span className="composer-hint">{busy ? '正在生成' : 'Shift + Enter 换行'}</span>{generating ? <Button className="send-button" type="primary" icon={<StopOutlined />} loading={stopping} aria-label="停止生成" onClick={() => void stop()} /> : <Button className="send-button" type="primary" icon={<ArrowUpOutlined />} disabled={pending || !draft.trim() || !snapshot.config.configured} loading={pending} aria-label="发送消息" onClick={() => void send()} />}</div>
       </div><div className="footer-note"><span>{active ? `${active.messages.filter(m => m.role === 'user').length} 条提问` : ''}</span><span>DCode / {active?.model || modelName}</span></div></div>
     </main>
-    <Modal title="设置" open={settingsOpen} onCancel={() => setSettingsOpen(false)} footer={null} width={460}>
-      <div className="settings-section"><span className="settings-label">外观</span><Segmented block value={snapshot.theme} options={[{ label: '浅色', value: 'light' }, { label: '深色', value: 'dark' }]} disabled={busy} onChange={value => void act({ type: 'theme', theme: value === 'dark' ? 'dark' : 'light' })} /></div>
-      <div className="settings-section"><span className="settings-label">模型服务</span><div className="settings-row"><span>服务地址</span><span className="settings-value">{snapshot.config.baseUrl}</span></div><div className="settings-row"><span>模型</span><span className="settings-value">{modelName}</span></div><div className="settings-row"><span>API 密钥</span><span>{snapshot.config.configured ? '已配置' : '未配置'}</span></div></div>
-    </Modal>
-    <Modal title="本地用户" open={usersOpen} onCancel={() => setUsersOpen(false)} footer={null} width={480}>
-      <div className="user-list">{snapshot.users.map(u => <div className="user-list-row" key={u.id}><span className="avatar">{u.name.slice(0, 1)}</span><span className="user-list-name">{u.name}</span>{u.id === user.id ? <CheckOutlined /> : <Button size="small" disabled={busy} onClick={() => void act({ type: 'user:switch', id: u.id }).then(ok => { if (ok) setUsersOpen(false) })}>切换</Button>}<Button type="text" size="small" icon={<EditOutlined />} disabled={busy} aria-label={`编辑用户 ${u.name}`} onClick={() => setEdit({ type: 'user', id: u.id, value: u.name })} /><Button type="text" size="small" icon={<DeleteOutlined />} danger disabled={busy || snapshot.users.length === 1} aria-label={`删除用户 ${u.name}`} onClick={() => confirmDelete('user', u.id, u.name)} /></div>)}</div>
-      <div className="user-create"><Input aria-label="新用户名称" placeholder="新用户名称" maxLength={40} value={newName} disabled={busy} onChange={e => setNewName(e.target.value)} /><Button type="primary" icon={<PlusOutlined />} aria-label="创建" disabled={busy || !newName.trim()} onClick={() => void act({ type: 'user:create', name: newName }).then(ok => { if (ok) { setNewName(''); setUsersOpen(false) } })}>创建</Button></div>
-    </Modal>
+    {settingsOpen && <ModelSettings snapshot={snapshot} busy={busy} onClose={() => setSettingsOpen(false)} onSaved={installSnapshot} onTheme={value => void act({ type: 'theme', theme: value })} />}
     <Modal title={edit?.type === 'user' ? '编辑用户名称' : '重命名对话'} open={Boolean(edit)} onCancel={() => setEdit(null)} okText="保存" cancelText="取消" okButtonProps={{ disabled: busy || !edit?.value.trim() }} confirmLoading={pending} onOk={async () => {
       if (!edit) return
       const ok = await act(edit.type === 'user' ? { type: 'user:rename', id: edit.id, name: edit.value } : { type: 'conversation:rename', id: edit.id, title: edit.value })

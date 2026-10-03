@@ -10,6 +10,14 @@ import type { DCodeAPI, StreamEvent } from '../shared/types'
 const api: DCodeAPI = {
   /** 向主进程请求 Store.snapshot，用于首次加载界面。 */
   getState: () => ipcRenderer.invoke(channels.state),
+  /** 由 Auth 注册并加密保存保持登录的令牌。 */
+  register: (input) => ipcRenderer.invoke(channels.register, input),
+  /** 由 Auth 验证密码后恢复账号数据。 */
+  login: (input) => ipcRenderer.invoke(channels.login, input),
+  /** 撤销 Auth 的登录会话。 */
+  logout: () => ipcRenderer.invoke(channels.logout),
+  /** Models 连通测试通过后才保存准确配置。 */
+  saveModel: (input) => ipcRenderer.invoke(channels.saveModel, input),
   /** 将用户、会话或主题 Action 交给主进程的 Store.apply。 */
   action: (action) => ipcRenderer.invoke(channels.action, action),
   /** 请求主进程的 Chat.send 开始或重试生成，返回初始快照。 */

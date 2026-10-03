@@ -53,6 +53,16 @@ describe('SSE protocol and model requests', () => {
     expect(options.body).not.toContain('test-secret')
   })
 
+  it('limits the DeepSeek thinking parameter to the official service', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => new Response(bytes('data: {"choices":[{"delta":{"content":"OK"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')))
+    vi.stubGlobal('fetch', fetchMock)
+    for (const baseUrl of ['https://api.deepseek.com', 'https://compatible.example.com/v1']) {
+      await streamModel({ ...config, baseUrl }, [], new AbortController(), () => {})
+    }
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).thinking).toEqual({ type: 'disabled' })
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).not.toHaveProperty('thinking')
+  })
+
   it('aborts idle connections on timeout', async () => {
     vi.useFakeTimers()
     vi.stubGlobal('fetch', vi.fn((_url, options) => new Promise((_resolve, reject) => {

@@ -64,15 +64,16 @@ export async function streamModel(
   config: ModelConfig,
   messages: { role: string; content: string }[],
   controller: AbortController,
-  onDelta: (delta: Delta) => void
+  onDelta: (delta: Delta) => void,
+  options: { maxTokens?: number; timeoutMs?: number } = {}
 ): Promise<void> {
-  if (!config.apiKey) throw new Error('请在环境变量中配置 DEEPSEEK_API_KEY，然后重启应用。')
+  if (!config.apiKey) throw new Error('请先在设置中填写 API 密钥。')
   let timedOut = false
   let timer: ReturnType<typeof setTimeout>
-  /** 每次收到字节（包括心跳）都刷新空闲计时，连续 60 秒无响应则取消请求。 */
+  /** 每次收到字节（包括心跳）刷新空闲计时；聊天默认 60 秒，Models 测试使用 15 秒。 */
   const resetTimeout = (): void => {
     clearTimeout(timer)
-    timer = setTimeout(() => { timedOut = true; controller.abort() }, 60_000)
+    timer = setTimeout(() => { timedOut = true; controller.abort() }, options.timeoutMs || 60_000)
   }
   resetTimeout()
   try {
@@ -80,13 +81,16 @@ export async function streamModel(
       method: 'POST',
       redirect: 'error',
       headers: { Authorization: `Bearer ${config.apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: config.model, messages, stream: true, thinking: { type: 'disabled' }, max_tokens: 8192 }),
+      body: JSON.stringify({
+        model: config.model, messages, stream: true, max_tokens: options.maxTokens || 8192,
+        ...(new URL(config.baseUrl).hostname === 'api.deepseek.com' ? { thinking: { type: 'disabled' } } : {})
+      }),
       signal: controller.signal
     })
     if (!response.ok) {
       const errors: Record<number, string> = {
         400: '请求参数或模型不受支持，请检查模型配置。',
-        401: 'API 密钥无效，请检查环境变量。',
+        401: 'API 密钥无效，请检查模型配置。',
         402: '模型账户余额不足，请充值后重试。',
         403: '无权访问该模型，请检查账户权限。',
         404: '模型服务地址或模型不存在。',

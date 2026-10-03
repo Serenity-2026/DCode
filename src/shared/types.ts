@@ -1,16 +1,12 @@
-/** Store 保存的外观偏好，由 renderer 的 Root 组件映射到 Ant Design 主题。 */
+/** 账号保存的外观偏好，由 Root 映射到 Ant Design 主题。 */
 export type Theme = 'light' | 'dark'
-/** Chat 维护的回复状态；Store 启动恢复时会把遗留的 streaming 改为 stopped。 */
+/** Chat 维护的回复状态，Store 会将上次遗留的生成标记为停止。 */
 export type MessageStatus = 'streaming' | 'complete' | 'stopped' | 'error'
 
-/** 本地用户档案，由 Store 创建和管理；用于会话归属，不承担服务端身份认证。 */
-export interface User {
-  id: string
-  name: string
-  createdAt: string
-}
+/** 公开账号信息，不包含密码哈希、会话令牌或模型密钥。 */
+export interface User { id: string; name: string; username?: string; createdAt: string }
 
-/** 会话中的单条消息；Chat 更新回复内容及状态，Markdown/Workspace 负责展示。 */
+/** 单条对话消息，由 Chat 更新，Workspace 与 Markdown 展示。 */
 export interface Message {
   id: string
   role: 'user' | 'assistant'
@@ -21,7 +17,7 @@ export interface Message {
   createdAt: string
 }
 
-/** 属于某个 User 的完整对话，包含有序 Message；Store 持久化，Chat 将其转换为模型上下文。 */
+/** 属于一个账号的完整对话，Store 持久化，Chat 构建模型上下文。 */
 export interface Conversation {
   id: string
   userId: string
@@ -32,59 +28,65 @@ export interface Conversation {
   messages: Message[]
 }
 
-/** Store 保存到磁盘的完整应用状态，包含全部本地用户、会话和当前选择。 */
-export interface AppState {
-  schemaVersion: 1
+/** 不含秘密的模型配置，供模型菜单与设置表单使用。 */
+export interface ModelProfile { id: string; name: string; baseUrl: string; model: string }
+
+/** 设置表单提交的配置；编辑时 apiKey 留空表示保留现有密钥。 */
+export interface ModelDraft extends Omit<ModelProfile, 'id'> { id?: string; apiKey: string }
+
+/** 界面可见状态；未登录时不包含账号、聊天或模型配置。 */
+export interface Snapshot {
   users: User[]
-  activeUserId: string
+  activeUserId: string | null
   activeConversationId: string | null
   conversations: Conversation[]
   theme: Theme
-}
-
-/** Store.snapshot 返回给界面的状态副本：会话仅属于当前用户，config 不包含模型密钥。 */
-export interface Snapshot extends Omit<AppState, 'conversations'> {
-  conversations: Conversation[]
+  legacyUsers: User[]
+  models: ModelProfile[]
+  activeModelId: string | null
   config: { baseUrl: string; model: string; configured: boolean }
 }
 
-/** renderer 可请求的管理操作白名单；preload 转发，Store.apply 校验并执行。 */
+/** 注册/登录输入由 Auth 校验；legacyUserId 可将首版档案关联到新账号。 */
+export interface AuthInput { username: string; password: string; legacyUserId?: string }
+
+/** 已登录账号允许执行的操作，Store 再次校验账号与数据归属。 */
 export type Action =
-  | { type: 'user:create'; name: string }
   | { type: 'user:rename'; id: string; name: string }
-  | { type: 'user:switch'; id: string }
-  | { type: 'user:delete'; id: string }
   | { type: 'conversation:select'; id: string | null }
   | { type: 'conversation:rename'; id: string; title: string }
   | { type: 'conversation:delete'; id: string }
+  | { type: 'model:select'; id: string }
   | { type: 'theme'; theme: Theme }
 
-/** Chat 经 IPC 推送的回复更新，携带当前完整 Message；Workspace 按 ID 替换消息而非追加 token。 */
-export interface StreamEvent {
-  conversationId: string
-  message: Message
-}
+/** 流更新携带完整消息，Workspace 按 ID 替换对应回复。 */
+export interface StreamEvent { conversationId: string; message: Message }
 
-/** 主进程 handle 统一包装的 IPC 返回值，界面检查 ok 后读取结果或显示错误。 */
+/** 主进程 IPC 的成功/失败结果，不向界面泄露秘密。 */
 export type Result<T> = { ok: true; value: T } | { ok: false; error: string }
 
-/**
- * preload 通过 contextBridge 注入 window.dcode 的接口契约。
- * renderer 依赖该接口调用主进程的 Store/Chat 和指定系统能力，不能直接接触 Electron IPC。
- */
+/** preload 的业务白名单；依赖主进程 Auth、Models、Store 和 Chat，不暴露原始 IPC。 */
 export interface DCodeAPI {
-  /** 获取 Store 提供的当前用户快照。 */
+  /** 获取当前登录状态及账号快照。 */
   getState(): Promise<Result<Snapshot>>
-  /** 请求 Store 执行管理操作，并返回更新后的快照。 */
+  /** 注册账号并保持登录，可关联旧档案。 */
+  register(input: AuthInput): Promise<Result<Snapshot>>
+  /** 验证账号密码并保持登录。 */
+  login(input: AuthInput): Promise<Result<Snapshot>>
+  /** 注销记住的会话，必须再次输入密码才能进入。 */
+  logout(): Promise<Result<Snapshot>>
+  /** 测试准确配置，成功后加密保存并选中，失败则保留旧值。 */
+  saveModel(input: ModelDraft): Promise<Result<Snapshot>>
+  /** 修改当前账号的资料、会话、模型选择或主题。 */
   action(action: Action): Promise<Result<Snapshot>>
-  /** 请求 Chat 发送/重试；先返回快照，后续更新由 onStream 接收。 */
+  /** 使用当前账号选中的模型生成回复。 */
   send(input: { content: string; retry?: boolean }): Promise<Result<Snapshot>>
-  /** 请求 Chat 停止生成并保存，返回最终快照。 */
+  /** 停止生成并等待结果保存。 */
   stop(): Promise<Result<Snapshot>>
-  /** 订阅回复更新，返回卸载监听用的退订函数。 */
+  /** 订阅消息更新，返回退订函数。 */
   onStream(callback: (event: StreamEvent) => void): () => void
-  /** 请求主进程校验链接后在系统浏览器打开。 */
+  /** 校验后在系统浏览器打开链接。 */
   openLink(url: string): Promise<Result<void>>
-  /** 请求主进程把文本写入剪贴板。 */
+  /** 将文本写入系统剪贴板。 */
   copyText(text: string): Promise<Result<void>>
 }
