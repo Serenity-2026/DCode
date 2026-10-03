@@ -12,7 +12,7 @@ TypeScript + Electron 的 Coding Harness 基础框架。包含本机账号与密
 npm ci
 cp .env.example .env.local
 chmod 600 .env.local
-# 编辑 .env.local，填入自己的 DEEPSEEK_API_KEY
+# 编辑 .env.local，填入自己的 BASE_URL 和 API_KEY
 npm run dev
 ```
 
@@ -43,11 +43,18 @@ npm start
 
 | 变量 | 用途 | 默认值 |
 | --- | --- | --- |
-| `DEEPSEEK_BASE_URL` | 首个注册账号的初始服务地址 | `https://api.deepseek.com` |
-| `DEEPSEEK_API_KEY` | 首个注册账号的初始模型 API 密钥，仅主进程读取 | 无 |
+| `BASE_URL` | 首个注册账号的初始服务地址，与模型服务商无关 | 无 |
+| `API_KEY` | 首个注册账号的初始模型 API 密钥，仅主进程读取 | 无 |
 | `DCODE_USER_DATA_DIR` | 覆盖本地数据目录，供测试隔离使用 | Electron userData |
 
-启动时加载根目录 `.env.local` 到 `process.env`，系统已有环境变量优先。环境地址和密钥仅导入首个注册账号；之后在设置页修改，其他账号自行添加服务。更改环境文件不会覆盖已保存的账号服务配置。模型 ID 来自服务返回列表，原 `DEEPSEEK_MODEL` 变量不再使用。
+开发启动时加载根目录 `.env.local` 到 `process.env`，系统已有环境变量优先。`BASE_URL` 和 `API_KEY` 没有服务商前缀，也没有内置地址或密钥；旧的服务商前缀变量不再读取。地址和密钥都非空时，仅导入首个注册账号；未填写完整时可注册后在设置页添加服务，填写了非法地址则启动时报错。之后以账号自己的配置为准，更改环境文件不会覆盖已保存的账号服务配置。模型 ID 来自服务返回列表，不通过环境变量固定。
+
+`.env.local` 的配置格式（将地址与密钥替换成自己的服务配置）：
+
+```dotenv
+BASE_URL=https://your-provider.example/v1
+API_KEY=your-api-key
+```
 
 打包后的应用读取 userData 目录下的 `.env.local` 或系统环境变量；也可以直接注册后在设置页配置模型。通过 Finder 启动通常不会继承终端变量。
 

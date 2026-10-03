@@ -28,12 +28,12 @@ export function validateBaseUrl(value: unknown): string {
   return baseUrl
 }
 
-/** 读取启动环境配置，仅供 Models 向首个注册账号导入；之后以账号自己的配置为准。 */
+/** 通过 dotenv 读取通用 BASE_URL/API_KEY，不预设服务；Models 仅向首个注册账号导入完整配置。 */
 export function loadConfig(userData: string, packaged: boolean): ProviderConfig {
   config({ path: join(packaged ? userData : process.cwd(), '.env.local'), quiet: true })
-  const baseUrl = validateBaseUrl(process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com')
+  const baseUrl = process.env.BASE_URL?.trim() || ''
   return {
-    baseUrl,
-    apiKey: process.env.DEEPSEEK_API_KEY?.trim() || ''
+    baseUrl: baseUrl ? validateBaseUrl(baseUrl) : '',
+    apiKey: process.env.API_KEY?.trim() || ''
   }
 }

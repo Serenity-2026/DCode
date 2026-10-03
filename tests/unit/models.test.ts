@@ -11,6 +11,14 @@ function response(ids = ['gpt-6-astra', 'gpt-6-sol', 'gpt-5.6-sol']): Response {
 }
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); cleanup() })
 
+it('imports no environment service unless both URL and key are configured', async () => {
+  for (const initial of [{ baseUrl: '', apiKey: '' }, { baseUrl: '', apiKey: 'private-key' }, { baseUrl: 'https://example.com/v1', apiKey: '' }]) {
+    const { store } = await create({ ...initial, model: 'test' })
+    expect(store.snapshot().providers).toEqual([])
+    expect(store.snapshot().config.configured).toBe(false)
+  }
+})
+
 it('uses the candidate URL and key to discover models before saving, without a chat request', async () => {
   const { models, store } = await create()
   const fetchMock = vi.fn().mockImplementation(async () => response())
