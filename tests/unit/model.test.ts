@@ -57,9 +57,9 @@ describe('SSE protocol and model requests', () => {
     const fetchMock = vi.fn().mockImplementation(async () => new Response(bytes('data: {"choices":[{"delta":{"content":"OK"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')))
     vi.stubGlobal('fetch', fetchMock)
     for (const baseUrl of ['https://api.deepseek.com', 'https://compatible.example.com/v1']) {
-      await streamModel({ ...config, baseUrl }, [], new AbortController(), () => {})
+      await streamModel({ ...config, baseUrl, reasoningEffort: 'max' }, [], new AbortController(), () => {})
     }
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body).thinking).toEqual({ type: 'disabled' })
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).thinking).toEqual({ type: 'enabled' })
     expect(JSON.parse(fetchMock.mock.calls[1][1].body)).not.toHaveProperty('thinking')
   })
 
@@ -74,15 +74,18 @@ describe('SSE protocol and model requests', () => {
     expect(JSON.parse(fetchMock.mock.calls[2][1].body)).not.toHaveProperty('service_tier')
   })
 
-  it('sends selected reasoning effort, enables DeepSeek thinking and omits automatic effort', async () => {
+  it('sends selected reasoning effort and leaves defaults untouched when effort metadata is unknown', async () => {
     const fetchMock = vi.fn().mockImplementation(async () => new Response(bytes('data: {"choices":[{"delta":{"content":"OK"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')))
     vi.stubGlobal('fetch', fetchMock)
     await streamModel({ ...config, reasoningEffort: 'medium' }, [], new AbortController(), () => {})
     await streamModel({ ...config, baseUrl: 'https://api.deepseek.com', reasoningEffort: 'max' }, [], new AbortController(), () => {})
     await streamModel({ ...config, reasoningEffort: null }, [], new AbortController(), () => {})
+    await streamModel({ ...config, baseUrl: 'https://api.deepseek.com', reasoningEffort: null }, [], new AbortController(), () => {})
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ reasoning_effort: 'medium' })
     expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({ reasoning_effort: 'max', thinking: { type: 'enabled' } })
     expect(JSON.parse(fetchMock.mock.calls[2][1].body)).not.toHaveProperty('reasoning_effort')
+    expect(JSON.parse(fetchMock.mock.calls[3][1].body)).not.toHaveProperty('reasoning_effort')
+    expect(JSON.parse(fetchMock.mock.calls[3][1].body)).not.toHaveProperty('thinking')
   })
 
   it('aborts idle connections on timeout', async () => {

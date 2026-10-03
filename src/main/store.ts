@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { constants, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { Action, Attachment, Conversation, Message, ProviderProfile, ReasoningEffort, Snapshot, Theme, User } from '../shared/types'
-import { normalizeEffort, reasoningEfforts, strengthLevels, validateAttachments } from '../shared/context'
+import { modelEfforts, resolveEffort, selectedEffort, reasoningEfforts, validateAttachments } from '../shared/context'
 export { contextMessages } from '../shared/context'
 
 /** 校验并去除文本两端空白，供 Store 的用户名称、会话标题和问题输入共用。 */
@@ -22,6 +22,7 @@ export interface StoredUser extends User {
   activeProviderId: string | null
   selectedModel: string | null
   fastMode: boolean
+  /** 兼容旧的全局档位；启动时迁移到该账号当时选中的模型后移除此字段。 */
   reasoningEffort?: ReasoningEffort | null
 }
 
@@ -73,10 +74,11 @@ function validState(value: unknown): boolean {
         if (!Array.isArray(u.providers) || typeof u.fastMode !== 'boolean') return false
         if (u.reasoningEffort != null && !reasoningEfforts.includes(u.reasoningEffort)) return false
         if (u.providers.some(p => !p || ['id', 'name', 'baseUrl', 'encryptedApiKey'].some(key => typeof p[key as keyof typeof p] !== 'string') || !Array.isArray(p.availableModels) || p.availableModels.some(id => typeof id !== 'string' || !id.trim()))) return false
+        if (u.providers.some(p => p.selectedEfforts !== undefined && (!p.selectedEfforts || typeof p.selectedEfforts !== 'object' || Array.isArray(p.selectedEfforts) || Object.values(p.selectedEfforts).some(level => !reasoningEfforts.includes(level))))) return false
         if (new Set(u.providers.map(p => p.id)).size !== u.providers.length) return false
         for (const provider of u.providers) if (provider.modelDetails !== undefined) {
           if (!provider.modelDetails || typeof provider.modelDetails !== 'object' || Array.isArray(provider.modelDetails)) return false
-          if (Object.entries(provider.modelDetails).some(([id, detail]) => !provider.availableModels.includes(id) || !detail || typeof detail !== 'object' || (detail.contextWindow !== undefined && (!Number.isSafeInteger(detail.contextWindow) || detail.contextWindow <= 0)) || (detail.reasoningEfforts !== undefined && (!Array.isArray(detail.reasoningEfforts) || detail.reasoningEfforts.some(effort => !reasoningEfforts.includes(effort)))))) return false
+          if (Object.entries(provider.modelDetails).some(([id, detail]) => !provider.availableModels.includes(id) || !detail || typeof detail !== 'object' || (detail.contextWindow !== undefined && (!Number.isSafeInteger(detail.contextWindow) || detail.contextWindow <= 0)) || (detail.defaultEffort !== undefined && !reasoningEfforts.includes(detail.defaultEffort)) || (detail.reasoningEfforts !== undefined && (!Array.isArray(detail.reasoningEfforts) || detail.reasoningEfforts.some(effort => !reasoningEfforts.includes(effort)))))) return false
         }
         if (u.activeProviderId !== null && !u.providers.some(p => p.id === u.activeProviderId)) return false
         if (u.selectedModel !== null && (typeof u.selectedModel !== 'string' || !u.providers.some(p => p.id === u.activeProviderId && p.availableModels.includes(u.selectedModel!)))) return false
@@ -135,11 +137,30 @@ export class Store {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error('无法读取本地数据，请备份数据文件后检查格式。')
       this.state = { schemaVersion: 3, users: [], activeUserId: null, activeConversationId: null, conversations: [], session: null }
     }
-    for (const user of this.state.users) user.reasoningEffort = normalizeEffort(user.reasoningEffort)
+    // 旧全局偏好只迁移到当时选中的模型；其他模型独立采用服务默认值。
+    for (const user of this.state.users) {
+      const provider = user.providers.find(item => item.id === user.activeProviderId)
+      if (provider && user.selectedModel && user.reasoningEffort && !Object.hasOwn(provider.selectedEfforts || {}, user.selectedModel)) {
+        provider.selectedEfforts = { ...provider.selectedEfforts, [user.selectedModel]: user.reasoningEffort }
+      }
+      delete user.reasoningEffort
+      for (const profile of user.providers) this.reconcileEfforts(profile)
+    }
     for (const c of this.state.conversations) {
       for (const m of c.messages) if (m.status === 'streaming') m.status = 'stopped'
     }
     this.save()
+  }
+
+  /** 模型目录更新或旧状态迁移时修正失效档位；依赖共享规则，不修改其他模型和账号的选择。 */
+  reconcileEfforts(provider: ProviderProfile): void {
+    for (const [model, value] of Object.entries(provider.selectedEfforts || {})) {
+      const detail = provider.modelDetails?.[model]
+      if (detail?.reasoningEfforts === undefined) continue
+      const effort = resolveEffort(value, detail)
+      if (effort) provider.selectedEfforts![model] = effort
+      else delete provider.selectedEfforts![model]
+    }
   }
 
   /** 通过 Node 文件 API 先写入临时文件，再原子替换数据文件；失败时抛出保存错误。 */
@@ -204,7 +225,7 @@ export class Store {
       theme: user?.theme || 'light', legacyUsers: user ? [] : this.state.users.filter(u => !u.username).map(publicUser),
       providers: user?.providers.map(({ encryptedApiKey: _secret, ...profile }) => profile) || [],
       activeProviderId: user?.activeProviderId || null, selectedModel: user?.selectedModel || null, fastMode: user?.fastMode || false,
-      reasoningEffort: user ? normalizeEffort(user.reasoningEffort) : null,
+      reasoningEffort: selectedEffort(selected, user?.selectedModel || null),
       config: { baseUrl: selected?.baseUrl || '', model: user?.selectedModel || '', configured: Boolean(selected?.encryptedApiKey && selected.availableModels.includes(user?.selectedModel || '')) }
     })
   }
@@ -239,10 +260,13 @@ export class Store {
           if (typeof action.enabled !== 'boolean') throw new Error('无效快速模式状态。')
           currentUser.fastMode = action.enabled
           break
-        case 'reasoning-effort':
-          if (!strengthLevels.includes(action.effort as typeof strengthLevels[number])) throw new Error('模型强度无效，请选择 low / medium / high / max / ultra。')
-          currentUser.reasoningEffort = action.effort
+        case 'reasoning-effort': {
+          const provider = currentUser.providers.find(item => item.id === currentUser.activeProviderId)
+          const model = currentUser.selectedModel
+          if (!provider || !model || !action.effort || !modelEfforts(provider.modelDetails?.[model]).includes(action.effort)) throw new Error('该模型不支持此强度，请选择模型提供的档位。')
+          provider.selectedEfforts = { ...provider.selectedEfforts, [model]: action.effort }
           break
+        }
         case 'conversation:select':
           if (action.id !== null) this.conversation(action.id)
           this.state.activeConversationId = action.id

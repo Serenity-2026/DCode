@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { listModels } from '../../src/main/models'
 import { create, cleanup } from './helpers'
-import { normalizeEffort, resolveEffort, strengthLevels } from '../../src/shared/context'
+import { modelEfforts, resolveEffort, reasoningEfforts } from '../../src/shared/context'
 import { Store } from '../../src/main/store'
 
 const draft = { name: '自定义服务', baseUrl: 'https://another.example.com/v1', apiKey: 'new-private-key' }
@@ -44,24 +44,28 @@ it('deduplicates actual model IDs without inventing default models', async () =>
   expect((await listModels(draft)).ids).toEqual(['vendor/custom', 'another-model'])
 })
 
-it('reads verified metadata and maps five-level preferences without rejecting model switches', async () => {
+it('shows only actual model levels and sends selected levels without mapping', async () => {
   const { models, store } = await create()
   vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => Response.json({ data: [
-    { id: 'detailed', context_window: 1048576, effort: { supported_levels: ['low', 'high', 'max', 'invented', 'max'] } },
+    { id: 'detailed', context_window: 1048576, effort: { supported_levels: ['max', 'low', 'high', 'invented', 'max'], default_level: 'high' } },
     { id: 'plain', context_window: -2, effort: { supported_levels: [] } }
   ] })))
   const snapshot = await models.testAndSave(draft)
-  expect(snapshot.providers[1].modelDetails).toEqual({ detailed: { contextWindow: 1048576, reasoningEfforts: ['low', 'high', 'max'] }, plain: { reasoningEfforts: [] } })
-  store.apply({ type: 'reasoning-effort', effort: 'max' })
-  expect(await models.selected()).toMatchObject({ reasoningEffort: 'max' })
-  for (const [effort, wire] of [['low', 'low'], ['medium', 'high'], ['high', 'high'], ['max', 'max'], ['ultra', 'max']] as const) {
+  expect(snapshot.providers[1].modelDetails).toEqual({ detailed: { contextWindow: 1048576, reasoningEfforts: ['max', 'low', 'high'], defaultEffort: 'high' }, plain: { reasoningEfforts: [] } })
+  expect(modelEfforts(snapshot.providers[1].modelDetails?.detailed)).toEqual(['low', 'high', 'max'])
+  expect(store.snapshot().reasoningEffort).toBe('high')
+  for (const effort of ['low', 'high', 'max'] as const) {
     store.apply({ type: 'reasoning-effort', effort })
     expect(store.snapshot().reasoningEffort).toBe(effort)
-    expect((await models.selected()).reasoningEffort).toBe(wire)
+    expect((await models.selected()).reasoningEffort).toBe(effort)
   }
-  expect(() => store.apply({ type: 'reasoning-effort', effort: 'invented' as never })).toThrow('模型强度无效')
+  const before = structuredClone(store.state)
+  for (const effort of ['medium', 'ultra', 'invented', null] as const) {
+    expect(() => store.apply({ type: 'reasoning-effort', effort: effort as never })).toThrow('不支持此强度')
+    expect(store.state).toEqual(before)
+  }
   store.apply({ type: 'model:select', providerId: snapshot.activeProviderId!, model: 'plain' })
-  expect(store.snapshot().reasoningEffort).toBe('ultra')
+  expect(store.snapshot().reasoningEffort).toBeNull()
   expect((await models.selected()).reasoningEffort).toBeNull()
 })
 
@@ -139,21 +143,69 @@ it('reads window aliases, ignores invalid values and retains verified metadata w
   expect(store.snapshot().providers[1].modelDetails).toEqual(snapshot.providers[1].modelDetails)
 })
 
-it('migrates old preferences, restores five levels and resolves catalogs with native ultra', async () => {
+it('migrates the legacy preference only to its original model and preserves native levels', async () => {
   const { store, path } = await create()
-  for (const [old, expected] of [[null, 'medium'], ['minimal', 'low'], ['xhigh', 'max']] as const) {
+  const provider = store.requireUser().providers[0]
+  provider.availableModels = ['test', 'another']
+  provider.modelDetails = { test: { reasoningEfforts: ['low', 'high', 'max'], defaultEffort: 'high' }, another: { reasoningEfforts: [...reasoningEfforts], defaultEffort: 'minimal' } }
+  for (const [old, expected] of [[null, undefined], ['medium', 'high'], ['ultra', 'max']] as const) {
+    provider.selectedEfforts = undefined
     store.requireUser().reasoningEffort = old
     store.save()
     const restored = new Store(path)
-    expect(restored.state.users[0].reasoningEffort).toBe(expected)
-    expect(normalizeEffort(old)).toBe(expected)
+    expect(restored.state.users[0].reasoningEffort).toBeUndefined()
+    expect(restored.state.users[0].providers[0].selectedEfforts?.test).toBe(expected)
+    expect(restored.state.users[0].providers[0].selectedEfforts?.another).toBeUndefined()
   }
-  for (const effort of strengthLevels) {
-    store.apply({ type: 'reasoning-effort', effort })
-    expect(new Store(path).state.users[0].reasoningEffort).toBe(effort)
-    expect(resolveEffort(effort, { reasoningEfforts: [...strengthLevels] })).toBe(effort)
-  }
-  expect(resolveEffort('ultra')).toBe('max')
-  expect(resolveEffort('medium')).toBe('medium')
-  expect(resolveEffort('high', { reasoningEfforts: [] })).toBeNull()
+  for (const effort of reasoningEfforts) expect(resolveEffort(effort, { reasoningEfforts: [...reasoningEfforts] })).toBe(effort)
+  expect(resolveEffort(null, { reasoningEfforts: ['low', 'high', 'max'], defaultEffort: 'low' })).toBe('low')
+  expect(resolveEffort('ultra')).toBeNull()
+  expect(resolveEffort('medium', { reasoningEfforts: [] })).toBeNull()
+})
+
+it('keeps independent model and service choices, repairs changed catalogs and restores them on restart', async () => {
+  const { store, models, auth, path } = await create()
+  const catalog = () => Response.json({ data: [
+    { id: 'three', effort: { supported_levels: ['low', 'high', 'max'], default_level: 'high' } },
+    { id: 'five', effort: { supported_levels: ['low', 'medium', 'high', 'max', 'ultra'], default_level: 'medium' } },
+    { id: 'one', effort: { supported_levels: ['high'] } },
+    { id: 'unknown' }
+  ] })
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => catalog()))
+  const first = (await models.testAndSave(draft)).activeProviderId!
+  store.apply({ type: 'reasoning-effort', effort: 'max' })
+  store.apply({ type: 'model:select', providerId: first, model: 'five' })
+  expect(store.snapshot().reasoningEffort).toBe('medium')
+  store.apply({ type: 'reasoning-effort', effort: 'ultra' })
+  store.apply({ type: 'model:select', providerId: first, model: 'three' })
+  expect(store.snapshot().reasoningEffort).toBe('max')
+  const second = (await models.testAndSave({ ...draft, name: 'second' })).activeProviderId!
+  expect(store.snapshot().reasoningEffort).toBe('high')
+  store.apply({ type: 'reasoning-effort', effort: 'low' })
+  store.apply({ type: 'model:select', providerId: first, model: 'five' })
+  expect(store.snapshot().reasoningEffort).toBe('ultra')
+  await models.refresh()
+  expect(store.snapshot().reasoningEffort).toBe('ultra')
+  await models.testAndSave({ ...draft, id: first, apiKey: '' })
+  expect(store.snapshot().reasoningEffort).toBe('ultra')
+  const restored = new Store(path)
+  restored.authenticate(store.requireUser().id)
+  expect(restored.snapshot().reasoningEffort).toBe('ultra')
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => Response.json({ data: [
+    { id: 'three', effort: { supported_levels: ['low', 'high', 'max'] } },
+    { id: 'five', effort: { supported_levels: ['low', 'medium', 'high'] } },
+    { id: 'one', effort: { supported_levels: ['high'] } }, { id: 'unknown' }
+  ] })))
+  await models.refresh()
+  expect(store.snapshot().reasoningEffort).toBe('high')
+  expect(store.requireUser().providers.find(p => p.id === first)?.selectedEfforts?.five).toBe('high')
+  store.apply({ type: 'model:select', providerId: first, model: 'one' })
+  expect(store.snapshot().reasoningEffort).toBe('high')
+  store.apply({ type: 'model:select', providerId: first, model: 'unknown' })
+  expect((await models.selected()).reasoningEffort).toBeNull()
+  auth.logout()
+  await auth.register({ username: 'independent', password: 'another-password' })
+  expect(store.snapshot().providers).toEqual([])
+  expect(store.snapshot().reasoningEffort).toBeNull()
+  expect(store.state.users[0].providers.find(p => p.id === second)?.selectedEfforts?.three).toBe('low')
 })

@@ -41,11 +41,11 @@ export interface Conversation {
   messages: Message[]
 }
 
-/** 服务公开配置及实际获取的模型列表，模型 ID 只能来自服务的 /models 响应。 */
-export interface ProviderProfile { id: string; name: string; baseUrl: string; availableModels: string[]; modelDetails?: Record<string, ModelDetails> }
+/** 服务公开配置、实际模型列表及账号为各模型选中的档位，模型 ID 只能来自 /models 响应。 */
+export interface ProviderProfile { id: string; name: string; baseUrl: string; availableModels: string[]; modelDetails?: Record<string, ModelDetails>; selectedEfforts?: Record<string, ReasoningEffort> }
 
-/** 服务实际返回的上下文窗口和受支持强度，没有返回的字段保持未知。 */
-export interface ModelDetails { contextWindow?: number; reasoningEfforts?: ReasoningEffort[] }
+/** 服务实际返回的上下文窗口、受支持强度和默认档位，没有返回的字段保持未知。 */
+export interface ModelDetails { contextWindow?: number; reasoningEfforts?: ReasoningEffort[]; defaultEffort?: ReasoningEffort }
 
 /** 设置表单提交的配置；编辑时 apiKey 留空表示保留现有密钥。 */
 export interface ProviderDraft { id?: string; name: string; baseUrl: string; apiKey: string }

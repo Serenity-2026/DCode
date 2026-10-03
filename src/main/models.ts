@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { ModelDetails, ModelRefresh, ProviderDraft, ReasoningEffort, Snapshot } from '../shared/types'
-import { resolveEffort, reasoningEfforts } from '../shared/context'
+import { selectedEffort, reasoningEfforts } from '../shared/context'
 import { validateBaseUrl, type ModelConfig, type ProviderConfig } from './config'
 import type { SecretCodec } from './secrets'
 import { Store, textInput, type StoredUser } from './store'
@@ -28,6 +28,7 @@ export async function listModels(config: ProviderConfig): Promise<{ ids: string[
       const window = [item.context_window, item.context_length, item.top_provider?.context_length].find(value => Number.isSafeInteger(value) && value > 0)
       if (window !== undefined) detail.contextWindow = window
       if (Array.isArray(item.effort?.supported_levels)) detail.reasoningEfforts = [...new Set<ReasoningEffort>(item.effort.supported_levels.filter((level: unknown) => reasoningEfforts.includes(level as ReasoningEffort)))]
+      if (detail.reasoningEfforts?.includes(item.effort?.default_level)) detail.defaultEffort = item.effort.default_level
       return [item.id, detail]
     }))
     return { ids, details }
@@ -55,7 +56,7 @@ export class Models {
     const user = this.store.requireUser()
     const provider = user.providers.find(p => p.id === user.activeProviderId)
     if (!provider || !user.selectedModel || !provider.availableModels.includes(user.selectedModel)) throw new Error('请先配置服务并选择可用模型。')
-    return { baseUrl: provider.baseUrl, model: user.selectedModel, fastMode: user.fastMode, reasoningEffort: resolveEffort(user.reasoningEffort, provider.modelDetails?.[user.selectedModel]), apiKey: await this.secrets.decrypt(provider.encryptedApiKey) }
+    return { baseUrl: provider.baseUrl, model: user.selectedModel, fastMode: user.fastMode, reasoningEffort: selectedEffort(provider, user.selectedModel), apiKey: await this.secrets.decrypt(provider.encryptedApiKey) }
   }
 
   /** 获取当前账号各服务的列表；失败服务保留缓存，失效的模型选择改为返回列表的第一项。 */
@@ -69,7 +70,11 @@ export class Models {
     }))
     if (results.some(r => r.catalog)) this.store.transaction(() => {
       if (this.store.requireUser().id !== user.id) throw new Error('登录状态已变化，请重试。')
-      for (const result of results) if (result.catalog) { result.provider.availableModels = result.catalog.ids; result.provider.modelDetails = Object.fromEntries(result.catalog.ids.map(id => [id, { ...result.provider.modelDetails?.[id], ...result.catalog!.details[id] }])) }
+      for (const result of results) if (result.catalog) {
+        result.provider.availableModels = result.catalog.ids
+        result.provider.modelDetails = Object.fromEntries(result.catalog.ids.map(id => [id, { ...result.provider.modelDetails?.[id], ...result.catalog!.details[id] }]))
+        this.store.reconcileEfforts(result.provider)
+      }
       const selected = user.providers.find(p => p.id === user.activeProviderId)
       if (selected && !selected.availableModels.includes(user.selectedModel || '')) user.selectedModel = selected.availableModels[0] || null
     })
@@ -94,7 +99,8 @@ export class Models {
       throw new Error(`连通测试未通过：${detail}`)
     }
     const { ids: availableModels, details: modelDetails } = catalog
-    const profile = { id: existing?.id || randomUUID(), name, baseUrl, availableModels, modelDetails, encryptedApiKey: await this.secrets.encrypt(apiKey) }
+    const profile = { id: existing?.id || randomUUID(), name, baseUrl, availableModels, modelDetails, selectedEfforts: { ...existing?.selectedEfforts }, encryptedApiKey: await this.secrets.encrypt(apiKey) }
+    this.store.reconcileEfforts(profile)
     this.store.transaction(() => {
       if (this.store.requireUser().id !== user.id) throw new Error('登录状态已变化，请重试。')
       if (existing) user.providers = user.providers.map(p => p.id === profile.id ? profile : p)

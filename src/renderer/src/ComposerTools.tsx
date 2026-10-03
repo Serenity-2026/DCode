@@ -12,7 +12,8 @@ export function ComposerTools({ snapshot, busy, modelsLoading, usedTokens, onAdd
   onEffort: (effort: ReasoningEffort | null) => Promise<boolean>; sendButton: ReactNode
 }): ReactNode {
   const provider = snapshot.providers.find(item => item.id === snapshot.activeProviderId)
-  const contextWindow = snapshot.selectedModel ? provider?.modelDetails?.[snapshot.selectedModel]?.contextWindow : undefined
+  const detail = snapshot.selectedModel ? provider?.modelDetails?.[snapshot.selectedModel] : undefined
+  const contextWindow = detail?.contextWindow
   const percent = contextWindow ? Math.min(100, usedTokens / contextWindow * 100) : undefined
   const choices = snapshot.providers.flatMap(item => item.availableModels.map(model => ({ key: JSON.stringify([item.id, model]), providerId: item.id, model })))
 
@@ -49,7 +50,7 @@ export function ComposerTools({ snapshot, busy, modelsLoading, usedTokens, onAdd
       <Tooltip title={`${snapshot.fastMode ? '关闭' : '开启'}快速模式 · 仅对支持加速的模型生效`}>
         <Button className="speed-button" style={snapshot.fastMode ? { color: '#1677ff' } : undefined} type="text" disabled={busy} icon={snapshot.fastMode ? <ThunderboltFilled /> : <ThunderboltOutlined />} aria-label="快速模式" aria-pressed={snapshot.fastMode} onClick={onFastMode} />
       </Tooltip>
-      <EffortControl value={snapshot.reasoningEffort} detail={snapshot.selectedModel ? provider?.modelDetails?.[snapshot.selectedModel] : undefined} theme={snapshot.theme} disabled={busy || !snapshot.config.configured} onSave={onEffort} />
+      <EffortControl key={JSON.stringify([snapshot.activeProviderId, snapshot.selectedModel])} value={snapshot.reasoningEffort} detail={detail} theme={snapshot.theme} disabled={busy || !snapshot.config.configured} onSave={onEffort} />
       {sendButton}
     </div>
   </div>

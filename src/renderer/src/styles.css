@@ -129,11 +129,10 @@ button { -webkit-app-region: no-drag; }
 .strength-ticks { display: flex; justify-content: space-between; margin-top: 8px; pointer-events: none; }
 .strength-ticks span { width: 3px; height: 3px; border-radius: 50%; background: var(--strength-muted); opacity: .5; }
 .strength-levels { display: flex; position: relative; isolation: isolate; background: var(--strength-pill); border-radius: 999px; padding: 3px; }
-.strength-selection { position: absolute; z-index: -1; top: 3px; bottom: 3px; left: 3px; width: calc((100% - 6px) / 5); border-radius: 999px; background: var(--strength-bg); box-shadow: 0 1px 4px #00000012; transform: translateX(var(--strength-position)); transition: transform 180ms cubic-bezier(.22, 1, .36, 1); }
+.strength-selection { position: absolute; z-index: -1; top: 3px; bottom: 3px; left: 3px; width: calc((100% - 6px) / var(--strength-count)); border-radius: 999px; background: var(--strength-bg); box-shadow: 0 1px 4px #00000012; transform: translateX(var(--strength-position)); transition: transform 180ms cubic-bezier(.22, 1, .36, 1); }
 .strength-level { flex: 1; min-width: 0; height: 26px !important; padding: 0 !important; font-size: 10px !important; border-radius: 999px !important; font-family: ui-monospace, SFMono-Regular, monospace !important; color: var(--strength-muted) !important; }
 .strength-level[aria-pressed='true'] { color: var(--strength-text) !important; }
 .strength-level:hover { background: transparent !important; color: var(--strength-text) !important; }
-.strength-request { color: var(--strength-muted); font-size: 10px; text-align: right; margin: 10px 3px 0; }
 .strength-panel[data-dragging='true'] .strength-track, .strength-panel[data-dragging='true'] .strength-handle, .strength-panel[data-dragging='true'] .strength-selection { transition: none !important; }
 .send-button { width: 31px; height: 31px; border-radius: 9px; margin-left: 5px; }
 .footer-note { max-width: 730px; margin: 11px auto 0; display: flex; justify-content: space-between; color: var(--muted); font-size: 9px; letter-spacing: .4px; }

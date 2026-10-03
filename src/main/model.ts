@@ -85,7 +85,7 @@ export async function streamModel(
       headers: { Authorization: `Bearer ${config.apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: config.model, messages, stream: true, max_tokens: options.maxTokens || 8192,
-        ...(deepseek ? { thinking: { type: config.reasoningEffort ? 'enabled' : 'disabled' } } : config.fastMode ? { service_tier: 'priority' } : {}),
+        ...(deepseek && config.reasoningEffort ? { thinking: { type: 'enabled' } } : !deepseek && config.fastMode ? { service_tier: 'priority' } : {}),
         ...(config.reasoningEffort ? { reasoning_effort: config.reasoningEffort } : {})
       }),
       signal: controller.signal
