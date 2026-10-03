@@ -1,0 +1,94 @@
+import type { ModelConfig } from './config'
+
+export interface Delta { content?: string; reasoning?: string }
+
+export async function consumeSSE(body: ReadableStream<Uint8Array>, onDelta: (delta: Delta) => void): Promise<void> {
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let complete = false
+  let finish: string | null = null
+  const frame = (value: string): void => {
+    const data = value.split('\n').filter(line => line.startsWith('data:')).map(line => line.slice(5).trimStart()).join('\n')
+    if (!data) return
+    if (data.trim() === '[DONE]') { complete = true; return }
+    let chunk: { error?: unknown; choices?: { delta?: { content?: string; reasoning_content?: string }; finish_reason?: string | null }[] }
+    try { chunk = JSON.parse(data) } catch { throw new Error('模型返回了无法解析的数据，请重试。') }
+    if (chunk.error) throw new Error('模型服务返回错误，请重试。')
+    const choice = chunk.choices?.[0]
+    if (choice?.delta) {
+      onDelta({ content: choice.delta.content || '', reasoning: choice.delta.reasoning_content || '' })
+    }
+    if (choice?.finish_reason) finish = choice.finish_reason
+  }
+  try {
+    while (!complete) {
+      const { value, done } = await reader.read()
+      buffer += done ? decoder.decode() : decoder.decode(value, { stream: true })
+      buffer = buffer.replace(/\r\n/g, '\n')
+      let boundary: number
+      while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+        frame(buffer.slice(0, boundary))
+        buffer = buffer.slice(boundary + 2)
+        if (complete) break
+      }
+      if (done) {
+        if (buffer.trim()) frame(buffer)
+        break
+      }
+    }
+    if (!complete) throw new Error('连接中断，回复尚未完成。请重试。')
+    if (finish === 'length') throw new Error('回复达到长度上限，内容已保留。')
+    if (finish === 'content_filter') throw new Error('回复被服务过滤，内容已保留。')
+    if (finish && finish !== 'stop') throw new Error('模型未返回完整文本回复，请重试。')
+  } finally {
+    await reader.cancel().catch(() => undefined)
+    reader.releaseLock()
+  }
+}
+
+export async function streamModel(
+  config: ModelConfig,
+  messages: { role: string; content: string }[],
+  controller: AbortController,
+  onDelta: (delta: Delta) => void
+): Promise<void> {
+  if (!config.apiKey) throw new Error('请在环境变量中配置 DEEPSEEK_API_KEY，然后重启应用。')
+  let timedOut = false
+  let timer: ReturnType<typeof setTimeout>
+  const resetTimeout = (): void => {
+    clearTimeout(timer)
+    timer = setTimeout(() => { timedOut = true; controller.abort() }, 60_000)
+  }
+  resetTimeout()
+  try {
+    const response = await fetch(`${config.baseUrl}/chat/completions`, {
+      method: 'POST',
+      redirect: 'error',
+      headers: { Authorization: `Bearer ${config.apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: config.model, messages, stream: true, thinking: { type: 'disabled' }, max_tokens: 8192 }),
+      signal: controller.signal
+    })
+    if (!response.ok) {
+      const errors: Record<number, string> = {
+        400: '请求参数或模型不受支持，请检查模型配置。',
+        401: 'API 密钥无效，请检查环境变量。',
+        402: '模型账户余额不足，请充值后重试。',
+        403: '无权访问该模型，请检查账户权限。',
+        404: '模型服务地址或模型不存在。',
+        429: '请求过于频繁，请稍后重试。'
+      }
+      await response.body?.cancel()
+      throw new Error(errors[response.status] || `模型服务暂不可用（${response.status}），请稍后重试。`)
+    }
+    if (!response.body) throw new Error('模型服务没有返回响应内容。')
+    await consumeSSE(response.body, delta => { resetTimeout(); onDelta(delta) })
+  } catch (error) {
+    if (timedOut) throw new Error('模型响应超时，请重试。')
+    if (controller.signal.aborted) throw error
+    if (error instanceof TypeError) throw new Error('无法连接模型服务，请检查网络后重试。')
+    throw error
+  } finally {
+    clearTimeout(timer!)
+  }
+}

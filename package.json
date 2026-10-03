@@ -1,0 +1,48 @@
+{
+  "name": "dcode",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DCode desktop coding conversations",
+  "main": "out/main/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "npm run build && playwright test",
+    "build": "npm run typecheck && electron-vite build",
+    "pack": "npm run build && electron-builder --dir"
+  },
+  "dependencies": {
+    "@ant-design/icons": "^6.3.4",
+    "antd": "^6.6.5",
+    "dotenv": "^17.2.3",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@ant-design/cli": "^6.6.5",
+    "@playwright/test": "^1.56.0",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "electron": "^44.5.1",
+    "electron-builder": "^26.0.12",
+    "electron-vite": "^5.0.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.0.0",
+    "vitest": "^4.0.0"
+  },
+  "build": {
+    "appId": "com.serenity.dcode",
+    "productName": "DCode",
+    "directories": { "output": "release" },
+    "files": ["out/**/*", "package.json"],
+    "asar": true,
+    "mac": { "category": "public.app-category.developer-tools" }
+  }
+}
