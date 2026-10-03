@@ -6,6 +6,7 @@ export const channels = {
   logout: 'dcode:logout',
   saveProvider: 'dcode:save-provider',
   refreshModels: 'dcode:refresh-models',
+  selectAttachments: 'dcode:select-attachments',
   action: 'dcode:action',
   send: 'dcode:send',
   stop: 'dcode:stop',

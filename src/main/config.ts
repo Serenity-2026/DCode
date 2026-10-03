@@ -1,5 +1,6 @@
 import { config } from 'dotenv'
 import { join } from 'node:path'
+import type { ReasoningEffort } from '../shared/types'
 
 /** 主进程服务凭据，由 loadConfig/Models 读取；密钥不传入 renderer。 */
 export interface ProviderConfig {
@@ -11,6 +12,7 @@ export interface ProviderConfig {
 export interface ModelConfig extends ProviderConfig {
   model: string
   fastMode?: boolean
+  reasoningEffort?: ReasoningEffort | null
 }
 
 /** 校验并规范化模型服务地址，供环境导入与用户填写的配置共用，不允许携带认证或查询信息。 */

@@ -3,6 +3,18 @@ export type Theme = 'light' | 'dark'
 /** Chat 维护的回复状态，Store 会将上次遗留的生成标记为停止。 */
 export type MessageStatus = 'streaming' | 'complete' | 'stopped' | 'error'
 
+/** Models 从服务元数据确认的推理档位，Store 保存账号选择，streamModel 发送实际参数。 */
+export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
+/** 系统选择器读取的文本快照，由 Chat 随消息保存，界面只展示名称与文件数。 */
+export interface Attachment { id: string; name: string; kind: 'file' | 'folder'; fileCount: number; content: string }
+
+/** 附件选择结果，提示被跳过的文件，不静默把非文本文件当成已添加。 */
+export interface AttachmentSelection { attachments: Attachment[]; skipped: number }
+
+/** Chat 的发送输入，重试复用已保存的附件，不能通过此接口要求读取本机路径。 */
+export interface SendInput { content: string; retry?: boolean; attachments?: Attachment[] }
+
 /** 公开账号信息，不包含密码哈希、会话令牌或模型密钥。 */
 export interface User { id: string; name: string; username?: string; createdAt: string }
 
@@ -15,6 +27,7 @@ export interface Message {
   status: MessageStatus
   error?: string
   createdAt: string
+  attachments?: Attachment[]
 }
 
 /** 属于一个账号的完整对话，Store 持久化，Chat 构建模型上下文。 */
@@ -29,7 +42,10 @@ export interface Conversation {
 }
 
 /** 服务公开配置及实际获取的模型列表，模型 ID 只能来自服务的 /models 响应。 */
-export interface ProviderProfile { id: string; name: string; baseUrl: string; availableModels: string[] }
+export interface ProviderProfile { id: string; name: string; baseUrl: string; availableModels: string[]; modelDetails?: Record<string, ModelDetails> }
+
+/** 服务实际返回的上下文窗口和受支持强度，没有返回的字段保持未知。 */
+export interface ModelDetails { contextWindow?: number; reasoningEfforts?: ReasoningEffort[] }
 
 /** 设置表单提交的配置；编辑时 apiKey 留空表示保留现有密钥。 */
 export interface ProviderDraft { id?: string; name: string; baseUrl: string; apiKey: string }
@@ -46,6 +62,7 @@ export interface Snapshot {
   activeProviderId: string | null
   selectedModel: string | null
   fastMode: boolean
+  reasoningEffort: ReasoningEffort | null
   config: { baseUrl: string; model: string; configured: boolean }
 }
 
@@ -63,6 +80,7 @@ export type Action =
   | { type: 'conversation:delete'; id: string }
   | { type: 'model:select'; providerId: string; model: string }
   | { type: 'fast-mode'; enabled: boolean }
+  | { type: 'reasoning-effort'; effort: ReasoningEffort | null }
   | { type: 'theme'; theme: Theme }
 
 /** 流更新携带完整消息，Workspace 按 ID 替换对应回复。 */
@@ -88,7 +106,9 @@ export interface DCodeAPI {
   /** 修改当前账号的资料、会话、模型选择或主题。 */
   action(action: Action): Promise<Result<Snapshot>>
   /** 使用当前账号选中的模型生成回复。 */
-  send(input: { content: string; retry?: boolean }): Promise<Result<Snapshot>>
+  send(input: SendInput): Promise<Result<Snapshot>>
+  /** 打开系统文件或目录选择器，只读取用户主动选择的文本附件。 */
+  selectAttachments(kind: 'file' | 'folder'): Promise<Result<AttachmentSelection>>
   /** 停止生成并等待结果保存。 */
   stop(): Promise<Result<Snapshot>>
   /** 订阅消息更新，返回退订函数。 */

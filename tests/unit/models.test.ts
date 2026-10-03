@@ -39,7 +39,22 @@ it('retains the old service and selection on HTTP, malformed and empty model lis
 
 it('deduplicates actual model IDs without inventing default models', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response(['vendor/custom', 'vendor/custom', 'another-model'])))
-  expect(await listModels(draft)).toEqual(['vendor/custom', 'another-model'])
+  expect((await listModels(draft)).ids).toEqual(['vendor/custom', 'another-model'])
+})
+
+it('reads verified context and effort metadata and resets unsupported strength on model switches', async () => {
+  const { models, store } = await create()
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => Response.json({ data: [
+    { id: 'detailed', context_window: 1048576, effort: { supported_levels: ['low', 'high', 'max', 'invented', 'max'] } },
+    { id: 'plain', context_window: -2, effort: { supported_levels: [] } }
+  ] })))
+  const snapshot = await models.testAndSave(draft)
+  expect(snapshot.providers[1].modelDetails).toEqual({ detailed: { contextWindow: 1048576, reasoningEfforts: ['low', 'high', 'max'] }, plain: { reasoningEfforts: [] } })
+  store.apply({ type: 'reasoning-effort', effort: 'max' })
+  expect(await models.selected()).toMatchObject({ reasoningEffort: 'max' })
+  expect(() => store.apply({ type: 'reasoning-effort', effort: 'medium' })).toThrow('不支持此强度')
+  store.apply({ type: 'model:select', providerId: snapshot.activeProviderId!, model: 'plain' })
+  expect(store.snapshot().reasoningEffort).toBeNull()
 })
 
 it('times out model discovery and leaves the original service unchanged', async () => {

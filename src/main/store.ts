@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { constants, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import type { Action, Conversation, Message, ProviderProfile, Snapshot, Theme, User } from '../shared/types'
+import type { Action, Attachment, Conversation, Message, ProviderProfile, ReasoningEffort, Snapshot, Theme, User } from '../shared/types'
+import { modelEfforts, reasoningEfforts, validateAttachments } from '../shared/context'
+export { contextMessages } from '../shared/context'
 
 /** 校验并去除文本两端空白，供 Store 的用户名称、会话标题和问题输入共用。 */
 export function textInput(value: unknown, max: number): string {
@@ -20,6 +22,7 @@ export interface StoredUser extends User {
   activeProviderId: string | null
   selectedModel: string | null
   fastMode: boolean
+  reasoningEffort?: ReasoningEffort | null
 }
 
 /** 保持登录的令牌只以 OS 加密密文保存，Auth 在启动时解密并核对哈希。 */
@@ -68,8 +71,13 @@ function validState(value: unknown): boolean {
         if (new Set(old.models.map(m => m.id)).size !== old.models.length || (old.activeModelId !== null && !old.models.some(m => m.id === old.activeModelId))) return false
       } else {
         if (!Array.isArray(u.providers) || typeof u.fastMode !== 'boolean') return false
+        if (u.reasoningEffort != null && !reasoningEfforts.includes(u.reasoningEffort)) return false
         if (u.providers.some(p => !p || ['id', 'name', 'baseUrl', 'encryptedApiKey'].some(key => typeof p[key as keyof typeof p] !== 'string') || !Array.isArray(p.availableModels) || p.availableModels.some(id => typeof id !== 'string' || !id.trim()))) return false
         if (new Set(u.providers.map(p => p.id)).size !== u.providers.length) return false
+        for (const provider of u.providers) if (provider.modelDetails !== undefined) {
+          if (!provider.modelDetails || typeof provider.modelDetails !== 'object' || Array.isArray(provider.modelDetails)) return false
+          if (Object.entries(provider.modelDetails).some(([id, detail]) => !provider.availableModels.includes(id) || !detail || typeof detail !== 'object' || (detail.contextWindow !== undefined && (!Number.isSafeInteger(detail.contextWindow) || detail.contextWindow <= 0)) || (detail.reasoningEfforts !== undefined && (!Array.isArray(detail.reasoningEfforts) || detail.reasoningEfforts.some(effort => !reasoningEfforts.includes(effort)))))) return false
+        }
         if (u.activeProviderId !== null && !u.providers.some(p => p.id === u.activeProviderId)) return false
         if (u.selectedModel !== null && (typeof u.selectedModel !== 'string' || !u.providers.some(p => p.id === u.activeProviderId && p.availableModels.includes(u.selectedModel!)))) return false
       }
@@ -81,6 +89,7 @@ function validState(value: unknown): boolean {
     conversationIds.add(c.id)
     if (c.messages.some(m => !m || typeof m.id !== 'string' || !['user', 'assistant'].includes(m.role) || typeof m.content !== 'string' || typeof m.reasoning !== 'string' || !['complete', 'streaming', 'stopped', 'error'].includes(m.status) || typeof m.createdAt !== 'string' || (m.error !== undefined && typeof m.error !== 'string'))) return false
     if (new Set(c.messages.map(m => m.id)).size !== c.messages.length) return false
+    try { for (const message of c.messages) validateAttachments(message.attachments) } catch { return false }
   }
   if (state.activeUserId !== null && !ids.has(state.activeUserId)) return false
   if (state.activeConversationId !== null && !state.conversations.some(c => c.id === state.activeConversationId && c.userId === state.activeUserId)) return false
@@ -194,6 +203,7 @@ export class Store {
       theme: user?.theme || 'light', legacyUsers: user ? [] : this.state.users.filter(u => !u.username).map(publicUser),
       providers: user?.providers.map(({ encryptedApiKey: _secret, ...profile }) => profile) || [],
       activeProviderId: user?.activeProviderId || null, selectedModel: user?.selectedModel || null, fastMode: user?.fastMode || false,
+      reasoningEffort: user?.reasoningEffort || null,
       config: { baseUrl: selected?.baseUrl || '', model: user?.selectedModel || '', configured: Boolean(selected?.encryptedApiKey && selected.availableModels.includes(user?.selectedModel || '')) }
     })
   }
@@ -223,10 +233,15 @@ export class Store {
           if (!currentUser.providers.some(p => p.id === action.providerId && p.availableModels.includes(action.model))) throw new Error('模型不存在或不属于当前账号。')
           currentUser.activeProviderId = action.providerId
           currentUser.selectedModel = action.model
+          if (currentUser.reasoningEffort && !modelEfforts(currentUser.providers.find(p => p.id === action.providerId), action.model).includes(currentUser.reasoningEffort)) currentUser.reasoningEffort = null
           break
         case 'fast-mode':
           if (typeof action.enabled !== 'boolean') throw new Error('无效快速模式状态。')
           currentUser.fastMode = action.enabled
+          break
+        case 'reasoning-effort':
+          if (action.effort !== null && (!reasoningEfforts.includes(action.effort) || !modelEfforts(currentUser.providers.find(p => p.id === currentUser.activeProviderId), currentUser.selectedModel).includes(action.effort))) throw new Error('该模型不支持此强度，请选择其他档位。')
+          currentUser.reasoningEffort = action.effort
           break
         case 'conversation:select':
           if (action.id !== null) this.conversation(action.id)
@@ -250,25 +265,26 @@ export class Store {
   }
 
   /**
-   * 为 Chat.send 准备一次生成：必要时新建会话，保存问题并添加 streaming 回复占位。
+   * 为 Chat.send 准备一次生成：校验附件快照，必要时新建会话，保存问题并添加 streaming 回复占位。
    * 重试时只替换最后的 assistant 消息；返回仓库内对象的引用，供 Chat 持续追加文本。
    */
-  begin(content: unknown, retry: boolean, model: string): { conversation: Conversation; message: Message } {
+  begin(content: unknown, retry: boolean, model: string, inputAttachments?: Attachment[]): { conversation: Conversation; message: Message } {
     const user = this.requireUser()
+    const attachments = retry ? [] : validateAttachments(inputAttachments)
     return this.transaction(() => {
       let c = this.state.activeConversationId ? this.conversation(this.state.activeConversationId) : undefined
       if (retry) {
         if (!c || c.messages.at(-1)?.role !== 'assistant' || c.messages.at(-2)?.role !== 'user') throw new Error('没有可重新生成的回复。')
         c.messages.pop()
       } else {
-        const text = textInput(content, 32_000)
+        const text = attachments.length && content === '' ? '' : textInput(content, 32_000)
         if (!c) {
           const now = new Date().toISOString()
-          c = { id: randomUUID(), userId: user.id, title: text.replace(/\s+/g, ' ').slice(0, 32), model, createdAt: now, updatedAt: now, messages: [] }
+          c = { id: randomUUID(), userId: user.id, title: (text || attachments[0].name).replace(/\s+/g, ' ').slice(0, 32), model, createdAt: now, updatedAt: now, messages: [] }
           this.state.conversations.push(c)
           this.state.activeConversationId = c.id
         }
-        c.messages.push({ id: randomUUID(), role: 'user', content: text, reasoning: '', status: 'complete', createdAt: new Date().toISOString() })
+        c.messages.push({ id: randomUUID(), role: 'user', content: text, reasoning: '', status: 'complete', createdAt: new Date().toISOString(), ...(attachments.length ? { attachments: structuredClone(attachments) } : {}) })
       }
       c!.model = model
       c!.updatedAt = new Date().toISOString()
@@ -277,23 +293,4 @@ export class Store {
       return { conversation: c!, message }
     })
   }
-}
-
-/**
- * 将 Conversation 转成模型请求上下文，供 Chat.send 传给 streamModel。
- * 保留已完整回答的历史轮次与本次待回答的问题，排除失败或停止的历史轮次。
- */
-export function contextMessages(conversation: Conversation): { role: 'system' | 'user' | 'assistant'; content: string }[] {
-  const result: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
-    { role: 'system', content: '你是 DCode，一位严谨、简洁的编程助手。使用用户的语言回答，代码使用带语言标记的 Markdown 代码块。不要声称已经执行代码或访问文件。' }
-  ]
-  for (let i = 0; i < conversation.messages.length; i += 2) {
-    const user = conversation.messages[i]
-    const assistant = conversation.messages[i + 1]
-    if (!user || user.role !== 'user') continue
-    if (assistant?.status === 'complete' && assistant.content) {
-      result.push({ role: 'user', content: user.content }, { role: 'assistant', content: assistant.content })
-    } else if (i === conversation.messages.length - 2) result.push({ role: 'user', content: user.content })
-  }
-  return result
 }

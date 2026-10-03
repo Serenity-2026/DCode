@@ -1,4 +1,4 @@
-import type { Snapshot, StreamEvent } from '../shared/types'
+import type { SendInput, Snapshot, StreamEvent } from '../shared/types'
 import type { ModelConfig } from './config'
 import { streamModel } from './model'
 import { contextMessages, Store } from './store'
@@ -21,12 +21,12 @@ export class Chat {
    * 通过 Store.begin 保存问题与回复占位，启动 streamModel 后立即返回界面快照。
    * 后续文本通过 emit 推送；结束、失败或停止时保存最终状态。retry 会替换最后一条回复。
    */
-  send(input: { content: string; retry?: boolean }, config: ModelConfig): Snapshot {
+  send(input: SendInput, config: ModelConfig): Snapshot {
     this.store.requireUser()
     if (this.busy) throw new Error('请先停止当前生成。')
     if (!input || typeof input !== 'object' || (input.retry !== undefined && typeof input.retry !== 'boolean')) throw new Error('无效请求。')
     if (!config.apiKey) throw new Error('请先配置模型 API 密钥。')
-    const { conversation, message } = this.store.begin(input.content, Boolean(input.retry), config.model)
+    const { conversation, message } = this.store.begin(input.content, Boolean(input.retry), config.model, input.attachments)
     const controller = new AbortController()
     // 延迟到 invoke 响应之后发事件，同时允许 stop 在请求开始前取消。
     const done = new Promise<void>(resolve => setImmediate(resolve)).then(async () => {

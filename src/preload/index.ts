@@ -24,6 +24,8 @@ const api: DCodeAPI = {
   action: (action) => ipcRenderer.invoke(channels.action, action),
   /** 请求主进程的 Chat.send 开始或重试生成，返回初始快照。 */
   send: (input) => ipcRenderer.invoke(channels.send, input),
+  /** 由主进程打开系统选择器并读取已选择的文本，不提供通用文件系统权限。 */
+  selectAttachments: (kind) => ipcRenderer.invoke(channels.selectAttachments, kind),
   /** 请求 Chat.stop 取消生成，等待主进程保存后获取最终快照。 */
   stop: () => ipcRenderer.invoke(channels.stop),
   /** 将链接交给主进程校验，再由 Electron shell 打开系统浏览器。 */

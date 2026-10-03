@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { Alert, App as AntApp, Button, ConfigProvider, Dropdown, Input, Modal, Tooltip, theme } from 'antd'
+import { Alert, App as AntApp, Button, ConfigProvider, Dropdown, Input, Modal, theme } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import {
   ArrowUpOutlined, PlusOutlined, SearchOutlined, MessageOutlined, MoreOutlined,
   SettingOutlined, CodeOutlined, BugOutlined, BranchesOutlined, CopyOutlined,
   ReloadOutlined, StopOutlined, DeleteOutlined, EditOutlined, LogoutOutlined,
-  DownOutlined, RightOutlined, ThunderboltOutlined, ThunderboltFilled
+  DownOutlined, RightOutlined
 } from '@ant-design/icons'
-import type { Action, Message, ModelRefresh, Result, Snapshot, StreamEvent } from '../../shared/types'
+import type { Action, Attachment, Message, ModelRefresh, Result, Snapshot, StreamEvent } from '../../shared/types'
+import { estimateContext, validateAttachments } from '../../shared/context'
 import { Markdown } from './Markdown'
 import { AuthScreen } from './AuthScreen'
 import { ModelSettings } from './ModelSettings'
+import { ComposerTools } from './ComposerTools'
+import { AttachmentList } from './AttachmentList'
 
 /** 绘制品牌图形，供 Workspace 的侧栏、欢迎页与 assistant 消息共用，不依赖业务类。 */
 function Mark(): ReactNode {
@@ -50,6 +53,7 @@ export default function Root(): ReactNode {
 function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot: React.Dispatch<React.SetStateAction<Snapshot | null>> }): ReactNode {
   const { message: toast, modal } = AntApp.useApp()
   const [draft, setDraft] = useState('')
+  const [attachments, setAttachments] = useState<Attachment[]>([])
   const [search, setSearch] = useState('')
   const [pending, setPending] = useState(false)
   const [stopping, setStopping] = useState(false)
@@ -133,12 +137,26 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
       streamEvents.current.clear()
       installSnapshot(result.value)
       if (['conversation:select', 'conversation:delete'].includes(action.type)) {
-        setDraft(''); follow.current = true
+        setDraft(''); setAttachments([]); follow.current = true
       }
       return true
     } catch { void toast.error('操作失败，请重试。'); return false }
     finally { inFlight.current = false; setPending(false) }
   }, [installSnapshot, toast])
+
+  /** 打开 preload 附件选择器并合并文本快照，校验总量后显示标签；取消或失败不影响草稿。 */
+  async function addAttachments(kind: 'file' | 'folder'): Promise<void> {
+    if (busy || inFlight.current) return
+    inFlight.current = true; setPending(true)
+    try {
+      const result = await window.dcode.selectAttachments(kind)
+      if (!result.ok) { void toast.error(result.error); return }
+      const next = validateAttachments([...attachments, ...result.value.attachments])
+      setAttachments(next)
+      if (result.value.skipped) void toast.warning(`已跳过 ${result.value.skipped} 项非文本、隐藏或忽略项。`)
+    } catch (error) { void toast.error(error instanceof Error ? error.message : '添加附件失败，请重试。') }
+    finally { inFlight.current = false; setPending(false); composer.current?.focus() }
+  }
 
   useEffect(() => {
     /** 处理 Cmd/Ctrl+N：生成结束后通过 act 切换到新对话，并聚焦输入框。 */
@@ -157,14 +175,14 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
    * 通过 installSnapshot 合并初始消息与流事件；发送成功才清空草稿，失败则保留输入。
    */
   async function send(retry = false): Promise<void> {
-    if (busy || inFlight.current || (!retry && !draft.trim())) return
+    if (busy || inFlight.current || (!retry && !draft.trim() && !attachments.length)) return
     inFlight.current = true
     setPending(true)
     follow.current = true
     streamEvents.current.clear()
     try {
-      const result = await window.dcode.send({ content: draft, retry })
-      if (result.ok) { installSnapshot(result.value); if (!retry) setDraft('') }
+      const result = await window.dcode.send({ content: draft.trim(), retry, ...(retry ? {} : { attachments }) })
+      if (result.ok) { installSnapshot(result.value); if (!retry) { setDraft(''); setAttachments([]) } }
       else void toast.error(result.error)
     } catch { void toast.error('发送失败，请重试。') }
     finally { inFlight.current = false; setPending(false); composer.current?.focus() }
@@ -224,7 +242,7 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
 
   const conversations = snapshot.conversations.filter(c => `${c.title} ${c.messages.map(m => m.content).join(' ')}`.toLowerCase().includes(search.toLowerCase())).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
   const modelName = snapshot.config.model
-  const modelChoices = snapshot.providers.flatMap(provider => provider.availableModels.map(model => ({ key: JSON.stringify([provider.id, model]), providerId: provider.id, model })))
+  const usedTokens = estimateContext(active, draft, attachments, generating)
   return <div className="shell" data-theme={snapshot.theme}>
     <aside className="sidebar">
       <div className="window-space" />
@@ -272,30 +290,17 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
         </div></section> : <section className="messages" aria-label="对话消息">
           {active.messages.map((m, index) => <article className="message-row" key={m.id} data-role={m.role} data-status={m.status}>
             <div className="message-label">{m.role === 'user' ? <span className="avatar">{user.name.slice(0, 1)}</span> : <span className="brand-mark"><Mark /></span>}<span>{m.role === 'user' ? user.name : 'DCode'}</span><time className="message-time">{new Date(m.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</time></div>
-            {m.role === 'user' ? <div className="user-content">{m.content}</div> : renderAssistant(m, index === active.messages.length - 1)}
+            {m.role === 'user' ? <><div className="user-content">{m.content}</div>{Boolean(m.attachments?.length) && <div className="message-attachments"><AttachmentList items={m.attachments!} /></div>}</> : renderAssistant(m, index === active.messages.length - 1)}
           </article>)}
         </section>}
       </div>
       <div className="composer-area"><div className="composer">
+        {Boolean(attachments.length) && <AttachmentList items={attachments} disabled={busy} onRemove={id => setAttachments(previous => previous.filter(item => item.id !== id))} />}
         <Input.TextArea ref={composer} aria-label="消息" placeholder="描述你的想法，或粘贴代码…" variant="borderless" autoSize={{ minRows: 2, maxRows: 7 }} maxLength={32_000} value={draft} disabled={busy} onChange={e => setDraft(e.target.value)} onKeyDown={event => {
           if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void send() }
         }} />
-        <div className="composer-tools"><Tooltip title={`${snapshot.fastMode ? '关闭' : '开启'}快速模式 · 仅对支持加速的模型生效`}><Button className="speed-button" style={snapshot.fastMode ? { color: '#1677ff' } : undefined} type="text" disabled={busy} icon={snapshot.fastMode ? <ThunderboltFilled /> : <ThunderboltOutlined />} aria-label="快速模式" aria-pressed={snapshot.fastMode} onClick={() => void act({ type: 'fast-mode', enabled: !snapshot.fastMode })} /></Tooltip>
-          <Dropdown disabled={busy} trigger={['click']} menu={{ style: { maxHeight: 360, overflowY: 'auto' }, selectedKeys: snapshot.selectedModel ? [JSON.stringify([snapshot.activeProviderId, snapshot.selectedModel])] : [], items: [
-            ...snapshot.providers.map(provider => ({ key: provider.id, type: 'group' as const, label: provider.name, children: modelChoices.filter(choice => choice.providerId === provider.id).map(choice => ({ key: choice.key, label: choice.model })) })),
-            { key: 'refresh', label: '刷新模型列表', icon: <ReloadOutlined />, disabled: !snapshot.providers.length },
-            { key: 'settings', label: '配置模型服务', icon: <SettingOutlined /> }
-          ], onClick: ({ key }) => {
-            if (key === 'settings') setSettingsOpen(true)
-            else if (key === 'refresh') void refreshModels()
-            else {
-              const choice = modelChoices.find(item => item.key === key)
-              if (choice) void act({ type: 'model:select', providerId: choice.providerId, model: choice.model })
-            }
-          } }}>
-            <Button className="model-selector" type="text" aria-label="切换模型" disabled={busy} loading={modelsLoading}><span className="model-selector-label">{modelName || '选择模型'}</span><DownOutlined /></Button>
-          </Dropdown><span className="composer-hint">{busy ? '正在生成' : 'Shift + Enter 换行'}</span>{generating ? <Button className="send-button" type="primary" icon={<StopOutlined />} loading={stopping} aria-label="停止生成" onClick={() => void stop()} /> : <Button className="send-button" type="primary" icon={<ArrowUpOutlined />} disabled={pending || !draft.trim() || !snapshot.config.configured} loading={pending} aria-label="发送消息" onClick={() => void send()} />}</div>
-      </div><div className="footer-note"><span>{active ? `${active.messages.filter(m => m.role === 'user').length} 条提问` : ''}</span><span>DCode / {active?.model || modelName}</span></div></div>
+        <ComposerTools snapshot={snapshot} busy={busy} modelsLoading={modelsLoading} usedTokens={usedTokens} onAdd={kind => void addAttachments(kind)} onModel={(providerId, model) => void act({ type: 'model:select', providerId, model })} onRefresh={() => void refreshModels()} onSettings={() => setSettingsOpen(true)} onFastMode={() => void act({ type: 'fast-mode', enabled: !snapshot.fastMode })} onEffort={effort => act({ type: 'reasoning-effort', effort })} sendButton={generating ? <Button className="send-button" type="primary" icon={<StopOutlined />} loading={stopping} aria-label="停止生成" onClick={() => void stop()} /> : <Button className="send-button" type="primary" icon={<ArrowUpOutlined />} disabled={busy || (!draft.trim() && !attachments.length) || !snapshot.config.configured} loading={pending} aria-label="发送消息" onClick={() => void send()} />} />
+      </div><div className="footer-note"><span>{active ? `${active.messages.filter(m => m.role === 'user').length} 条提问` : 'Shift + Enter 换行'}</span><span>DCode / {active?.model || modelName}</span></div></div>
     </main>
     {settingsOpen && <ModelSettings snapshot={snapshot} busy={busy} onClose={() => setSettingsOpen(false)} onSaved={installSnapshot} onTheme={value => void act({ type: 'theme', theme: value })} />}
     <Modal title={edit?.type === 'user' ? '编辑用户名称' : '重命名对话'} open={Boolean(edit)} onCancel={() => setEdit(null)} okText="保存" cancelText="取消" okButtonProps={{ disabled: busy || !edit?.value.trim() }} confirmLoading={pending} onOk={async () => {

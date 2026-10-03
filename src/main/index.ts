@@ -2,13 +2,14 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { channels } from '../shared/channels'
-import type { Action, AuthInput, ProviderDraft, Result } from '../shared/types'
+import type { Action, AuthInput, ProviderDraft, Result, SendInput } from '../shared/types'
 import { loadConfig } from './config'
 import { Store } from './store'
 import { Chat } from './chat'
 import { Auth } from './auth'
 import { Models } from './models'
 import { Secrets } from './secrets'
+import { readAttachments } from './attachments'
 
 const here = dirname(fileURLToPath(import.meta.url))
 let window: BrowserWindow | null = null
@@ -94,7 +95,14 @@ void app.whenReady().then(async () => {
     return store.snapshot()
   }))
   // 开始/重试生成由 Chat.send 处理，后续内容经独立的 stream 通道推送。
-  handle<{ content: string; retry?: boolean }>(channels.send, input => exclusive(async () => chat.send(input, await models.selected())))
+  handle<SendInput>(channels.send, input => exclusive(async () => chat.send(input, await models.selected())))
+  // 附件入口先验证登录，再打开父窗口的系统选择器；路径只能来自原生选择结果。
+  handle<'file' | 'folder'>(channels.selectAttachments, kind => exclusive(async () => {
+    store.requireUser()
+    if (kind !== 'file' && kind !== 'folder') throw new Error('无效附件类型。')
+    const result = await dialog.showOpenDialog(window!, { title: kind === 'file' ? '添加文件' : '添加文件夹', properties: kind === 'file' ? ['openFile', 'multiSelections'] : ['openDirectory'] })
+    return result.canceled ? { attachments: [], skipped: 0 } : readAttachments(result.filePaths, kind)
+  }))
   // 停止生成由 Chat.stop 取消请求并返回保存后的快照。
   handle(channels.stop, () => { store.requireUser(); return chat.stop() })
   // 通过 Electron clipboard 复制文本，界面无需获得通用剪贴板或文件系统权限。

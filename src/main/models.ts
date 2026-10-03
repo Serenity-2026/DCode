@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import type { ModelRefresh, ProviderDraft, Snapshot } from '../shared/types'
+import type { ModelDetails, ModelRefresh, ProviderDraft, ReasoningEffort, Snapshot } from '../shared/types'
+import { modelEfforts, reasoningEfforts } from '../shared/context'
 import { validateBaseUrl, type ModelConfig, type ProviderConfig } from './config'
 import type { SecretCodec } from './secrets'
 import { Store, textInput, type StoredUser } from './store'
 
-/** 用账号服务的 URL 与密钥获取实际模型 ID，供 Models 保存验证与登录后刷新共用。 */
-export async function listModels(config: ProviderConfig): Promise<string[]> {
+/** 用账号服务的 URL 与密钥获取模型 ID、窗口和强度元数据，供 Models 保存验证与登录后刷新共用。 */
+export async function listModels(config: ProviderConfig): Promise<{ ids: string[]; details: Record<string, ModelDetails> }> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 15_000)
   try {
@@ -22,7 +23,13 @@ export async function listModels(config: ProviderConfig): Promise<string[]> {
     if (!Array.isArray(data) || data.some(item => !item || typeof item.id !== 'string' || !item.id.trim())) throw new Error('服务返回的模型列表格式不正确。')
     const ids = [...new Set<string>(data.map(item => item.id))]
     if (!ids.length) throw new Error('该服务没有返回可用模型。')
-    return ids
+    const details = Object.fromEntries(data.map(item => {
+      const detail: ModelDetails = {}
+      if (Number.isSafeInteger(item.context_window) && item.context_window > 0) detail.contextWindow = item.context_window
+      if (Array.isArray(item.effort?.supported_levels)) detail.reasoningEfforts = [...new Set<ReasoningEffort>(item.effort.supported_levels.filter((level: unknown) => reasoningEfforts.includes(level as ReasoningEffort)))]
+      return [item.id, detail]
+    }))
+    return { ids, details }
   } catch (error) {
     if (controller.signal.aborted) throw new Error('获取模型列表超时，请重试。')
     if (error instanceof TypeError) throw new Error('无法连接模型服务，请检查网络和服务地址。')
@@ -47,7 +54,7 @@ export class Models {
     const user = this.store.requireUser()
     const provider = user.providers.find(p => p.id === user.activeProviderId)
     if (!provider || !user.selectedModel || !provider.availableModels.includes(user.selectedModel)) throw new Error('请先配置服务并选择可用模型。')
-    return { baseUrl: provider.baseUrl, model: user.selectedModel, fastMode: user.fastMode, apiKey: await this.secrets.decrypt(provider.encryptedApiKey) }
+    return { baseUrl: provider.baseUrl, model: user.selectedModel, fastMode: user.fastMode, reasoningEffort: user.reasoningEffort || null, apiKey: await this.secrets.decrypt(provider.encryptedApiKey) }
   }
 
   /** 获取当前账号各服务的列表；失败服务保留缓存，失效的模型选择改为返回列表的第一项。 */
@@ -56,14 +63,15 @@ export class Models {
     const results = await Promise.all(user.providers.map(async provider => {
       try {
         const apiKey = await this.secrets.decrypt(provider.encryptedApiKey)
-        return { provider, ids: await listModels({ baseUrl: provider.baseUrl, apiKey }), error: '' }
-      } catch (error) { return { provider, ids: null, error: `${provider.name}：${error instanceof Error ? error.message : '获取模型列表失败。'}` } }
+        return { provider, catalog: await listModels({ baseUrl: provider.baseUrl, apiKey }), error: '' }
+      } catch (error) { return { provider, catalog: null, error: `${provider.name}：${error instanceof Error ? error.message : '获取模型列表失败。'}` } }
     }))
-    if (results.some(r => r.ids)) this.store.transaction(() => {
+    if (results.some(r => r.catalog)) this.store.transaction(() => {
       if (this.store.requireUser().id !== user.id) throw new Error('登录状态已变化，请重试。')
-      for (const result of results) if (result.ids) result.provider.availableModels = result.ids
+      for (const result of results) if (result.catalog) { result.provider.availableModels = result.catalog.ids; result.provider.modelDetails = result.catalog.details }
       const selected = user.providers.find(p => p.id === user.activeProviderId)
       if (selected && !selected.availableModels.includes(user.selectedModel || '')) user.selectedModel = selected.availableModels[0] || null
+      if (user.reasoningEffort && !modelEfforts(selected, user.selectedModel).includes(user.reasoningEffort)) user.reasoningEffort = null
     })
     return { snapshot: this.store.snapshot(), errors: results.filter(r => r.error).map(r => r.error) }
   }
@@ -79,19 +87,21 @@ export class Models {
     if (typeof input.apiKey !== 'string' || input.apiKey.length > 4096) throw new Error('API 密钥无效。')
     const apiKey = input.apiKey.trim() || (existing ? await this.secrets.decrypt(existing.encryptedApiKey) : '')
     if (!apiKey) throw new Error('请输入 API 密钥。')
-    let availableModels: string[]
-    try { availableModels = await listModels({ baseUrl, apiKey }) }
+    let catalog: Awaited<ReturnType<typeof listModels>>
+    try { catalog = await listModels({ baseUrl, apiKey }) }
     catch (error) {
       const detail = error instanceof Error ? error.message.split(apiKey).join('[密钥]') : '服务连接失败。'
       throw new Error(`连通测试未通过：${detail}`)
     }
-    const profile = { id: existing?.id || randomUUID(), name, baseUrl, availableModels, encryptedApiKey: await this.secrets.encrypt(apiKey) }
+    const { ids: availableModels, details: modelDetails } = catalog
+    const profile = { id: existing?.id || randomUUID(), name, baseUrl, availableModels, modelDetails, encryptedApiKey: await this.secrets.encrypt(apiKey) }
     this.store.transaction(() => {
       if (this.store.requireUser().id !== user.id) throw new Error('登录状态已变化，请重试。')
       if (existing) user.providers = user.providers.map(p => p.id === profile.id ? profile : p)
       else user.providers.push(profile)
       if (user.activeProviderId !== profile.id || !availableModels.includes(user.selectedModel || '')) user.selectedModel = availableModels[0]
       user.activeProviderId = profile.id
+      if (user.reasoningEffort && !modelEfforts(profile, user.selectedModel).includes(user.reasoningEffort)) user.reasoningEffort = null
     })
     return this.store.snapshot()
   }

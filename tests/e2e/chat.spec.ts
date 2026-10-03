@@ -1,6 +1,6 @@
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test'
 import { createServer, type Server } from 'node:http'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { AddressInfo } from 'node:net'
@@ -12,7 +12,7 @@ let application: ElectronApplication
 let page: Page
 let failDiscovery = false
 const discoveries: { path: string; authorization?: string }[] = []
-const requests: { model: string; max_tokens: number; service_tier?: string; messages: { role: string; content: string }[]; authorization?: string }[] = []
+const requests: { model: string; max_tokens: number; service_tier?: string; reasoning_effort?: string; messages: { role: string; content: string }[]; authorization?: string }[] = []
 
 /** 使用隔离的数据目录启动真实 Electron，live 模式改用本地环境里的服务配置。 */
 async function launch(live = false): Promise<void> {
@@ -53,7 +53,7 @@ test.beforeAll(async () => {
       }
       response.writeHead(200, { 'Content-Type': 'application/json' })
       const ids = request.headers.authorization === 'Bearer e2e-second-key' ? ['other-fast-model', 'other-chat'] : ['gpt-6-astra', 'gpt-6-sol', 'gpt-5.6-sol']
-      response.end(JSON.stringify({ data: ids.map(id => ({ id, object: 'model' })) })); return
+      response.end(JSON.stringify({ data: ids.map(id => ({ id, object: 'model', ...(id === 'gpt-6-astra' || id === 'gpt-6-sol' ? { context_window: id === 'gpt-6-astra' ? 4096 : 8192, effort: { supported_levels: ['low', 'medium', 'high'] } } : {}) })) })); return
     }
     let body = ''
     request.on('data', chunk => { body += chunk })
@@ -77,7 +77,7 @@ test.beforeAll(async () => {
   baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
 })
 
-test.beforeEach(() => { failDiscovery = false; directory = mkdtempSync(join(tmpdir(), 'dcode-e2e-')) })
+test.beforeEach(() => { failDiscovery = false; discoveries.length = 0; requests.length = 0; directory = mkdtempSync(join(tmpdir(), 'dcode-e2e-')) })
 test.afterEach(async () => {
   await application?.close().catch(() => undefined)
   rmSync(directory, { recursive: true, force: true })
@@ -236,6 +236,97 @@ test('accounts, model discovery/switch, fast mode, streaming and restart', async
   await page.getByRole('button', { name: '删除', exact: true }).click()
   await expect(page.getByText('暂无对话', { exact: true })).toBeVisible()
   expect(errors).toEqual([])
+})
+
+test('composer attachments, context meter, reasoning strength and responsive toolbar', async () => {
+  test.setTimeout(60_000)
+  await launch()
+  expect(await page.evaluate(() => window.dcode.selectAttachments('file'))).toMatchObject({ ok: false })
+  await authenticate('tools', true)
+  const input = page.getByRole('textbox', { name: '消息', exact: true })
+  const context = page.getByRole('button', { name: '上下文用量', exact: true })
+  const strength = page.getByRole('slider', { name: '模型强度', exact: true })
+  const add = page.getByRole('button', { name: '添加附件', exact: true })
+  await expect(context).toHaveAttribute('data-limit', '4096')
+  const originalTokens = Number(await context.getAttribute('data-used'))
+  await input.fill('中'.repeat(2200))
+  expect(Number(await context.getAttribute('data-used'))).toBeGreaterThan(originalTokens + 2000)
+  expect(Number(await context.getAttribute('data-percent'))).toBeGreaterThan(50)
+  await context.hover()
+  await expect(page.getByRole('tooltip')).toContainText('窗口：4,096 tokens')
+  await expect(page.getByRole('tooltip')).toContainText('剩余约')
+  await expect(page.getByRole('tooltip')).toContainText('预估')
+  await input.fill('请查看附件代码')
+  await strength.focus()
+  await strength.press('ArrowRight')
+  await expect(strength).toHaveAttribute('aria-valuetext', '轻量')
+  await expect(page.getByRole('button', { name: '切换模型', exact: true })).toBeEnabled()
+  await strength.press('ArrowRight')
+  await expect(strength).toHaveAttribute('aria-valuetext', '标准')
+  await expect.poll(async () => {
+    const state = await page.evaluate(() => window.dcode.getState()); return state.ok ? state.value.reasoningEffort : undefined
+  }).toBe('medium')
+  const source = join(directory, 'selected.ts')
+  const project = join(directory, 'sample-project')
+  mkdirSync(project)
+  writeFileSync(source, 'export const selected = "attachment-e2e"')
+  writeFileSync(join(project, 'folder.ts'), 'export const folder = "folder-e2e"')
+  writeFileSync(join(project, '.env'), 'excluded-file')
+  await application.evaluate(({ dialog }, paths) => {
+    dialog.showOpenDialog = async (...args: unknown[]) => {
+      const options = args.at(-1) as Electron.OpenDialogOptions
+      const global = globalThis as unknown as { dialogOptions?: Electron.OpenDialogOptions }
+      global.dialogOptions = options
+      return { canceled: false, filePaths: options.properties?.includes('openDirectory') ? [paths.project] : [paths.source] }
+    }
+  }, { source, project })
+  await add.click()
+  await page.getByRole('menuitem', { name: /添加文件$/, exact: false }).click()
+  await expect(page.getByRole('button', { name: '移除附件 selected.ts', exact: true })).toBeVisible()
+  expect(await application.evaluate(() => (globalThis as unknown as { dialogOptions?: Electron.OpenDialogOptions }).dialogOptions?.properties)).toEqual(['openFile', 'multiSelections'])
+  const withFile = Number(await context.getAttribute('data-used'))
+  await page.getByRole('button', { name: '移除附件 selected.ts', exact: true }).click()
+  expect(Number(await context.getAttribute('data-used'))).toBeLessThan(withFile)
+  await add.click(); await page.getByRole('menuitem', { name: /添加文件$/, exact: false }).click()
+  await add.click(); await page.getByRole('menuitem', { name: /添加文件夹/ }).click()
+  await expect(page.getByRole('button', { name: '移除附件 sample-project', exact: true })).toBeVisible()
+  await expect(page.getByText(/已跳过 1 项/)).toBeVisible()
+  expect(await application.evaluate(() => (globalThis as unknown as { dialogOptions?: Electron.OpenDialogOptions }).dialogOptions?.properties)).toEqual(['openDirectory'])
+  await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(820, 620))
+  expect(await page.evaluate(() => document.documentElement.scrollWidth === innerWidth)).toBe(true)
+  const plusBounds = await add.boundingBox()
+  const modelBounds = await page.getByRole('button', { name: '切换模型', exact: true }).boundingBox()
+  expect(modelBounds!.x).toBeGreaterThan(plusBounds!.x + plusBounds!.width)
+  for (const control of [context, strength, page.getByRole('button', { name: '快速模式', exact: true })]) {
+    const bounds = await control.boundingBox(); expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(820)
+  }
+  await page.getByRole('button', { name: '发送消息', exact: true }).click()
+  await expect(page.locator('article[data-role="assistant"][data-status="complete"]')).toHaveCount(1)
+  expect(requests.at(-1)?.reasoning_effort).toBe('medium')
+  expect(requests.at(-1)?.messages.at(-1)?.content).toContain('attachment-e2e')
+  expect(requests.at(-1)?.messages.at(-1)?.content).toContain('folder-e2e')
+  expect(requests.at(-1)?.messages.at(-1)?.content).not.toContain('excluded-file')
+  await expect(page.getByRole('button', { name: /移除附件/ })).toHaveCount(0)
+  await expect(page.locator('article[data-role="user"]')).toContainText('sample-project')
+  await page.getByRole('button', { name: '重新生成', exact: true }).click()
+  await expect(page.locator('article[data-role="assistant"][data-status="complete"]')).toHaveCount(1)
+  expect(requests.at(-1)?.messages.at(-1)?.content).toContain('attachment-e2e')
+  await page.getByRole('button', { name: '切换模型', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'gpt-5.6-sol', exact: true }).click()
+  await expect(context).toHaveAttribute('data-limit', 'unknown')
+  await context.hover()
+  await expect(page.getByRole('tooltip')).toContainText('窗口：未知')
+  await input.click()
+  await application.close(); await launch()
+  await expect(page.getByRole('button', { name: '切换模型', exact: true })).toBeEnabled()
+  await expect(page.getByRole('slider', { name: '模型强度', exact: true })).toHaveAttribute('aria-valuetext', '标准')
+  await expect(page.locator('article[data-role="user"]')).toContainText('sample-project')
+  await page.getByRole('button', { name: '新对话', exact: true }).click()
+  const resumedInput = page.getByRole('textbox', { name: '消息', exact: true })
+  await resumedInput.fill('取消后保留的草稿')
+  await application.evaluate(({ dialog }) => { dialog.showOpenDialog = async () => ({ canceled: true, filePaths: [] }) })
+  await page.getByRole('button', { name: '添加附件', exact: true }).click(); await page.getByRole('menuitem', { name: /添加文件$/ }).click()
+  await expect(resumedInput).toHaveValue('取消后保留的草稿')
 })
 
 test('live DeepSeek model test and streaming smoke', async () => {

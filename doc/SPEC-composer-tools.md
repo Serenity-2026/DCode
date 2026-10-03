@@ -1,6 +1,6 @@
 # 输入框工具与附件 SPEC
 
-日期：2026-10-03 · 状态：实施中
+日期：2026-10-03 · 状态：已实现并验证
 
 ## 工具栏
 
@@ -29,5 +29,7 @@
 1. 附件读取、输入校验、上下文估算与强度请求参数单元测试。
 2. Electron E2E 验证系统选择器调用、附件移除和实际请求、圆环悬浮与草稿变化、强度滑动/持久化、左右布局与窄窗口。
 3. 类型检查、构建、打包；清理本次临时文件后本地 Git 提交，不推送，保留既有 AGENTS.md 改动。
+
+验证记录：44 项单元测试通过；3 项 Electron E2E 通过，包含真实 DeepSeek 列表与流式聊天、附件请求/重试、上下文数据、键盘强度选择与账号状态恢复。类型检查、生产构建和 macOS 打包通过；打包应用实测鼠标拖动到 max、文件夹附件、蓝色快速模式、上下文悬浮、浅色/深色和 820 × 620 窗口。上下文悬浮提示不会拦截输入框点击。
 
 参考：[Electron dialog](https://www.electronjs.org/docs/latest/api/dialog)、[DeepSeek 模型列表](https://api-docs.deepseek.com/api/list-models)、[DeepSeek 推理模式](https://api-docs.deepseek.com/guides/thinking_mode)、[OpenAI 推理强度](https://developers.openai.com/api/docs/guides/reasoning)。
