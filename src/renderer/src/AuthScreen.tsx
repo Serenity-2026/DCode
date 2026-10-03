@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { Alert, Button, Form, Input, Segmented, Select } from 'antd'
-import { CodeOutlined } from '@ant-design/icons'
+import { BrandMark } from './BrandMark'
 import type { AuthInput, Snapshot } from '../../shared/types'
 
 /** 登录/注册入口，依赖 Ant Design 表单和 preload 的 Auth API；成功后把账号快照交给 Root。 */
@@ -23,7 +23,7 @@ export function AuthScreen({ snapshot, onLogin }: { snapshot: Snapshot; onLogin:
   }
 
   return <main className="auth-screen"><div className="auth-titlebar" /><section className="auth-card">
-    <div className="auth-brand"><span className="brand-mark"><CodeOutlined /></span>DCode</div>
+    <div className="auth-brand"><span className="brand-mark"><BrandMark /></span>DCode</div>
     <Segmented block options={[{ label: '登录', value: 'login' }, { label: '注册', value: 'register' }]} value={mode} disabled={busy} onChange={value => {
       setMode(value === 'register' ? 'register' : 'login'); setError(''); form.resetFields()
     }} />

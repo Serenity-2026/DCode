@@ -13,6 +13,7 @@
 - `build/icon.icns`：包含 16、32、64、128、256、512、1024 像素版本。
 - Electron 主进程区分开发目录和 `process.resourcesPath`，设置 Dock 与窗口图标。
 - electron-builder 配置 macOS ICNS，并将 PNG 复制到应用 Resources。
+- 应用内侧栏左上角、登录页、欢迎页和模型消息头像通过 `BrandMark` 共用 `build/icon.svg`，由 Vite 打包为本地资源；保留各位置原有尺寸。
 - 构建通过；确认应用包声明的图标存在且与源 ICNS 一致，运行时 PNG 与源文件一致。
 
 ## 修改图标

@@ -16,13 +16,7 @@ import { ComposerTools } from './ComposerTools'
 import { AttachmentList } from './AttachmentList'
 import { WorkspaceLayout } from './WorkspaceLayout'
 import { MessageNavigation } from './MessageNavigation'
-
-/** 绘制品牌图形，供 Workspace 的侧栏、欢迎页与 assistant 消息共用，不依赖业务类。 */
-function Mark(): ReactNode {
-  return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-    <path d="m8 6-5 6 5 6m8-12 5 6-5 6M14 4l-4 16" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-}
+import { BrandMark } from './BrandMark'
 
 /**
  * 界面根组件：通过 preload 的 window.dcode 读取 Snapshot，并配置 Ant Design 主题与提示容器。
@@ -271,7 +265,7 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
     <WorkspaceLayout theme={snapshot.theme} sidebar={
     <aside className="sidebar">
       <div className="window-space" />
-      <div className="brand"><span className="brand-mark"><Mark /></span><span className="brand-name">DCode</span><span className="brand-version">0.1</span></div>
+      <div className="brand"><span className="brand-mark"><BrandMark /></span><span className="brand-name">DCode</span><span className="brand-version">0.1</span></div>
       <Button className="new-chat" icon={<PlusOutlined />} aria-label="新对话" disabled={busy} onClick={() => void act({ type: 'conversation:select', id: null }).then(() => composer.current?.focus())}>新对话 <kbd className="shortcut">⌘ N</kbd></Button>
       <Input className="search" prefix={<SearchOutlined />} placeholder="搜索对话" aria-label="搜索对话" variant="borderless" allowClear value={search} onChange={e => setSearch(e.target.value)} />
       <div className="section-label"><span>最近对话</span><span>{snapshot.conversations.length ? snapshot.conversations.length : ''}</span></div>
@@ -306,7 +300,7 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
         if (el) follow.current = !jumping.current && el.scrollHeight - el.scrollTop - el.clientHeight < 100
       }}>
         {!active ? <section className="welcome"><div className="welcome-inner">
-          <div className="welcome-symbol"><Mark /></div>
+          <div className="welcome-symbol"><BrandMark /></div>
           <h1>今天想写点什么？</h1>
           <div className="suggestions">
             {[
@@ -317,7 +311,7 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
           </div>
         </div></section> : <section className="messages" aria-label="对话消息">
           {active.messages.map((m, index) => <article className="message-row" id={`message-${m.id}`} key={m.id} data-role={m.role} data-status={m.status}>
-            <div className="message-label">{m.role === 'user' ? <span className="avatar">{user.name.slice(0, 1)}</span> : <span className="brand-mark"><Mark /></span>}<span>{m.role === 'user' ? user.name : 'DCode'}</span><time className="message-time">{new Date(m.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</time></div>
+            <div className="message-label">{m.role === 'user' ? <span className="avatar">{user.name.slice(0, 1)}</span> : <span className="brand-mark"><BrandMark /></span>}<span>{m.role === 'user' ? user.name : 'DCode'}</span><time className="message-time">{new Date(m.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</time></div>
             {m.role === 'user' ? <><div className="user-content">{m.content}</div>{Boolean(m.attachments?.length) && <div className="message-attachments"><AttachmentList items={m.attachments!} /></div>}</> : renderAssistant(m, index === active.messages.length - 1)}
           </article>)}
         </section>}
