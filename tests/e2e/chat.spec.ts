@@ -41,6 +41,38 @@ async function logout(): Promise<void> {
   await expect(page.getByRole('textbox', { name: '账号', exact: true })).toBeVisible()
 }
 
+/** 检查真实菜单文字与背景的 WCAG 对比度，依赖 Page 和浏览器计算样式，覆盖选中与悬浮状态。 */
+async function verifyModelMenu(selectedModel: string): Promise<void> {
+  const trigger = page.getByRole('button', { name: '切换模型', exact: true })
+  await expect(trigger.getByRole('img', { name: 'up', exact: true })).toBeVisible()
+  const menu = page.getByRole('menu')
+  await expect.poll(async () => {
+    const popup = await menu.boundingBox()
+    const button = await trigger.boundingBox()
+    return Boolean(popup && button && popup.y + popup.height <= button.y)
+  }).toBe(true)
+  for (const model of [selectedModel, 'gpt-5.6-sol']) {
+    const item = page.getByRole('menuitem', { name: model, exact: true })
+    for (const hover of [false, true]) {
+      if (hover) await item.hover()
+      await expect.poll(() => item.evaluate(element => {
+        const luminance = (color: string): number => {
+          const channels = color.match(/[\d.]+/g)!.slice(0, 3).map(value => {
+            const channel = Number(value) / 255
+            return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
+          })
+          return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722
+        }
+        let background = element
+        while (getComputedStyle(background).backgroundColor === 'rgba(0, 0, 0, 0)' && background.parentElement) background = background.parentElement
+        const text = luminance(getComputedStyle(element).color)
+        const surface = luminance(getComputedStyle(background).backgroundColor)
+        return (Math.max(text, surface) + 0.05) / (Math.min(text, surface) + 0.05)
+      })).toBeGreaterThanOrEqual(4.5)
+    }
+  }
+}
+
 test.beforeAll(async () => {
   server = createServer((request, response) => {
     if (request.method === 'GET') {
@@ -112,6 +144,7 @@ test('accounts, model discovery/switch, fast mode, streaming and restart', async
 
   await page.getByRole('button', { name: '切换模型', exact: true }).click()
   for (const model of ['gpt-6-astra', 'gpt-6-sol', 'gpt-5.6-sol']) await expect(page.getByRole('menuitem', { name: model, exact: true })).toBeVisible()
+  await verifyModelMenu('gpt-6-astra')
   await page.getByRole('menuitem', { name: /配置模型服务/ }).click()
   await expect(page.getByRole('textbox', { name: '模型 ID', exact: true })).toHaveCount(0)
   await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(820, 620))
@@ -207,6 +240,9 @@ test('accounts, model discovery/switch, fast mode, streaming and restart', async
   await page.getByText('深色', { exact: true }).click()
   await expect(page.locator('.shell')).toHaveAttribute('data-theme', 'dark')
   await page.getByRole('button', { name: '关闭', exact: true }).click()
+  await page.getByRole('button', { name: '切换模型', exact: true }).click()
+  await verifyModelMenu('gpt-6-sol')
+  await page.getByRole('button', { name: '切换模型', exact: true }).click()
   await page.getByRole('button', { name: '模型强度选择', exact: true }).click()
   await expect(page.locator('.strength-panel')).toHaveAttribute('data-theme', 'dark')
   expect(await page.locator('.strength-panel').evaluate(element => getComputedStyle(element).backgroundColor)).toBe('rgb(37, 39, 34)')

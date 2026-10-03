@@ -1,6 +1,6 @@
 import { type ReactNode } from 'react'
-import { Button, Dropdown, Progress, Tooltip } from 'antd'
-import { DownOutlined, PlusOutlined, FileOutlined, FolderOpenOutlined, ReloadOutlined, SettingOutlined, ThunderboltFilled, ThunderboltOutlined } from '@ant-design/icons'
+import { Button, ConfigProvider, Dropdown, Progress, Tooltip } from 'antd'
+import { UpOutlined, PlusOutlined, FileOutlined, FolderOpenOutlined, ReloadOutlined, SettingOutlined, ThunderboltFilled, ThunderboltOutlined } from '@ant-design/icons'
 import type { ReasoningEffort, Snapshot } from '../../shared/types'
 import { EffortControl } from './EffortControl'
 
@@ -16,6 +16,7 @@ export function ComposerTools({ snapshot, busy, modelsLoading, usedTokens, onAdd
   const contextWindow = detail?.contextWindow
   const percent = contextWindow ? Math.min(100, usedTokens / contextWindow * 100) : undefined
   const choices = snapshot.providers.flatMap(item => item.availableModels.map(model => ({ key: JSON.stringify([item.id, model]), providerId: item.id, model })))
+  const dark = snapshot.theme === 'dark'
 
   return <div className="composer-tools">
     <Dropdown disabled={busy} trigger={['click']} placement="topLeft" menu={{ items: [{ key: 'add', type: 'group', label: '添加', children: [
@@ -24,6 +25,12 @@ export function ComposerTools({ snapshot, busy, modelsLoading, usedTokens, onAdd
       <Button className="attachment-add" type="text" disabled={busy} icon={<PlusOutlined />} aria-label="添加附件" />
     </Dropdown>
     <div className="composer-right">
+      <ConfigProvider theme={{ components: { Dropdown: {
+        colorBgElevated: dark ? '#292c28' : '#ffffff', colorText: dark ? '#edf0eb' : '#292e2a',
+        colorTextDescription: dark ? '#abb5ab' : '#687268', colorPrimary: dark ? '#e1eee4' : '#303b33',
+        controlItemBgHover: dark ? '#353b35' : '#f4f6f3', controlItemBgActive: dark ? '#3b4a3f' : '#eaf0e9',
+        controlItemBgActiveHover: dark ? '#435448' : '#dfe8de', borderRadiusLG: 14
+      } } }}>
       <Dropdown disabled={busy} trigger={['click']} placement="topRight" menu={{ style: { maxHeight: 360, overflowY: 'auto' }, selectedKeys: snapshot.selectedModel ? [JSON.stringify([snapshot.activeProviderId, snapshot.selectedModel])] : [], items: [
         ...snapshot.providers.map(item => ({ key: item.id, type: 'group' as const, label: item.name, children: choices.filter(choice => choice.providerId === item.id).map(choice => ({ key: choice.key, label: choice.model })) })),
         { key: 'refresh', label: '刷新模型列表', icon: <ReloadOutlined />, disabled: !snapshot.providers.length },
@@ -33,8 +40,9 @@ export function ComposerTools({ snapshot, busy, modelsLoading, usedTokens, onAdd
         else if (key === 'refresh') onRefresh()
         else { const choice = choices.find(item => item.key === key); if (choice) onModel(choice.providerId, choice.model) }
       } }}>
-        <Button className="model-selector" type="text" aria-label="切换模型" disabled={busy} loading={modelsLoading}><span className="model-selector-label">{snapshot.selectedModel || '选择模型'}</span><DownOutlined /></Button>
+        <Button className="model-selector" type="text" aria-label="切换模型" disabled={busy} loading={modelsLoading}><span className="model-selector-label">{snapshot.selectedModel || '选择模型'}</span><UpOutlined /></Button>
       </Dropdown>
+      </ConfigProvider>
       <Tooltip trigger={['hover', 'focus']} styles={{ root: { pointerEvents: 'none' } }} title={<div className="context-tooltip">
         <strong>上下文窗口{percent !== undefined ? ` · ${percent.toFixed(1)}%` : ''}</strong>
         <span>窗口：{contextWindow ? `${contextWindow.toLocaleString()} tokens` : '未知'}</span>
