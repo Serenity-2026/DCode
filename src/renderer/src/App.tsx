@@ -15,6 +15,7 @@ import { ModelSettings } from './ModelSettings'
 import { ComposerTools } from './ComposerTools'
 import { AttachmentList } from './AttachmentList'
 import { WorkspaceLayout } from './WorkspaceLayout'
+import { MessageNavigation } from './MessageNavigation'
 
 /** 绘制品牌图形，供 Workspace 的侧栏、欢迎页与 assistant 消息共用，不依赖业务类。 */
 function Mark(): ReactNode {
@@ -65,6 +66,7 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
   const streamEvents = useRef(new Map<string, StreamEvent>())
   const scroll = useRef<HTMLDivElement>(null)
   const follow = useRef(true)
+  const jumping = useRef(false)
   const composer = useRef<React.ComponentRef<typeof Input.TextArea>>(null)
   const inFlight = useRef(false)
   const user = snapshot.users.find(u => u.id === snapshot.activeUserId)!
@@ -124,6 +126,18 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
     if (follow.current && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight
   }, [active?.messages, active?.id])
 
+  /** 导航到指定问题；依赖消息 DOM 锚点，平滑跳转期间暂停跟随流式输出，减少动画时即时滚动。 */
+  function navigateMessage(id: string): void {
+    const container = scroll.current
+    const message = document.getElementById(`message-${id}`)
+    if (!container || !message || !container.contains(message)) return
+    const top = Math.max(0, message.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop - 24)
+    const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    jumping.current = smooth && Math.abs(container.scrollTop - top) > 1
+    follow.current = false
+    container.scrollTo({ top, behavior: smooth ? 'smooth' : 'instant' })
+  }
+
   /**
    * 通过 window.dcode.action 执行用户/会话/主题操作，并用 installSnapshot 同步界面。
    * inFlight 防止重复提交；切换上下文时清空草稿，返回成功标志供弹窗决定是否关闭。
@@ -138,7 +152,7 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
       streamEvents.current.clear()
       installSnapshot(result.value)
       if (['conversation:select', 'conversation:delete'].includes(action.type)) {
-        setDraft(''); setAttachments([]); follow.current = true
+        setDraft(''); setAttachments([]); follow.current = true; jumping.current = false
       }
       return true
     } catch { void toast.error('操作失败，请重试。'); return false }
@@ -180,6 +194,7 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
     inFlight.current = true
     setPending(true)
     follow.current = true
+    jumping.current = false
     streamEvents.current.clear()
     try {
       const result = await window.dcode.send({ content: draft.trim(), retry, ...(retry ? {} : { attachments }) })
@@ -273,9 +288,14 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
         <Button type="text" className="settings-button" icon={<SettingOutlined />} aria-label="设置" disabled={busy} onClick={() => setSettingsOpen(true)}>设置</Button>
       </div>
     </aside>} header={<><span className="titlebar-label">工作台</span><span className="titlebar-divider" /><span className="titlebar-title">{active?.title || '新对话'}</span><span className="connection"><i className={`status-dot${snapshot.config.configured ? '' : ' missing'}`} />{snapshot.config.configured ? new URL(snapshot.config.baseUrl).hostname : '未配置模型'}</span></>}>
-      <div className="workspace" ref={scroll} onScroll={() => {
+      <div className="conversation-body">
+      <div className="workspace" ref={scroll} onWheel={() => { jumping.current = false }} onPointerDown={() => { jumping.current = false }} onScrollEnd={() => {
+        jumping.current = false
         const el = scroll.current
         if (el) follow.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100
+      }} onScroll={() => {
+        const el = scroll.current
+        if (el) follow.current = !jumping.current && el.scrollHeight - el.scrollTop - el.clientHeight < 100
       }}>
         {!active ? <section className="welcome"><div className="welcome-inner">
           <div className="welcome-symbol"><Mark /></div>
@@ -288,11 +308,13 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
             ].map(s => <Button className="suggestion" key={s.title} disabled={busy} onClick={() => { setDraft(s.prompt); composer.current?.focus() }}><span className="suggestion-icon">{s.icon}</span><span className="suggestion-title">{s.title}<RightOutlined className="suggestion-arrow" /></span></Button>)}
           </div>
         </div></section> : <section className="messages" aria-label="对话消息">
-          {active.messages.map((m, index) => <article className="message-row" key={m.id} data-role={m.role} data-status={m.status}>
+          {active.messages.map((m, index) => <article className="message-row" id={`message-${m.id}`} key={m.id} data-role={m.role} data-status={m.status}>
             <div className="message-label">{m.role === 'user' ? <span className="avatar">{user.name.slice(0, 1)}</span> : <span className="brand-mark"><Mark /></span>}<span>{m.role === 'user' ? user.name : 'DCode'}</span><time className="message-time">{new Date(m.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</time></div>
             {m.role === 'user' ? <><div className="user-content">{m.content}</div>{Boolean(m.attachments?.length) && <div className="message-attachments"><AttachmentList items={m.attachments!} /></div>}</> : renderAssistant(m, index === active.messages.length - 1)}
           </article>)}
         </section>}
+      </div>
+      {active && <MessageNavigation key={active.id} messages={active.messages} theme={snapshot.theme} containerRef={scroll} onNavigate={navigateMessage} />}
       </div>
       <div className="composer-area"><div className="composer">
         {Boolean(attachments.length) && <AttachmentList items={attachments} disabled={busy} onRemove={id => setAttachments(previous => previous.filter(item => item.id !== id))} />}
