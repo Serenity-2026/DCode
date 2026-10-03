@@ -18,11 +18,11 @@
 
 ## 上下文与强度
 
-- 从服务 `/models` 的 `context_window`、`effort.supported_levels` 读取模型元数据，不按模型名称猜测。
+- 从服务 `/models` 的 `context_window`（兼容 `context_length`、`top_provider.context_length`）、`effort.supported_levels` 读取模型元数据，不按模型名称猜测。
 - 圆环比例为当前请求的预估输入 token / 上下文窗口。与模型请求共用上下文构建函数，包含系统提示、有效历史轮次、当前草稿、附件；不计失败历史或隐藏推理。
 - token 数按 UTF-8 字节数 / 3 向上取整加消息开销估计，不冒充服务端的精确用量；悬浮提示注明“预估”、窗口、已用、剩余。窗口未知显示未知状态，不能伪造百分比。
-- 强度默认“自动”，保持既有请求行为；用户调整后按 `reasoning_effort` 发送。服务有元数据时只使用返回的受支持档位；缺少元数据按兼容接口 low / medium / high 提供选择，实际接受情况以服务为准。强度绑定账号并持久化，切换到不支持当前档位的模型时恢复自动。
-- DeepSeek 选择强度时同时启用 thinking；自动保留原非思考请求行为。无效强度的服务请求明确提示切回自动或调整档位。
+- 强度固定为 `low / medium / high / max / ultra`，默认 medium，绑定账号并持久化，切换模型保留偏好。旧 minimal / xhigh 分别迁移为 low / max，旧自动或缺省迁移为 medium。服务提供档位元数据时选择不低于偏好的最近受支持档位；超出上限使用最高档位。明确不支持推理时不发送该参数；缺少元数据时 ultra 使用兼容参数 max，其他档位原样发送。
+- DeepSeek 同时启用 thinking；当前目录支持 low / high / max，medium 映射 high，ultra 映射 max。面板显示与偏好不同的实际请求档位；不虚构服务的原生 ultra 能力。服务拒绝参数时提示调整强度。
 
 ## 验证
 
@@ -33,3 +33,10 @@
 验证记录：44 项单元测试通过；3 项 Electron E2E 通过，包含真实 DeepSeek 列表与流式聊天、附件请求/重试、上下文数据、键盘强度选择与账号状态恢复。类型检查、生产构建和 macOS 打包通过；打包应用实测鼠标拖动到 max、文件夹附件、蓝色快速模式、上下文悬浮、浅色/深色和 820 × 620 窗口。上下文悬浮提示不会拦截输入框点击。
 
 参考：[Electron dialog](https://www.electronjs.org/docs/latest/api/dialog)、[DeepSeek 模型列表](https://api-docs.deepseek.com/api/list-models)、[DeepSeek 推理模式](https://api-docs.deepseek.com/guides/thinking_mode)、[OpenAI 推理强度](https://developers.openai.com/api/docs/guides/reasoning)。
+
+## 2026-10-03 修正 SPEC
+
+- 开发启动启用 electron-vite `--watch`，主进程和 preload 修改后重启，避免 renderer 热更新调用旧 IPC。重新启动当前旧开发窗口后刷新 /models；DeepSeek 返回的真实窗口应为 1,048,576 tokens。
+- 强度入口改为小型胶囊按钮，点击展开五档面板。滑块拖动使用连续数值，拖动中位置不加过渡延迟，仅在释放或点击档位时平滑吸附；结束才执行一次持久化，不在每帧调用 IPC。键盘方向键切换整档，Home / End 到两端。
+- 面板适配浅色、深色与窄窗口，保留系统减少动画偏好。
+- 验证：窗口字段兼容与缓存、旧偏好迁移、五档保存和请求映射单元测试；Electron E2E 验证点击、拖动中连续位置、键盘档位与重启恢复；类型检查、构建、打包和当前开发窗口实测。
