@@ -124,6 +124,13 @@ button { -webkit-app-region: no-drag; }
 .composer { max-width: 730px; margin: 0 auto; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); padding: 15px 16px 12px; box-shadow: 0 5px 20px #00000004, 0 1px 3px #00000003; }
 .composer:focus-within { border-color: #a5b5a8; box-shadow: 0 5px 20px #00000006; }
 .composer textarea { padding: 0 2px; color: var(--text); font-size: 13px; line-height: 1.75; outline: none !important; box-shadow: none !important; }
+.composer-input { position: relative; }
+.composer-input[data-generating='true'], .composer-input[data-generating='true'] textarea { cursor: none !important; }
+.generation-cursor { position: absolute; z-index: 1; left: var(--cursor-x, 50%); top: var(--cursor-y, 50%); width: 18px; height: 18px; transform: translate(-50%, -50%); opacity: 0; pointer-events: none; }
+.generation-cursor::after { content: ''; position: absolute; inset: 0; border: 2px solid var(--line); border-top-color: var(--text); border-right-color: var(--muted); border-radius: 50%; animation: generation-spin 800ms linear infinite; animation-play-state: paused; }
+.composer-input:hover .generation-cursor { opacity: 1; }
+.composer-input:hover .generation-cursor::after { animation-play-state: running; }
+@keyframes generation-spin { to { transform: rotate(360deg); } }
 .composer-tools { display: flex; align-items: center; margin-top: 15px; gap: 8px; }
 .composer-right { display: flex; align-items: center; justify-content: flex-end; gap: 7px; margin-left: auto; min-width: 0; flex-wrap: wrap; }
 .attachment-add { color: var(--muted); width: 28px; height: 28px; padding: 3px; flex-shrink: 0; border-radius: 50%; transition: transform .2s, background .2s; }
@@ -145,10 +152,12 @@ button { -webkit-app-region: no-drag; }
 .strength-heading { display: flex; align-items: center; justify-content: space-between; font-size: 12px; font-weight: 550; }
 .strength-heading strong { font-size: 11px; font-weight: 550; color: var(--strength-color); font-family: ui-monospace, SFMono-Regular, monospace; }
 .strength-slider-wrap { position: relative; margin: 24px 12px 18px; }
-.strength-slider { margin: 0 !important; padding: 5px 0 !important; }
-.strength-rail { height: 5px !important; border-radius: 999px !important; background: var(--strength-line) !important; }
-.strength-track { height: 5px !important; border-radius: 999px !important; background: linear-gradient(90deg, #64c9d7, var(--strength-color)) !important; transition: width 180ms cubic-bezier(.22, 1, .36, 1) !important; }
-.strength-handle { transition: left 180ms cubic-bezier(.22, 1, .36, 1) !important; }
+.strength-slider { margin: 0 !important; padding: 8px 0 !important; height: 24px !important; }
+.strength-rail { height: 8px !important; border-radius: 999px !important; background: var(--strength-line) !important; }
+.strength-track { height: 8px !important; border-radius: 999px !important; overflow: hidden; background: linear-gradient(90deg, #64c9d7, var(--strength-color)) !important; transition: width 180ms cubic-bezier(.22, 1, .36, 1) !important; }
+.strength-track::after { content: ''; position: absolute; inset: 0 -32px; pointer-events: none; opacity: .8; background-image: radial-gradient(circle at 3px 3px, #fff 0 1px, transparent 1.6px), radial-gradient(circle at 17px 6px, #ffffffb3 0 .8px, transparent 1.4px), radial-gradient(circle at 27px 2px, #ffffff80 0 .6px, transparent 1.2px); background-size: 32px 8px; animation: strength-flow 1600ms linear infinite; }
+@keyframes strength-flow { from { transform: translateX(-32px); } to { transform: translateX(0); } }
+.strength-handle { inset-block-start: 7px !important; transition: left 180ms cubic-bezier(.22, 1, .36, 1) !important; }
 .strength-handle::after { width: 16px !important; height: 16px !important; inset-inline-start: -3px !important; inset-block-start: -3px !important; background: var(--strength-bg) !important; box-shadow: 0 0 0 3px var(--strength-color), 0 3px 10px #0002 !important; transition: box-shadow 160ms ease !important; }
 .strength-handle:focus-visible::after { outline: 3px solid color-mix(in srgb, var(--strength-color) 25%, transparent); outline-offset: 5px; }
 .strength-ticks { display: flex; justify-content: space-between; margin-top: 8px; pointer-events: none; }

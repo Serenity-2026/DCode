@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react'
 import { Alert, App as AntApp, Button, ConfigProvider, Dropdown, Input, Modal, theme } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import {
@@ -125,6 +125,14 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
   useEffect(() => {
     if (follow.current && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight
   }, [active?.messages, active?.id])
+
+  /** 生成期间更新输入区域圆环的位置；依赖局部容器和 CSS 动画，不触发 Workspace 重渲染。 */
+  function moveGenerationCursor(event: PointerEvent<HTMLDivElement>): void {
+    if (!generating) return
+    const rect = event.currentTarget.getBoundingClientRect()
+    event.currentTarget.style.setProperty('--cursor-x', `${event.clientX - rect.left}px`)
+    event.currentTarget.style.setProperty('--cursor-y', `${event.clientY - rect.top}px`)
+  }
 
   /** 导航到指定问题；依赖消息 DOM 锚点，平滑跳转期间暂停跟随流式输出，减少动画时即时滚动。 */
   function navigateMessage(id: string): void {
@@ -318,9 +326,12 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
       </div>
       <div className="composer-area"><div className="composer">
         {Boolean(attachments.length) && <AttachmentList items={attachments} disabled={busy} onRemove={id => setAttachments(previous => previous.filter(item => item.id !== id))} />}
+        <div className="composer-input" data-generating={generating} onPointerMove={moveGenerationCursor}>
         <Input.TextArea ref={composer} aria-label="消息" placeholder="描述你的想法，或粘贴代码…" variant="borderless" autoSize={{ minRows: 2, maxRows: 7 }} maxLength={32_000} value={draft} disabled={busy} onChange={e => setDraft(e.target.value)} onKeyDown={event => {
           if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void send() }
         }} />
+        {generating && <span className="generation-cursor" aria-hidden="true" />}
+        </div>
         <ComposerTools snapshot={snapshot} busy={busy} modelsLoading={modelsLoading} usedTokens={usedTokens} onAdd={kind => void addAttachments(kind)} onModel={(providerId, model) => void act({ type: 'model:select', providerId, model })} onRefresh={() => void refreshModels()} onSettings={() => setSettingsOpen(true)} onFastMode={() => void act({ type: 'fast-mode', enabled: !snapshot.fastMode })} onEffort={effort => act({ type: 'reasoning-effort', effort })} sendButton={generating ? <Button className="send-button" type="primary" icon={<StopOutlined />} loading={stopping} aria-label="停止生成" onClick={() => void stop()} /> : <Button className="send-button" type="primary" icon={<ArrowUpOutlined />} disabled={busy || (!draft.trim() && !attachments.length) || !snapshot.config.configured} loading={pending} aria-label="发送消息" onClick={() => void send()} />} />
       </div><div className="footer-note"><span>{active ? `${active.messages.filter(m => m.role === 'user').length} 条提问` : 'Shift + Enter 换行'}</span><span>DCode / {active?.model || modelName}</span></div></div>
     </WorkspaceLayout>
