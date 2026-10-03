@@ -28,11 +28,11 @@ export interface Conversation {
   messages: Message[]
 }
 
-/** 不含秘密的模型配置，供模型菜单与设置表单使用。 */
-export interface ModelProfile { id: string; name: string; baseUrl: string; model: string }
+/** 服务公开配置及实际获取的模型列表，模型 ID 只能来自服务的 /models 响应。 */
+export interface ProviderProfile { id: string; name: string; baseUrl: string; availableModels: string[] }
 
 /** 设置表单提交的配置；编辑时 apiKey 留空表示保留现有密钥。 */
-export interface ModelDraft extends Omit<ModelProfile, 'id'> { id?: string; apiKey: string }
+export interface ProviderDraft { id?: string; name: string; baseUrl: string; apiKey: string }
 
 /** 界面可见状态；未登录时不包含账号、聊天或模型配置。 */
 export interface Snapshot {
@@ -42,10 +42,15 @@ export interface Snapshot {
   conversations: Conversation[]
   theme: Theme
   legacyUsers: User[]
-  models: ModelProfile[]
-  activeModelId: string | null
+  providers: ProviderProfile[]
+  activeProviderId: string | null
+  selectedModel: string | null
+  fastMode: boolean
   config: { baseUrl: string; model: string; configured: boolean }
 }
+
+/** 刷新各服务后的公开状态与失败提示，成功服务可独立更新，失败服务保留缓存。 */
+export interface ModelRefresh { snapshot: Snapshot; errors: string[] }
 
 /** 注册/登录输入由 Auth 校验；legacyUserId 可将首版档案关联到新账号。 */
 export interface AuthInput { username: string; password: string; legacyUserId?: string }
@@ -56,7 +61,8 @@ export type Action =
   | { type: 'conversation:select'; id: string | null }
   | { type: 'conversation:rename'; id: string; title: string }
   | { type: 'conversation:delete'; id: string }
-  | { type: 'model:select'; id: string }
+  | { type: 'model:select'; providerId: string; model: string }
+  | { type: 'fast-mode'; enabled: boolean }
   | { type: 'theme'; theme: Theme }
 
 /** 流更新携带完整消息，Workspace 按 ID 替换对应回复。 */
@@ -75,8 +81,10 @@ export interface DCodeAPI {
   login(input: AuthInput): Promise<Result<Snapshot>>
   /** 注销记住的会话，必须再次输入密码才能进入。 */
   logout(): Promise<Result<Snapshot>>
-  /** 测试准确配置，成功后加密保存并选中，失败则保留旧值。 */
-  saveModel(input: ModelDraft): Promise<Result<Snapshot>>
+  /** 使用准确的 URL 和密钥获取模型列表，成功才加密保存服务。 */
+  saveProvider(input: ProviderDraft): Promise<Result<Snapshot>>
+  /** 重新读取当前账号所有服务的模型列表，不向界面暴露密钥。 */
+  refreshModels(): Promise<Result<ModelRefresh>>
   /** 修改当前账号的资料、会话、模型选择或主题。 */
   action(action: Action): Promise<Result<Snapshot>>
   /** 使用当前账号选中的模型生成回复。 */

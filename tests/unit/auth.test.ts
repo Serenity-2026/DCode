@@ -77,3 +77,18 @@ it('backs up and migrates legacy conversations without assigning a password auto
   expect(state.activeUserId).toBe(legacy.users[0].id)
   expect(state.theme).toBe('dark')
 })
+
+it('migrates schema 2 services without exposing old hand-entered model IDs as discovered models', async () => {
+  const { store, path } = await create()
+  store.begin('保留聊天', false, 'previous-model')
+  const previous = { ...store.state, schemaVersion: 2, users: store.state.users.map(({ providers, activeProviderId, selectedModel: _selection, fastMode: _fast, ...user }) => ({
+    ...user, models: providers.map(({ availableModels: _catalog, ...provider }) => ({ ...provider, model: 'hand-entered' })), activeModelId: activeProviderId
+  })) }
+  writeFileSync(path, JSON.stringify(previous))
+  const migrated = new Store(path)
+  expect(JSON.parse(readFileSync(`${path}.v2.backup`, 'utf8'))).toEqual(previous)
+  await new Auth(migrated, secrets, new Models(migrated, secrets, config)).restore()
+  expect(migrated.snapshot()).toMatchObject({ providers: [{ availableModels: [] }], selectedModel: null, fastMode: false })
+  expect(migrated.snapshot().conversations[0].messages[0].content).toBe('保留聊天')
+  expect(migrated.requireUser().passwordHash).toBe(store.requireUser().passwordHash)
+})

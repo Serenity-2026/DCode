@@ -2,7 +2,7 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { channels } from '../shared/channels'
-import type { Action, AuthInput, ModelDraft, Result } from '../shared/types'
+import type { Action, AuthInput, ProviderDraft, Result } from '../shared/types'
 import { loadConfig } from './config'
 import { Store } from './store'
 import { Chat } from './chat'
@@ -85,7 +85,9 @@ void app.whenReady().then(async () => {
   handle<AuthInput>(channels.login, input => exclusive(() => auth.login(input)))
   handle(channels.logout, () => exclusive(() => auth.logout()))
   // Models 测试填写的准确配置，成功后保存，失败时不覆盖旧值。
-  handle<ModelDraft>(channels.saveModel, input => exclusive(() => models.testAndSave(input)))
+  handle<ProviderDraft>(channels.saveProvider, input => exclusive(() => models.testAndSave(input)))
+  // 登录后和模型菜单主动刷新时，获取账号各服务实际提供的模型。
+  handle(channels.refreshModels, () => exclusive(() => models.refresh()))
   // 用户、会话与主题操作交给 Store.apply；Chat 生成期间禁止修改会话状态。
   handle<Action>(channels.action, input => exclusive(() => {
     store.apply(input)

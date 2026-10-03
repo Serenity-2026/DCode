@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { constants, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import type { Action, Conversation, Message, ModelProfile, Snapshot, Theme, User } from '../shared/types'
+import type { Action, Conversation, Message, ProviderProfile, Snapshot, Theme, User } from '../shared/types'
 
 /** 校验并去除文本两端空白，供 Store 的用户名称、会话标题和问题输入共用。 */
 export function textInput(value: unknown, max: number): string {
@@ -16,16 +16,18 @@ export interface StoredUser extends User {
   passwordHash?: string
   passwordSalt?: string
   theme: Theme
-  models: (ModelProfile & { encryptedApiKey: string })[]
-  activeModelId: string | null
+  providers: (ProviderProfile & { encryptedApiKey: string })[]
+  activeProviderId: string | null
+  selectedModel: string | null
+  fastMode: boolean
 }
 
 /** 保持登录的令牌只以 OS 加密密文保存，Auth 在启动时解密并核对哈希。 */
 export interface RememberedSession { userId: string; tokenHash: string; encryptedToken: string }
 
-/** schema 2 的磁盘格式，不能直接通过 IPC 返回给界面。 */
+/** schema 3 的磁盘格式，不能直接通过 IPC 返回给界面。 */
 export interface StoredState {
-  schemaVersion: 2
+  schemaVersion: 3
   users: StoredUser[]
   activeUserId: string | null
   activeConversationId: string | null
@@ -33,27 +35,44 @@ export interface StoredState {
   session: RememberedSession | null
 }
 
-/** 校验磁盘结构及账号/会话归属；同时接受首版格式用于保留数据的升级。 */
+/** schema 2 的旧服务记录，只用于 Store 升级，旧手填模型不会混入服务返回列表。 */
+interface LegacyUser extends User {
+  passwordHash?: string
+  passwordSalt?: string
+  theme: Theme
+  models: { id: string; name: string; baseUrl: string; model: string; encryptedApiKey: string }[]
+  activeModelId: string | null
+}
+
+/** 校验磁盘结构、唯一性及账号/会话归属，同时接受首版和 schema 2 用于无损升级。 */
 function validState(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false
   const state = value as StoredState
-  if (![1, 2].includes(state.schemaVersion) || !Array.isArray(state.users) || !Array.isArray(state.conversations)) return false
-  if (Number(state.schemaVersion) === 1 && !['light', 'dark'].includes((value as { theme: string }).theme)) return false
+  const version = (value as { schemaVersion: number }).schemaVersion
+  if (![1, 2, 3].includes(version) || !Array.isArray(state.users) || !Array.isArray(state.conversations)) return false
+  if (version === 1 && !['light', 'dark'].includes((value as { theme: string }).theme)) return false
   const ids = new Set<string>()
   const usernames = new Set<string>()
   for (const u of state.users) {
     if (!u || typeof u.id !== 'string' || ids.has(u.id) || typeof u.name !== 'string' || !u.name.trim() || typeof u.createdAt !== 'string') return false
     ids.add(u.id)
-    if (state.schemaVersion === 2) {
-      if (!['light', 'dark'].includes(u.theme) || !Array.isArray(u.models)) return false
-      if (u.username !== undefined && (typeof u.username !== 'string' || typeof u.passwordHash !== 'string' || typeof u.passwordSalt !== 'string')) return false
+    if (version >= 2) {
+      if (!['light', 'dark'].includes(u.theme)) return false
       if (u.username !== undefined) {
-        if (usernames.has(u.username)) return false
+        if (typeof u.username !== 'string' || typeof u.passwordHash !== 'string' || typeof u.passwordSalt !== 'string' || usernames.has(u.username)) return false
         usernames.add(u.username)
       }
-      if (u.models.some(m => !m || ['id', 'name', 'baseUrl', 'model', 'encryptedApiKey'].some(key => typeof m[key as keyof typeof m] !== 'string'))) return false
-      if (new Set(u.models.map(m => m.id)).size !== u.models.length) return false
-      if (u.activeModelId !== null && !u.models.some(m => m.id === u.activeModelId)) return false
+      if (version === 2) {
+        const old = u as unknown as LegacyUser
+        if (!Array.isArray(old.models) || old.models.some(m => !m || ['id', 'name', 'baseUrl', 'model', 'encryptedApiKey'].some(key => typeof m[key as keyof typeof m] !== 'string'))) return false
+        if (new Set(old.models.map(m => m.id)).size !== old.models.length || (old.activeModelId !== null && !old.models.some(m => m.id === old.activeModelId))) return false
+      } else {
+        if (!Array.isArray(u.providers) || typeof u.fastMode !== 'boolean') return false
+        if (u.providers.some(p => !p || ['id', 'name', 'baseUrl', 'encryptedApiKey'].some(key => typeof p[key as keyof typeof p] !== 'string') || !Array.isArray(p.availableModels) || p.availableModels.some(id => typeof id !== 'string' || !id.trim()))) return false
+        if (new Set(u.providers.map(p => p.id)).size !== u.providers.length) return false
+        if (u.activeProviderId !== null && !u.providers.some(p => p.id === u.activeProviderId)) return false
+        if (u.selectedModel !== null && (typeof u.selectedModel !== 'string' || !u.providers.some(p => p.id === u.activeProviderId && p.availableModels.includes(u.selectedModel!)))) return false
+      }
     }
   }
   const conversationIds = new Set<string>()
@@ -65,7 +84,7 @@ function validState(value: unknown): boolean {
   }
   if (state.activeUserId !== null && !ids.has(state.activeUserId)) return false
   if (state.activeConversationId !== null && !state.conversations.some(c => c.id === state.activeConversationId && c.userId === state.activeUserId)) return false
-  if (state.schemaVersion === 2 && state.session !== null) {
+  if (version >= 2 && state.session !== null) {
     if (!state.session || !ids.has(state.session.userId) || typeof state.session.tokenHash !== 'string' || typeof state.session.encryptedToken !== 'string') return false
   }
   return true
@@ -92,13 +111,20 @@ export class Store {
         const legacy = parsed as { users: User[]; conversations: Conversation[]; theme: Theme }
         if (!existsSync(`${path}.v1.backup`)) copyFileSync(path, `${path}.v1.backup`, constants.COPYFILE_EXCL)
         this.state = {
-          schemaVersion: 2, users: legacy.users.map(u => ({ ...u, theme: legacy.theme, models: [], activeModelId: null })),
+          schemaVersion: 3, users: legacy.users.map(u => ({ ...u, theme: legacy.theme, providers: [], activeProviderId: null, selectedModel: null, fastMode: false })),
           activeUserId: null, activeConversationId: null, conversations: legacy.conversations, session: null
         }
+      } else if ((parsed as { schemaVersion: number }).schemaVersion === 2) {
+        const old = parsed as Omit<StoredState, 'schemaVersion' | 'users'> & { schemaVersion: 2; users: LegacyUser[] }
+        if (!existsSync(`${path}.v2.backup`)) copyFileSync(path, `${path}.v2.backup`, constants.COPYFILE_EXCL)
+        this.state = { ...old, schemaVersion: 3, users: old.users.map(({ models, activeModelId, ...user }) => ({
+          ...user, providers: models.map(({ model: _oldModel, ...provider }) => ({ ...provider, availableModels: [] })),
+          activeProviderId: activeModelId, selectedModel: null, fastMode: false
+        })) }
       } else this.state = parsed as StoredState
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error('无法读取本地数据，请备份数据文件后检查格式。')
-      this.state = { schemaVersion: 2, users: [], activeUserId: null, activeConversationId: null, conversations: [], session: null }
+      this.state = { schemaVersion: 3, users: [], activeUserId: null, activeConversationId: null, conversations: [], session: null }
     }
     for (const c of this.state.conversations) {
       for (const m of c.messages) if (m.status === 'streaming') m.status = 'stopped'
@@ -160,15 +186,15 @@ export class Store {
   snapshot(): Snapshot {
     const user = this.state.users.find(u => u.id === this.authenticatedUserId && u.id === this.state.activeUserId)
     const publicUser = (u: User): User => ({ id: u.id, name: u.name, username: u.username, createdAt: u.createdAt })
-    const selected = user?.models.find(m => m.id === user.activeModelId)
+    const selected = user?.providers.find(p => p.id === user.activeProviderId)
     return structuredClone({
       users: user ? [publicUser(user)] : [], activeUserId: user?.id || null,
       activeConversationId: user ? this.state.activeConversationId : null,
       conversations: user ? this.state.conversations.filter(c => c.userId === user.id) : [],
       theme: user?.theme || 'light', legacyUsers: user ? [] : this.state.users.filter(u => !u.username).map(publicUser),
-      models: user?.models.map(({ encryptedApiKey: _secret, ...profile }) => profile) || [],
-      activeModelId: user?.activeModelId || null,
-      config: { baseUrl: selected?.baseUrl || '', model: selected?.model || '', configured: Boolean(selected?.encryptedApiKey) }
+      providers: user?.providers.map(({ encryptedApiKey: _secret, ...profile }) => profile) || [],
+      activeProviderId: user?.activeProviderId || null, selectedModel: user?.selectedModel || null, fastMode: user?.fastMode || false,
+      config: { baseUrl: selected?.baseUrl || '', model: user?.selectedModel || '', configured: Boolean(selected?.encryptedApiKey && selected.availableModels.includes(user?.selectedModel || '')) }
     })
   }
 
@@ -194,8 +220,13 @@ export class Store {
           currentUser.name = textInput(action.name, 40)
           break
         case 'model:select':
-          if (!currentUser.models.some(m => m.id === action.id)) throw new Error('模型配置不存在。')
-          currentUser.activeModelId = action.id
+          if (!currentUser.providers.some(p => p.id === action.providerId && p.availableModels.includes(action.model))) throw new Error('模型不存在或不属于当前账号。')
+          currentUser.activeProviderId = action.providerId
+          currentUser.selectedModel = action.model
+          break
+        case 'fast-mode':
+          if (typeof action.enabled !== 'boolean') throw new Error('无效快速模式状态。')
+          currentUser.fastMode = action.enabled
           break
         case 'conversation:select':
           if (action.id !== null) this.conversation(action.id)

@@ -45,12 +45,12 @@ export class Auth {
     if (input.legacyUserId && !legacy) throw new Error('旧档案不存在或已关联账号。')
     const salt = randomBytes(16).toString('hex')
     const user: StoredUser = {
-      ...(legacy || { id: randomUUID(), name, createdAt: new Date().toISOString(), theme: 'light', models: [], activeModelId: null }),
+      ...(legacy || { id: randomUUID(), name, createdAt: new Date().toISOString(), theme: 'light', providers: [], activeProviderId: null, selectedModel: null, fastMode: false }),
       username: name, passwordSalt: salt, passwordHash: scryptSync(pass, salt, 64).toString('hex')
     }
     if (!this.store.state.users.some(u => u.username)) {
       const profile = await this.models.bootstrap()
-      if (profile) { user.models = [profile]; user.activeModelId = profile.id }
+      if (profile) { user.providers = [profile]; user.activeProviderId = profile.id }
     }
     const session = await this.session(user.id)
     this.store.transaction(() => {

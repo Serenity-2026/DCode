@@ -5,9 +5,9 @@ import {
   ArrowUpOutlined, PlusOutlined, SearchOutlined, MessageOutlined, MoreOutlined,
   SettingOutlined, CodeOutlined, BugOutlined, BranchesOutlined, CopyOutlined,
   ReloadOutlined, StopOutlined, DeleteOutlined, EditOutlined, LogoutOutlined,
-  DownOutlined, RightOutlined, ThunderboltOutlined
+  DownOutlined, RightOutlined, ThunderboltOutlined, ThunderboltFilled
 } from '@ant-design/icons'
-import type { Action, Message, Snapshot, StreamEvent } from '../../shared/types'
+import type { Action, Message, ModelRefresh, Result, Snapshot, StreamEvent } from '../../shared/types'
 import { Markdown } from './Markdown'
 import { AuthScreen } from './AuthScreen'
 import { ModelSettings } from './ModelSettings'
@@ -54,6 +54,8 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
   const [pending, setPending] = useState(false)
   const [stopping, setStopping] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [modelsLoading, setModelsLoading] = useState(snapshot.providers.length > 0)
+  const initialRefresh = useRef<Promise<Result<ModelRefresh>> | null>(null)
   const [edit, setEdit] = useState<{ type: 'user' | 'conversation'; id: string; value: string } | null>(null)
   const streamEvents = useRef(new Map<string, StreamEvent>())
   const scroll = useRef<HTMLDivElement>(null)
@@ -63,13 +65,41 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
   const user = snapshot.users.find(u => u.id === snapshot.activeUserId)!
   const active = snapshot.conversations.find(c => c.id === snapshot.activeConversationId)
   const generating = Boolean(active?.messages.some(m => m.status === 'streaming'))
-  const busy = generating || pending || stopping
+  const busy = generating || pending || stopping || modelsLoading
 
   /** 合并 IPC 返回的 Snapshot 与已收到的 StreamEvent，避免较早的快照覆盖较新的流式文本。 */
   const installSnapshot = useCallback((next: Snapshot): void => {
     for (const c of next.conversations) c.messages = c.messages.map(m => streamEvents.current.get(m.id)?.message || m)
     setSnapshot(next)
   }, [setSnapshot])
+
+  // 登录后先用账号服务读取模型列表；共享同一次请求，避免 StrictMode 重复执行网络测试。
+  useEffect(() => {
+    if (!initialRefresh.current) initialRefresh.current = window.dcode.refreshModels()
+    let active = true
+    void initialRefresh.current.then(result => {
+      if (!active) return
+      if (result.ok) {
+        installSnapshot(result.value.snapshot)
+        if (result.value.errors.length) void toast.error(result.value.errors.join('\n'))
+      } else void toast.error(result.error)
+    }).catch(() => { if (active) void toast.error('获取模型列表失败，请重试。') }).finally(() => { if (active) setModelsLoading(false) })
+    return () => { active = false }
+  }, [installSnapshot, toast])
+
+  /** 菜单主动刷新当前账号的模型列表，更新成功服务并显示失败原因，保留原聊天和草稿。 */
+  async function refreshModels(): Promise<void> {
+    if (busy || inFlight.current) return
+    inFlight.current = true; setModelsLoading(true)
+    try {
+      const result = await window.dcode.refreshModels()
+      if (result.ok) {
+        installSnapshot(result.value.snapshot)
+        if (result.value.errors.length) void toast.error(result.value.errors.join('\n'))
+      } else void toast.error(result.error)
+    } catch { void toast.error('获取模型列表失败，请重试。') }
+    finally { inFlight.current = false; setModelsLoading(false) }
+  }
 
   // 按会话/消息 ID 更新流式回复；effect 返回 preload 提供的退订函数，防止重复监听。
   useEffect(() => window.dcode.onStream(event => {
@@ -194,6 +224,7 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
 
   const conversations = snapshot.conversations.filter(c => `${c.title} ${c.messages.map(m => m.content).join(' ')}`.toLowerCase().includes(search.toLowerCase())).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
   const modelName = snapshot.config.model
+  const modelChoices = snapshot.providers.flatMap(provider => provider.availableModels.map(model => ({ key: JSON.stringify([provider.id, model]), providerId: provider.id, model })))
   return <div className="shell" data-theme={snapshot.theme}>
     <aside className="sidebar">
       <div className="window-space" />
@@ -249,12 +280,20 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
         <Input.TextArea ref={composer} aria-label="消息" placeholder="描述你的想法，或粘贴代码…" variant="borderless" autoSize={{ minRows: 2, maxRows: 7 }} maxLength={32_000} value={draft} disabled={busy} onChange={e => setDraft(e.target.value)} onKeyDown={event => {
           if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void send() }
         }} />
-        <div className="composer-tools"><Tooltip title="仅对支持加速的模型生效" trigger="click"><Button className="speed-button" type="text" icon={<ThunderboltOutlined />} aria-label="模型加速说明" /></Tooltip>
-          <Dropdown disabled={busy} trigger={['click']} menu={{ selectedKeys: snapshot.activeModelId ? [snapshot.activeModelId] : [], items: [
-            ...snapshot.models.map(m => ({ key: m.id, label: `${m.name} · ${m.model}` })),
-            { key: 'settings', label: '添加或编辑模型', icon: <SettingOutlined /> }
-          ], onClick: ({ key }) => key === 'settings' ? setSettingsOpen(true) : void act({ type: 'model:select', id: key }) }}>
-            <Button className="model-selector" type="text" aria-label="切换模型" disabled={busy}>{modelName || '配置模型'}<DownOutlined /></Button>
+        <div className="composer-tools"><Tooltip title={`${snapshot.fastMode ? '关闭' : '开启'}快速模式 · 仅对支持加速的模型生效`}><Button className="speed-button" style={snapshot.fastMode ? { color: '#1677ff' } : undefined} type="text" disabled={busy} icon={snapshot.fastMode ? <ThunderboltFilled /> : <ThunderboltOutlined />} aria-label="快速模式" aria-pressed={snapshot.fastMode} onClick={() => void act({ type: 'fast-mode', enabled: !snapshot.fastMode })} /></Tooltip>
+          <Dropdown disabled={busy} trigger={['click']} menu={{ style: { maxHeight: 360, overflowY: 'auto' }, selectedKeys: snapshot.selectedModel ? [JSON.stringify([snapshot.activeProviderId, snapshot.selectedModel])] : [], items: [
+            ...snapshot.providers.map(provider => ({ key: provider.id, type: 'group' as const, label: provider.name, children: modelChoices.filter(choice => choice.providerId === provider.id).map(choice => ({ key: choice.key, label: choice.model })) })),
+            { key: 'refresh', label: '刷新模型列表', icon: <ReloadOutlined />, disabled: !snapshot.providers.length },
+            { key: 'settings', label: '配置模型服务', icon: <SettingOutlined /> }
+          ], onClick: ({ key }) => {
+            if (key === 'settings') setSettingsOpen(true)
+            else if (key === 'refresh') void refreshModels()
+            else {
+              const choice = modelChoices.find(item => item.key === key)
+              if (choice) void act({ type: 'model:select', providerId: choice.providerId, model: choice.model })
+            }
+          } }}>
+            <Button className="model-selector" type="text" aria-label="切换模型" disabled={busy} loading={modelsLoading}><span className="model-selector-label">{modelName || '选择模型'}</span><DownOutlined /></Button>
           </Dropdown><span className="composer-hint">{busy ? '正在生成' : 'Shift + Enter 换行'}</span>{generating ? <Button className="send-button" type="primary" icon={<StopOutlined />} loading={stopping} aria-label="停止生成" onClick={() => void stop()} /> : <Button className="send-button" type="primary" icon={<ArrowUpOutlined />} disabled={pending || !draft.trim() || !snapshot.config.configured} loading={pending} aria-label="发送消息" onClick={() => void send()} />}</div>
       </div><div className="footer-note"><span>{active ? `${active.messages.filter(m => m.role === 'user').length} 条提问` : ''}</span><span>DCode / {active?.model || modelName}</span></div></div>
     </main>

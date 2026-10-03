@@ -24,6 +24,9 @@ export async function create(initial: ModelConfig = config) {
   const models = new Models(store, secrets, initial)
   const auth = new Auth(store, secrets, models)
   await auth.register({ username: 'developer', password: 'test-password' })
+  // 单元测试预置已获取的目录；模型目录网络行为由 models.test 验证，E2E 使用真实 /models 请求。
+  const user = store.requireUser()
+  if (user.providers[0]) { user.providers[0].availableModels = [initial.model]; user.selectedModel = initial.model; store.save() }
   return { store, auth, models, path, directory }
 }
 

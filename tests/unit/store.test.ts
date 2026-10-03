@@ -16,7 +16,7 @@ describe('account-owned conversations', () => {
     expect(restored.state.conversations[0].messages[1]).toMatchObject({ content: '部分回答', status: 'stopped' })
     expect(restored.state.activeConversationId).toBe(store.state.activeConversationId)
     expect(restored.snapshot().conversations).toEqual([])
-    expect(JSON.parse(readFileSync(path, 'utf8')).schemaVersion).toBe(2)
+    expect(JSON.parse(readFileSync(path, 'utf8')).schemaVersion).toBe(3)
   })
 
   it('isolates accounts and rejects direct user switching or cross-account access', async () => {
@@ -26,7 +26,7 @@ describe('account-owned conversations', () => {
     auth.logout()
     await auth.register({ username: 'another', password: 'another-password' })
     expect(store.snapshot().conversations).toEqual([])
-    expect(store.snapshot().models).toEqual([])
+    expect(store.snapshot().providers).toEqual([])
     expect(JSON.stringify(store.snapshot())).not.toContain('private-key')
     expect(() => store.apply({ type: 'conversation:select', id: conversation.id })).toThrow('会话不存在')
     expect(() => store.apply({ type: 'user:rename', id: originalUser, name: '非法修改' })).toThrow('无权')
@@ -75,8 +75,11 @@ describe('account-owned conversations', () => {
 
   it('does not overwrite damaged data', async () => {
     const { path } = await create()
-    writeFileSync(path, '{broken')
-    expect(() => new Store(path)).toThrow('无法读取')
-    expect(readFileSync(path, 'utf8')).toBe('{broken')
+    const original = JSON.parse(readFileSync(path, 'utf8'))
+    for (const broken of ['{broken', JSON.stringify({ ...original, schemaVersion: '3' })]) {
+      writeFileSync(path, broken)
+      expect(() => new Store(path)).toThrow('无法读取')
+      expect(readFileSync(path, 'utf8')).toBe(broken)
+    }
   })
 })

@@ -16,8 +16,10 @@ const api: DCodeAPI = {
   login: (input) => ipcRenderer.invoke(channels.login, input),
   /** 撤销 Auth 的登录会话。 */
   logout: () => ipcRenderer.invoke(channels.logout),
-  /** Models 连通测试通过后才保存准确配置。 */
-  saveModel: (input) => ipcRenderer.invoke(channels.saveModel, input),
+  /** Models 获取有效模型列表后才保存服务地址与密钥。 */
+  saveProvider: (input) => ipcRenderer.invoke(channels.saveProvider, input),
+  /** 由 Models 解密当前账号服务的密钥并刷新模型列表。 */
+  refreshModels: () => ipcRenderer.invoke(channels.refreshModels),
   /** 将用户、会话或主题 Action 交给主进程的 Store.apply。 */
   action: (action) => ipcRenderer.invoke(channels.action, action),
   /** 请求主进程的 Chat.send 开始或重试生成，返回初始快照。 */

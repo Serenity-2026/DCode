@@ -77,19 +77,21 @@ export async function streamModel(
   }
   resetTimeout()
   try {
+    // OpenAI 兼容服务可按 service_tier 请求快速模式；DeepSeek 不发送未声明支持的参数。
+    const deepseek = new URL(config.baseUrl).hostname === 'api.deepseek.com'
     const response = await fetch(`${config.baseUrl}/chat/completions`, {
       method: 'POST',
       redirect: 'error',
       headers: { Authorization: `Bearer ${config.apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: config.model, messages, stream: true, max_tokens: options.maxTokens || 8192,
-        ...(new URL(config.baseUrl).hostname === 'api.deepseek.com' ? { thinking: { type: 'disabled' } } : {})
+        ...(deepseek ? { thinking: { type: 'disabled' } } : config.fastMode ? { service_tier: 'priority' } : {})
       }),
       signal: controller.signal
     })
     if (!response.ok) {
       const errors: Record<number, string> = {
-        400: '请求参数或模型不受支持，请检查模型配置。',
+        400: config.fastMode && !deepseek ? '请求参数或快速模式不受支持，请关闭快速模式并检查模型配置。' : '请求参数或模型不受支持，请检查模型配置。',
         401: 'API 密钥无效，请检查模型配置。',
         402: '模型账户余额不足，请充值后重试。',
         403: '无权访问该模型，请检查账户权限。',

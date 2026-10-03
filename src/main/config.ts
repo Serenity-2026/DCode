@@ -1,11 +1,16 @@
 import { config } from 'dotenv'
 import { join } from 'node:path'
 
-/** 主进程专用的模型连接配置；Chat/streamModel 使用密钥，Store.snapshot 只提取可公开字段。 */
-export interface ModelConfig {
+/** 主进程服务凭据，由 loadConfig/Models 读取；密钥不传入 renderer。 */
+export interface ProviderConfig {
   baseUrl: string
   apiKey: string
+}
+
+/** Chat 从账号的服务、列表选择及快速模式组装单次请求，Models 不固定模型 ID。 */
+export interface ModelConfig extends ProviderConfig {
   model: string
+  fastMode?: boolean
 }
 
 /** 校验并规范化模型服务地址，供环境导入与用户填写的配置共用，不允许携带认证或查询信息。 */
@@ -22,12 +27,11 @@ export function validateBaseUrl(value: unknown): string {
 }
 
 /** 读取启动环境配置，仅供 Models 向首个注册账号导入；之后以账号自己的配置为准。 */
-export function loadConfig(userData: string, packaged: boolean): ModelConfig {
+export function loadConfig(userData: string, packaged: boolean): ProviderConfig {
   config({ path: join(packaged ? userData : process.cwd(), '.env.local'), quiet: true })
   const baseUrl = validateBaseUrl(process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com')
   return {
     baseUrl,
-    apiKey: process.env.DEEPSEEK_API_KEY?.trim() || '',
-    model: process.env.DEEPSEEK_MODEL?.trim() || 'deepseek-flash'
+    apiKey: process.env.DEEPSEEK_API_KEY?.trim() || ''
   }
 }

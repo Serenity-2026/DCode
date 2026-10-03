@@ -63,6 +63,17 @@ describe('SSE protocol and model requests', () => {
     expect(JSON.parse(fetchMock.mock.calls[1][1].body)).not.toHaveProperty('thinking')
   })
 
+  it('sends priority only with fast mode on and avoids unsupported DeepSeek fields', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => new Response(bytes('data: {"choices":[{"delta":{"content":"OK"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')))
+    vi.stubGlobal('fetch', fetchMock)
+    await streamModel({ ...config, fastMode: true }, [], new AbortController(), () => {})
+    await streamModel({ ...config, fastMode: false }, [], new AbortController(), () => {})
+    await streamModel({ ...config, baseUrl: 'https://api.deepseek.com', fastMode: true }, [], new AbortController(), () => {})
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).service_tier).toBe('priority')
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).not.toHaveProperty('service_tier')
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body)).not.toHaveProperty('service_tier')
+  })
+
   it('aborts idle connections on timeout', async () => {
     vi.useFakeTimers()
     vi.stubGlobal('fetch', vi.fn((_url, options) => new Promise((_resolve, reject) => {
