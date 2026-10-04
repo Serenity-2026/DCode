@@ -8,7 +8,7 @@
 - 涉及代码修改时，必须先确认当前分支不是 `main`；如在 `main`，需先新建或切换到合规分支后再修改，禁止直接在 `main` 分支上改代码。
 - 每次提交应尽量保持单一目的，只包含本次任务相关文件。
 - Git 提交说明中必须包含用户本次发出的原始提示词，方便回看当时执行的命令和需求。
-- Git 提交到 GitHub 时，提交人名称必须使用当前登录的 GitHub 用户名 `Senerity-2026`，提交邮箱必须使用 `devedmc@163，本项目仓库为“https://github.com/Serenity-2026/EmailAgent.git”，禁止使用 `Codex`、`codex`、`Claude`、`claude` 或其他机器人名称；提交前需用 `git config user.name` 和 `git config user.email` 确认。
+- Git 提交到 GitHub 时，提交人名称必须使用当前登录的 GitHub 用户名 `Senerity-2026`，提交邮箱必须使用 `devedmc@163，本项目仓库为“https://github.com/Serenity-2026/DCode.git”，禁止使用 `Codex`、`codex`、`Claude`、`claude` 或其他机器人名称；提交前需用 `git config user.name` 和 `git config user.email` 确认。
 - Git 分支名、远端分支名和 PR 分支名也禁止使用 `Codex`、`codex`、`Claude`、`claude` 或其他机器人/AI 名称；新建分支优先使用 `feature/`、`fix/`、`docs/` 等中性前缀。
 - 提交信息中禁止把 Claude、Codex 等 AI 加为贡献者：不得出现 `Co-Authored-By: Claude ...`、`Generated with Claude Code` 等署名行，提交只归属本人。
 - 如果工作区已有未提交改动，提交前必须区分本次修改和既有改动，不要把无关内容混入同一个提交。
@@ -41,11 +41,10 @@
 
 ## 前端统一 Ant 系，用之前先查
 
-- UI 组件用 `antd`，图表用 AntV 的 `@ant-design/plots`（底层 `@antv/g2`；包名虽在 `@ant-design/` 下，
-  但它就是 AntV）。
+- UI 组件用 `antd`
 - **写任何「别处定义的名字」前先用命令确认它存在**，不许按同目录命名习惯推断。推断出来的名字
   不会报错，只会静默失效（类名不存在 = 零样式），比崩溃更难发现。
-  - **写 antd 组件前必须先 `antd info <组件>` 查 API**（`@ant-design/cli`，本地离线，含 v4/v5/v6；
+  - **写 antd 组件前必须先 `antd info <组件>` 查 API**
     另有 `antd doc` / `antd demo` / `antd token` / `antd migrate`）。凭记忆写 antd 属性视为违规。
     注意 Git Bash 里 `antd` 可能找不到，用 PowerShell 调。
   - AntV 图表 CLI 查不到（`antd info Line` 报 not found），读 `node_modules/@ant-design/plots/**/*.d.ts`

@@ -89,6 +89,11 @@ export class Store {
   /**
    * 从指定 JSON 文件恢复状态；文件不存在时创建空账号状态，损坏时拒绝覆盖。
    * 将上次遗留的 streaming 消息标记为 stopped，再调用 save 保存恢复后的状态。
+   * 读取 state.json
+   *   ↓
+   * 把 JSON 文本解析成对象
+   *   ↓
+   * 校验对象是否符合本地数据格式
    */
   constructor(private readonly path: string) {
     try {
