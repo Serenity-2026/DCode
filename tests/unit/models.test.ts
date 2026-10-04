@@ -11,6 +11,14 @@ function response(ids = ['gpt-6-astra', 'gpt-6-sol', 'gpt-5.6-sol']): Response {
 }
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); cleanup() })
 
+it('imports no environment service unless both URL and key are configured', async () => {
+  for (const initial of [{ baseUrl: '', apiKey: '' }, { baseUrl: '', apiKey: 'private-key' }, { baseUrl: 'https://example.com/v1', apiKey: '' }]) {
+    const { store } = await create({ ...initial, model: 'test' })
+    expect(store.snapshot().providers).toEqual([])
+    expect(store.snapshot().config.configured).toBe(false)
+  }
+})
+
 it('uses the candidate URL and key to discover models before saving, without a chat request', async () => {
   const { models, store } = await create()
   const fetchMock = vi.fn().mockImplementation(async () => response())
@@ -143,20 +151,7 @@ it('reads window aliases, ignores invalid values and retains verified metadata w
   expect(store.snapshot().providers[1].modelDetails).toEqual(snapshot.providers[1].modelDetails)
 })
 
-it('migrates the legacy preference only to its original model and preserves native levels', async () => {
-  const { store, path } = await create()
-  const provider = store.requireUser().providers[0]
-  provider.availableModels = ['test', 'another']
-  provider.modelDetails = { test: { reasoningEfforts: ['low', 'high', 'max'], defaultEffort: 'high' }, another: { reasoningEfforts: [...reasoningEfforts], defaultEffort: 'minimal' } }
-  for (const [old, expected] of [[null, undefined], ['medium', 'high'], ['ultra', 'max']] as const) {
-    provider.selectedEfforts = undefined
-    store.requireUser().reasoningEffort = old
-    store.save()
-    const restored = new Store(path)
-    expect(restored.state.users[0].reasoningEffort).toBeUndefined()
-    expect(restored.state.users[0].providers[0].selectedEfforts?.test).toBe(expected)
-    expect(restored.state.users[0].providers[0].selectedEfforts?.another).toBeUndefined()
-  }
+it('preserves supported effort levels and resolves service defaults', () => {
   for (const effort of reasoningEfforts) expect(resolveEffort(effort, { reasoningEfforts: [...reasoningEfforts] })).toBe(effort)
   expect(resolveEffort(null, { reasoningEfforts: ['low', 'high', 'max'], defaultEffort: 'low' })).toBe('low')
   expect(resolveEffort('ultra')).toBeNull()

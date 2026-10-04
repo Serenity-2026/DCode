@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { readFileSync, writeFileSync } from 'node:fs'
-import { contextMessages, Store } from '../../src/main/store'
+import { contextMessages, Store, type StoredState } from '../../src/main/store'
 import { create, cleanup } from './helpers'
 import type { Action } from '../../src/shared/types'
 
@@ -75,8 +75,13 @@ describe('account-owned conversations', () => {
 
   it('does not overwrite damaged data', async () => {
     const { path } = await create()
-    const original = JSON.parse(readFileSync(path, 'utf8'))
-    for (const broken of ['{broken', JSON.stringify({ ...original, schemaVersion: '3' })]) {
+    const original: StoredState = JSON.parse(readFileSync(path, 'utf8'))
+    const invalidStates = [
+      '{broken',
+      ...['3', 1, 2].map(schemaVersion => JSON.stringify({ ...original, schemaVersion })),
+      JSON.stringify({ ...original, users: original.users.map(({ passwordHash: _hash, ...user }) => user) })
+    ]
+    for (const broken of invalidStates) {
       writeFileSync(path, broken)
       expect(() => new Store(path)).toThrow('无法读取')
       expect(readFileSync(path, 'utf8')).toBe(broken)

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
-import { constants, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import type { Action, Attachment, Conversation, Message, ProviderProfile, ReasoningEffort, Snapshot, Theme, User } from '../shared/types'
+import type { Action, Attachment, Conversation, Message, ProviderProfile, Snapshot, Theme, User } from '../shared/types'
 import { modelEfforts, resolveEffort, selectedEffort, reasoningEfforts, validateAttachments } from '../shared/context'
 export { contextMessages } from '../shared/context'
 
@@ -15,15 +15,13 @@ export function textInput(value: unknown, max: number): string {
 
 /** 仅在主进程保存的账号记录；Auth 管理密码与会话，Models 管理密钥密文。 */
 export interface StoredUser extends User {
-  passwordHash?: string
-  passwordSalt?: string
+  passwordHash: string
+  passwordSalt: string
   theme: Theme
   providers: (ProviderProfile & { encryptedApiKey: string })[]
   activeProviderId: string | null
   selectedModel: string | null
   fastMode: boolean
-  /** 兼容旧的全局档位；启动时迁移到该账号当时选中的模型后移除此字段。 */
-  reasoningEffort?: ReasoningEffort | null
 }
 
 /** 保持登录的令牌只以 OS 加密密文保存，Auth 在启动时解密并核对哈希。 */
@@ -39,51 +37,29 @@ export interface StoredState {
   session: RememberedSession | null
 }
 
-/** schema 2 的旧服务记录，只用于 Store 升级，旧手填模型不会混入服务返回列表。 */
-interface LegacyUser extends User {
-  passwordHash?: string
-  passwordSalt?: string
-  theme: Theme
-  models: { id: string; name: string; baseUrl: string; model: string; encryptedApiKey: string }[]
-  activeModelId: string | null
-}
-
-/** 校验磁盘结构、唯一性及账号/会话归属，同时接受首版和 schema 2 用于无损升级。 */
+/** 校验当前磁盘结构、唯一性及账号/会话归属，不转换其他版本的数据。 */
 function validState(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false
   const state = value as StoredState
-  const version = (value as { schemaVersion: number }).schemaVersion
-  if (![1, 2, 3].includes(version) || !Array.isArray(state.users) || !Array.isArray(state.conversations)) return false
-  if (version === 1 && !['light', 'dark'].includes((value as { theme: string }).theme)) return false
+  if (state.schemaVersion !== 3 || !Array.isArray(state.users) || !Array.isArray(state.conversations)) return false
   const ids = new Set<string>()
   const usernames = new Set<string>()
   for (const u of state.users) {
     if (!u || typeof u.id !== 'string' || ids.has(u.id) || typeof u.name !== 'string' || !u.name.trim() || typeof u.createdAt !== 'string') return false
     ids.add(u.id)
-    if (version >= 2) {
-      if (!['light', 'dark'].includes(u.theme)) return false
-      if (u.username !== undefined) {
-        if (typeof u.username !== 'string' || typeof u.passwordHash !== 'string' || typeof u.passwordSalt !== 'string' || usernames.has(u.username)) return false
-        usernames.add(u.username)
-      }
-      if (version === 2) {
-        const old = u as unknown as LegacyUser
-        if (!Array.isArray(old.models) || old.models.some(m => !m || ['id', 'name', 'baseUrl', 'model', 'encryptedApiKey'].some(key => typeof m[key as keyof typeof m] !== 'string'))) return false
-        if (new Set(old.models.map(m => m.id)).size !== old.models.length || (old.activeModelId !== null && !old.models.some(m => m.id === old.activeModelId))) return false
-      } else {
-        if (!Array.isArray(u.providers) || typeof u.fastMode !== 'boolean') return false
-        if (u.reasoningEffort != null && !reasoningEfforts.includes(u.reasoningEffort)) return false
-        if (u.providers.some(p => !p || ['id', 'name', 'baseUrl', 'encryptedApiKey'].some(key => typeof p[key as keyof typeof p] !== 'string') || !Array.isArray(p.availableModels) || p.availableModels.some(id => typeof id !== 'string' || !id.trim()))) return false
-        if (u.providers.some(p => p.selectedEfforts !== undefined && (!p.selectedEfforts || typeof p.selectedEfforts !== 'object' || Array.isArray(p.selectedEfforts) || Object.values(p.selectedEfforts).some(level => !reasoningEfforts.includes(level))))) return false
-        if (new Set(u.providers.map(p => p.id)).size !== u.providers.length) return false
-        for (const provider of u.providers) if (provider.modelDetails !== undefined) {
-          if (!provider.modelDetails || typeof provider.modelDetails !== 'object' || Array.isArray(provider.modelDetails)) return false
-          if (Object.entries(provider.modelDetails).some(([id, detail]) => !provider.availableModels.includes(id) || !detail || typeof detail !== 'object' || (detail.contextWindow !== undefined && (!Number.isSafeInteger(detail.contextWindow) || detail.contextWindow <= 0)) || (detail.defaultEffort !== undefined && !reasoningEfforts.includes(detail.defaultEffort)) || (detail.reasoningEfforts !== undefined && (!Array.isArray(detail.reasoningEfforts) || detail.reasoningEfforts.some(effort => !reasoningEfforts.includes(effort)))))) return false
-        }
-        if (u.activeProviderId !== null && !u.providers.some(p => p.id === u.activeProviderId)) return false
-        if (u.selectedModel !== null && (typeof u.selectedModel !== 'string' || !u.providers.some(p => p.id === u.activeProviderId && p.availableModels.includes(u.selectedModel!)))) return false
-      }
+    if (!['light', 'dark'].includes(u.theme)) return false
+    if (typeof u.username !== 'string' || typeof u.passwordHash !== 'string' || typeof u.passwordSalt !== 'string' || usernames.has(u.username)) return false
+    usernames.add(u.username)
+    if (!Array.isArray(u.providers) || typeof u.fastMode !== 'boolean') return false
+    if (u.providers.some(p => !p || ['id', 'name', 'baseUrl', 'encryptedApiKey'].some(key => typeof p[key as keyof typeof p] !== 'string') || !Array.isArray(p.availableModels) || p.availableModels.some(id => typeof id !== 'string' || !id.trim()))) return false
+    if (u.providers.some(p => p.selectedEfforts !== undefined && (!p.selectedEfforts || typeof p.selectedEfforts !== 'object' || Array.isArray(p.selectedEfforts) || Object.values(p.selectedEfforts).some(level => !reasoningEfforts.includes(level))))) return false
+    if (new Set(u.providers.map(p => p.id)).size !== u.providers.length) return false
+    for (const provider of u.providers) if (provider.modelDetails !== undefined) {
+      if (!provider.modelDetails || typeof provider.modelDetails !== 'object' || Array.isArray(provider.modelDetails)) return false
+      if (Object.entries(provider.modelDetails).some(([id, detail]) => !provider.availableModels.includes(id) || !detail || typeof detail !== 'object' || (detail.contextWindow !== undefined && (!Number.isSafeInteger(detail.contextWindow) || detail.contextWindow <= 0)) || (detail.defaultEffort !== undefined && !reasoningEfforts.includes(detail.defaultEffort)) || (detail.reasoningEfforts !== undefined && (!Array.isArray(detail.reasoningEfforts) || detail.reasoningEfforts.some(effort => !reasoningEfforts.includes(effort)))))) return false
     }
+    if (u.activeProviderId !== null && !u.providers.some(p => p.id === u.activeProviderId)) return false
+    if (u.selectedModel !== null && (typeof u.selectedModel !== 'string' || !u.providers.some(p => p.id === u.activeProviderId && p.availableModels.includes(u.selectedModel!)))) return false
   }
   const conversationIds = new Set<string>()
   for (const c of state.conversations) {
@@ -95,7 +71,7 @@ function validState(value: unknown): boolean {
   }
   if (state.activeUserId !== null && !ids.has(state.activeUserId)) return false
   if (state.activeConversationId !== null && !state.conversations.some(c => c.id === state.activeConversationId && c.userId === state.activeUserId)) return false
-  if (version >= 2 && state.session !== null) {
+  if (state.session !== null) {
     if (!state.session || !ids.has(state.session.userId) || typeof state.session.tokenHash !== 'string' || typeof state.session.encryptedToken !== 'string') return false
   }
   return true
@@ -111,39 +87,19 @@ export class Store {
   private authenticatedUserId: string | null = null
 
   /**
-   * 从指定 JSON 文件恢复状态；文件不存在时创建空账号状态，损坏时拒绝覆盖；升级前备份旧档案。
+   * 从指定 JSON 文件恢复状态；文件不存在时创建空账号状态，损坏时拒绝覆盖。
    * 将上次遗留的 streaming 消息标记为 stopped，再调用 save 保存恢复后的状态。
    */
   constructor(private readonly path: string) {
     try {
       const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'))
       if (!validState(parsed)) throw new Error('Invalid state')
-      if ((parsed as { schemaVersion: number }).schemaVersion === 1) {
-        const legacy = parsed as { users: User[]; conversations: Conversation[]; theme: Theme }
-        if (!existsSync(`${path}.v1.backup`)) copyFileSync(path, `${path}.v1.backup`, constants.COPYFILE_EXCL)
-        this.state = {
-          schemaVersion: 3, users: legacy.users.map(u => ({ ...u, theme: legacy.theme, providers: [], activeProviderId: null, selectedModel: null, fastMode: false })),
-          activeUserId: null, activeConversationId: null, conversations: legacy.conversations, session: null
-        }
-      } else if ((parsed as { schemaVersion: number }).schemaVersion === 2) {
-        const old = parsed as Omit<StoredState, 'schemaVersion' | 'users'> & { schemaVersion: 2; users: LegacyUser[] }
-        if (!existsSync(`${path}.v2.backup`)) copyFileSync(path, `${path}.v2.backup`, constants.COPYFILE_EXCL)
-        this.state = { ...old, schemaVersion: 3, users: old.users.map(({ models, activeModelId, ...user }) => ({
-          ...user, providers: models.map(({ model: _oldModel, ...provider }) => ({ ...provider, availableModels: [] })),
-          activeProviderId: activeModelId, selectedModel: null, fastMode: false
-        })) }
-      } else this.state = parsed as StoredState
+      this.state = parsed as StoredState
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error('无法读取本地数据，请备份数据文件后检查格式。')
       this.state = { schemaVersion: 3, users: [], activeUserId: null, activeConversationId: null, conversations: [], session: null }
     }
-    // 旧全局偏好只迁移到当时选中的模型；其他模型独立采用服务默认值。
     for (const user of this.state.users) {
-      const provider = user.providers.find(item => item.id === user.activeProviderId)
-      if (provider && user.selectedModel && user.reasoningEffort && !Object.hasOwn(provider.selectedEfforts || {}, user.selectedModel)) {
-        provider.selectedEfforts = { ...provider.selectedEfforts, [user.selectedModel]: user.reasoningEffort }
-      }
-      delete user.reasoningEffort
       for (const profile of user.providers) this.reconcileEfforts(profile)
     }
     for (const c of this.state.conversations) {
@@ -152,7 +108,7 @@ export class Store {
     this.save()
   }
 
-  /** 模型目录更新或旧状态迁移时修正失效档位；依赖共享规则，不修改其他模型和账号的选择。 */
+  /** 模型目录更新及启动读取时修正失效档位；依赖共享规则，不修改其他模型和账号的选择。 */
   reconcileEfforts(provider: ProviderProfile): void {
     for (const [model, value] of Object.entries(provider.selectedEfforts || {})) {
       const detail = provider.modelDetails?.[model]
@@ -222,7 +178,7 @@ export class Store {
       users: user ? [publicUser(user)] : [], activeUserId: user?.id || null,
       activeConversationId: user ? this.state.activeConversationId : null,
       conversations: user ? this.state.conversations.filter(c => c.userId === user.id) : [],
-      theme: user?.theme || 'light', legacyUsers: user ? [] : this.state.users.filter(u => !u.username).map(publicUser),
+      theme: user?.theme || 'light',
       providers: user?.providers.map(({ encryptedApiKey: _secret, ...profile }) => profile) || [],
       activeProviderId: user?.activeProviderId || null, selectedModel: user?.selectedModel || null, fastMode: user?.fastMode || false,
       reasoningEffort: selectedEffort(selected, user?.selectedModel || null),

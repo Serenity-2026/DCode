@@ -18,7 +18,7 @@ const requests: { model: string; max_tokens: number; service_tier?: string; reas
 async function launch(live = false): Promise<void> {
   application = await electron.launch({ args: ['.'], env: {
     ...process.env, DCODE_USER_DATA_DIR: directory,
-    ...(live ? {} : { DEEPSEEK_BASE_URL: baseUrl, DEEPSEEK_API_KEY: 'e2e-local-key' })
+    ...(live ? {} : { BASE_URL: baseUrl, API_KEY: 'e2e-local-key' })
   } })
   page = await application.firstWindow()
 }

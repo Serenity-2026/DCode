@@ -10,7 +10,7 @@ export function modelEfforts(detail?: ModelDetails): ReasoningEffort[] {
   return reasoningEfforts.filter(level => detail?.reasoningEfforts?.includes(level))
 }
 
-/** Store 迁移与默认选择共用规则：保留受支持值，旧值取最近档位，缺省采用服务默认值。 */
+/** Store 的档位校验与默认选择规则：保留受支持值，失效值取最近档位，缺省采用服务默认值。 */
 export function resolveEffort(value: ReasoningEffort | null | undefined, detail?: ModelDetails): ReasoningEffort | null {
   const levels = modelEfforts(detail)
   if (!levels.length) return null

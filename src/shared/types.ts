@@ -16,7 +16,7 @@ export interface AttachmentSelection { attachments: Attachment[]; skipped: numbe
 export interface SendInput { content: string; retry?: boolean; attachments?: Attachment[] }
 
 /** 公开账号信息，不包含密码哈希、会话令牌或模型密钥。 */
-export interface User { id: string; name: string; username?: string; createdAt: string }
+export interface User { id: string; name: string; username: string; createdAt: string }
 
 /** 单条对话消息，由 Chat 更新，Workspace 与 Markdown 展示。 */
 export interface Message {
@@ -57,7 +57,6 @@ export interface Snapshot {
   activeConversationId: string | null
   conversations: Conversation[]
   theme: Theme
-  legacyUsers: User[]
   providers: ProviderProfile[]
   activeProviderId: string | null
   selectedModel: string | null
@@ -69,8 +68,8 @@ export interface Snapshot {
 /** 刷新各服务后的公开状态与失败提示，成功服务可独立更新，失败服务保留缓存。 */
 export interface ModelRefresh { snapshot: Snapshot; errors: string[] }
 
-/** 注册/登录输入由 Auth 校验；legacyUserId 可将首版档案关联到新账号。 */
-export interface AuthInput { username: string; password: string; legacyUserId?: string }
+/** 本机账号的注册/登录输入，由 Auth 校验账号格式与密码长度。 */
+export interface AuthInput { username: string; password: string }
 
 /** 已登录账号允许执行的操作，Store 再次校验账号与数据归属。 */
 export type Action =
@@ -93,7 +92,7 @@ export type Result<T> = { ok: true; value: T } | { ok: false; error: string }
 export interface DCodeAPI {
   /** 获取当前登录状态及账号快照。 */
   getState(): Promise<Result<Snapshot>>
-  /** 注册账号并保持登录，可关联旧档案。 */
+  /** 注册账号并保持登录。 */
   register(input: AuthInput): Promise<Result<Snapshot>>
   /** 验证账号密码并保持登录。 */
   login(input: AuthInput): Promise<Result<Snapshot>>

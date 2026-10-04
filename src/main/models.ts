@@ -47,7 +47,7 @@ export class Models {
 
   /** 加密导入环境服务，由 Auth.register 调用；不内置或读取环境中的模型 ID。 */
   async bootstrap(): Promise<StoredUser['providers'][number] | null> {
-    if (!this.initial.apiKey) return null
+    if (!this.initial.baseUrl || !this.initial.apiKey) return null
     return { id: randomUUID(), name: '环境默认', baseUrl: this.initial.baseUrl, availableModels: [], encryptedApiKey: await this.secrets.encrypt(this.initial.apiKey) }
   }
 

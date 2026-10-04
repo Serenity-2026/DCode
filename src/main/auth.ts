@@ -35,28 +35,25 @@ export class Auth {
     return { userId, tokenHash: createHash('sha256').update(token).digest('hex'), encryptedToken: await this.secrets.encrypt(JSON.stringify({ userId, token })) }
   }
 
-  /** 注册账号，可关联尚未设置密码的旧档案；成功后保存哈希并自动保持登录。 */
+  /** 创建本机账号，依赖 Store 保存密码哈希与会话，Models 为首个账号导入环境配置。 */
   async register(input: AuthInput): Promise<Snapshot> {
     if (this.store.snapshot().activeUserId) throw new Error('请先退出当前账号。')
     const name = username(input?.username)
     const pass = password(input?.password)
     if (this.store.state.users.some(u => u.username === name)) throw new Error('该账号已存在。')
-    const legacy = input.legacyUserId ? this.store.state.users.find(u => u.id === input.legacyUserId && !u.username) : undefined
-    if (input.legacyUserId && !legacy) throw new Error('旧档案不存在或已关联账号。')
     const salt = randomBytes(16).toString('hex')
     const user: StoredUser = {
-      ...(legacy || { id: randomUUID(), name, createdAt: new Date().toISOString(), theme: 'light', providers: [], activeProviderId: null, selectedModel: null, fastMode: false }),
+      id: randomUUID(), name, createdAt: new Date().toISOString(), theme: 'light', providers: [], activeProviderId: null, selectedModel: null, fastMode: false,
       username: name, passwordSalt: salt, passwordHash: scryptSync(pass, salt, 64).toString('hex')
     }
-    if (!this.store.state.users.some(u => u.username)) {
+    if (!this.store.state.users.length) {
       const profile = await this.models.bootstrap()
       if (profile) { user.providers = [profile]; user.activeProviderId = profile.id }
     }
     const session = await this.session(user.id)
     this.store.transaction(() => {
       if (this.store.state.users.some(u => u.username === name)) throw new Error('该账号已存在。')
-      if (legacy) this.store.state.users = this.store.state.users.map(u => u.id === legacy.id ? user : u)
-      else this.store.state.users.push(user)
+      this.store.state.users.push(user)
       this.store.authenticate(user.id)
       this.store.state.session = session
     })
