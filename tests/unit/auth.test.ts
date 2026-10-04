@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from 'vitest'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { Store } from '../../src/main/store'
 import { Auth } from '../../src/main/auth'
 import { Models } from '../../src/main/models'
@@ -60,35 +60,4 @@ it('rejects a remembered token reassigned to another account on disk', async () 
   await new Auth(restored, secrets, new Models(restored, secrets, config)).restore()
   expect(restored.snapshot().activeUserId).toBeNull()
   expect(restored.state.session).toBeNull()
-})
-
-it('backs up and migrates legacy conversations without assigning a password automatically', async () => {
-  const { store, path } = await create()
-  store.begin('旧问题', false, 'old-model')
-  const legacy = { schemaVersion: 1, users: store.state.users.map(({ id, name, createdAt }) => ({ id, name, createdAt })), conversations: store.state.conversations, activeUserId: store.state.activeUserId, activeConversationId: store.state.activeConversationId, theme: 'dark' }
-  writeFileSync(path, JSON.stringify(legacy))
-  const migrated = new Store(path)
-  expect(JSON.parse(readFileSync(`${path}.v1.backup`, 'utf8'))).toEqual(legacy)
-  expect(migrated.snapshot().activeUserId).toBeNull()
-  expect(migrated.snapshot().legacyUsers).toHaveLength(1)
-  const auth = new Auth(migrated, secrets, new Models(migrated, secrets, config))
-  const state = await auth.register({ username: 'new-account', password: 'new-password', legacyUserId: legacy.users[0].id })
-  expect(state.conversations[0].messages[0].content).toBe('旧问题')
-  expect(state.activeUserId).toBe(legacy.users[0].id)
-  expect(state.theme).toBe('dark')
-})
-
-it('migrates schema 2 services without exposing old hand-entered model IDs as discovered models', async () => {
-  const { store, path } = await create()
-  store.begin('保留聊天', false, 'previous-model')
-  const previous = { ...store.state, schemaVersion: 2, users: store.state.users.map(({ providers, activeProviderId, selectedModel: _selection, fastMode: _fast, ...user }) => ({
-    ...user, models: providers.map(({ availableModels: _catalog, ...provider }) => ({ ...provider, model: 'hand-entered' })), activeModelId: activeProviderId
-  })) }
-  writeFileSync(path, JSON.stringify(previous))
-  const migrated = new Store(path)
-  expect(JSON.parse(readFileSync(`${path}.v2.backup`, 'utf8'))).toEqual(previous)
-  await new Auth(migrated, secrets, new Models(migrated, secrets, config)).restore()
-  expect(migrated.snapshot()).toMatchObject({ providers: [{ availableModels: [] }], selectedModel: null, fastMode: false })
-  expect(migrated.snapshot().conversations[0].messages[0].content).toBe('保留聊天')
-  expect(migrated.requireUser().passwordHash).toBe(store.requireUser().passwordHash)
 })

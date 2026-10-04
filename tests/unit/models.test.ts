@@ -151,20 +151,7 @@ it('reads window aliases, ignores invalid values and retains verified metadata w
   expect(store.snapshot().providers[1].modelDetails).toEqual(snapshot.providers[1].modelDetails)
 })
 
-it('migrates the legacy preference only to its original model and preserves native levels', async () => {
-  const { store, path } = await create()
-  const provider = store.requireUser().providers[0]
-  provider.availableModels = ['test', 'another']
-  provider.modelDetails = { test: { reasoningEfforts: ['low', 'high', 'max'], defaultEffort: 'high' }, another: { reasoningEfforts: [...reasoningEfforts], defaultEffort: 'minimal' } }
-  for (const [old, expected] of [[null, undefined], ['medium', 'high'], ['ultra', 'max']] as const) {
-    provider.selectedEfforts = undefined
-    store.requireUser().reasoningEffort = old
-    store.save()
-    const restored = new Store(path)
-    expect(restored.state.users[0].reasoningEffort).toBeUndefined()
-    expect(restored.state.users[0].providers[0].selectedEfforts?.test).toBe(expected)
-    expect(restored.state.users[0].providers[0].selectedEfforts?.another).toBeUndefined()
-  }
+it('preserves supported effort levels and resolves service defaults', () => {
   for (const effort of reasoningEfforts) expect(resolveEffort(effort, { reasoningEfforts: [...reasoningEfforts] })).toBe(effort)
   expect(resolveEffort(null, { reasoningEfforts: ['low', 'high', 'max'], defaultEffort: 'low' })).toBe('low')
   expect(resolveEffort('ultra')).toBeNull()

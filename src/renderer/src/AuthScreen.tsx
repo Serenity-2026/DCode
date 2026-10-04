@@ -1,10 +1,10 @@
 import { useState, type ReactNode } from 'react'
-import { Alert, Button, Form, Input, Segmented, Select } from 'antd'
+import { Alert, Button, Form, Input, Segmented } from 'antd'
 import { BrandMark } from './BrandMark'
 import type { AuthInput, Snapshot } from '../../shared/types'
 
 /** 登录/注册入口，依赖 Ant Design 表单和 preload 的 Auth API；成功后把账号快照交给 Root。 */
-export function AuthScreen({ snapshot, onLogin }: { snapshot: Snapshot; onLogin: (next: Snapshot) => void }): ReactNode {
+export function AuthScreen({ onLogin }: { onLogin: (next: Snapshot) => void }): ReactNode {
   const [mode, setMode] = useState<'login' | 'register'>('login')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -34,7 +34,6 @@ export function AuthScreen({ snapshot, onLogin }: { snapshot: Snapshot; onLogin:
         <Form.Item name="confirmPassword" label="确认密码" dependencies={['password']} rules={[{ required: true, message: '请确认密码。' }, ({ getFieldValue }) => ({ validator: async (_rule, value) => {
           if (value && value !== getFieldValue('password')) throw new Error('两次输入的密码不一致。')
         } })]}><Input.Password aria-label="确认密码" autoComplete="new-password" maxLength={128} placeholder="再次输入密码" /></Form.Item>
-        {snapshot.legacyUsers.length > 0 && <Form.Item name="legacyUserId" label="关联旧档案"><Select aria-label="关联旧档案" placeholder="新建账号" allowClear options={snapshot.legacyUsers.map(u => ({ label: u.name, value: u.id }))} /></Form.Item>}
       </>}
       {error && <Alert className="auth-error" title={error} type="error" showIcon />}
       <Button block type="primary" htmlType="submit" loading={busy}>{mode === 'login' ? '登录' : '注册并登录'}</Button>
