@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { loadConfig } from '../../src/main/config'
+import { loadConfig } from '../../src/main/infrastructure/config'
 
 let directory: string
 let userData: string

@@ -1,6 +1,7 @@
+import { StateRepository } from '../../src/main/repositories/state-repository'
 import { afterEach, expect, it, vi } from 'vitest'
-import { Chat } from '../../src/main/chat'
-import { Store } from '../../src/main/store'
+import { Chat } from '../../src/main/services/chat-service'
+import { StateService } from '../../src/main/services/state-service'
 import type { StreamEvent } from '../../src/shared/types'
 import { create, cleanup, config } from './helpers'
 
@@ -21,7 +22,7 @@ it('blocks concurrent sends and saves partial content on cancellation', async ()
   const state = await chat.stop()
   expect(chat.busy).toBe(false)
   expect(state.conversations[0].messages[1]).toMatchObject({ status: 'stopped', content: '部分回复' })
-  expect(new Store(path).state.conversations[0].messages).toHaveLength(2)
+  expect(new StateService(new StateRepository(path)).state.conversations[0].messages).toHaveLength(2)
 })
 
 it('marks abnormal EOF as error and persists the partial answer', async () => {
@@ -32,7 +33,7 @@ it('marks abnormal EOF as error and persists the partial answer', async () => {
   const chat = new Chat(store, event => { if (event.message.status !== 'streaming') finish(event) })
   chat.send({ content: '测试断流' }, config)
   expect((await completed).message).toMatchObject({ status: 'error', content: '已收到的文本' })
-  expect(new Store(path).state.conversations[0].messages[1].error).toContain('连接中断')
+  expect(new StateService(new StateRepository(path)).state.conversations[0].messages[1].error).toContain('连接中断')
   expect(chat.busy).toBe(false)
 })
 

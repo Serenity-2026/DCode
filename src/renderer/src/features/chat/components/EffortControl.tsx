@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
 import { Button, Popover, Slider } from 'antd'
 import { SlidersOutlined } from '@ant-design/icons'
-import { modelEfforts } from '../../shared/context'
-import type { ModelDetails, ReasoningEffort, Theme } from '../../shared/types'
+import { modelEfforts } from '../../../../../shared/context'
+import type { ModelDetails, ReasoningEffort, Theme } from '../../../../../shared/types'
 
 /** 模型动态强度面板；依赖服务元数据与 Workspace 保存回调，Ant Design 提供浮层、按钮和连续滑块。 */
 export function EffortControl({ value, detail, theme, disabled, onSave }: {

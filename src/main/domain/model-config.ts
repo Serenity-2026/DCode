@@ -1,6 +1,4 @@
-import { config } from 'dotenv'
-import { join } from 'node:path'
-import type { ReasoningEffort } from '../shared/types'
+import type { ReasoningEffort } from '../../shared/types'
 
 /** 主进程服务凭据，由 loadConfig/Models 读取；密钥不传入 renderer。 */
 export interface ProviderConfig {
@@ -26,14 +24,4 @@ export function validateBaseUrl(value: unknown): string {
   }
   if (url.username || url.password || url.search || url.hash) throw new Error('模型服务地址格式不正确。')
   return baseUrl
-}
-
-/** 通过 dotenv 读取通用 BASE_URL/API_KEY，不预设服务；Models 仅向首个注册账号导入完整配置。 */
-export function loadConfig(userData: string, packaged: boolean): ProviderConfig {
-  config({ path: join(packaged ? userData : process.cwd(), '.env.local'), quiet: true })
-  const baseUrl = process.env.BASE_URL?.trim() || ''
-  return {
-    baseUrl: baseUrl ? validateBaseUrl(baseUrl) : '',
-    apiKey: process.env.API_KEY?.trim() || ''
-  }
 }

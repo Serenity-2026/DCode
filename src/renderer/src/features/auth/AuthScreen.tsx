@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { Alert, Button, Form, Input, Segmented } from 'antd'
-import { BrandMark } from './BrandMark'
-import type { AuthInput, Snapshot } from '../../shared/types'
+import { BrandMark } from '../../components/BrandMark'
+import type { AuthInput, Snapshot } from '../../../../shared/types'
 
 /** 登录/注册入口，依赖 Ant Design 表单和 preload 的 Auth API；成功后把账号快照交给 Root。 */
 export function AuthScreen({ onLogin }: { onLogin: (next: Snapshot) => void }): ReactNode {

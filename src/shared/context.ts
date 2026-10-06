@@ -1,6 +1,6 @@
 import type { Attachment, Conversation, ModelDetails, ProviderProfile, ReasoningEffort } from './types'
 
-/** 推理档位白名单供 Models 解析元数据、Store 校验输入、界面生成滑块共用。 */
+/** 推理档位白名单供 Models 解析元数据、StateService 校验输入、界面生成滑块共用。 */
 export const reasoningEfforts: ReasoningEffort[] = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']
 /** 独立文件附件文本上限；文件夹不计入此限额，读取、IPC 与草稿校验共用。 */
 export const attachmentByteLimit = 512 * 1024
@@ -10,7 +10,7 @@ export function modelEfforts(detail?: ModelDetails): ReasoningEffort[] {
   return reasoningEfforts.filter(level => detail?.reasoningEfforts?.includes(level))
 }
 
-/** Store 的档位校验与默认选择规则：保留受支持值，失效值取最近档位，缺省采用服务默认值。 */
+/** StateService 的档位校验与默认选择规则：保留受支持值，失效值取最近档位，缺省采用服务默认值。 */
 export function resolveEffort(value: ReasoningEffort | null | undefined, detail?: ModelDetails): ReasoningEffort | null {
   const levels = modelEfforts(detail)
   if (!levels.length) return null
@@ -19,12 +19,12 @@ export function resolveEffort(value: ReasoningEffort | null | undefined, detail?
   return levels.find(level => reasoningEfforts.indexOf(level) >= reasoningEfforts.indexOf(value || 'medium')) || levels.at(-1)!
 }
 
-/** Store 快照与 Models 请求共用每模型选择，保证界面档位就是实际发送的参数。 */
+/** StateService 快照与 Models 请求共用每模型选择，保证界面档位就是实际发送的参数。 */
 export function selectedEffort(provider: ProviderProfile | undefined, model: string | null): ReasoningEffort | null {
   return model ? resolveEffort(Object.hasOwn(provider?.selectedEfforts || {}, model) ? provider?.selectedEfforts?.[model] : undefined, provider?.modelDetails?.[model]) : null
 }
 
-/** 校验附件结构；仅独立文件受数量与大小限额约束，Store 同样用于验证磁盘消息。 */
+/** 校验附件结构；仅独立文件受数量与大小限额约束，StateService 同样用于验证磁盘消息。 */
 export function validateAttachments(value: unknown): Attachment[] {
   if (value === undefined) return []
   if (!Array.isArray(value)) throw new Error('附件内容无效。')

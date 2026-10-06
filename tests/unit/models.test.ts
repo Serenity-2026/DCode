@@ -1,8 +1,9 @@
+import { StateRepository } from '../../src/main/repositories/state-repository'
 import { afterEach, expect, it, vi } from 'vitest'
-import { listModels } from '../../src/main/models'
+import { listModels } from '../../src/main/infrastructure/model-client'
 import { create, cleanup } from './helpers'
 import { modelEfforts, resolveEffort, reasoningEfforts } from '../../src/shared/context'
-import { Store } from '../../src/main/store'
+import { StateService } from '../../src/main/services/state-service'
 
 const draft = { name: '自定义服务', baseUrl: 'https://another.example.com/v1', apiKey: 'new-private-key' }
 /** 用真实 /models 的 data[].id 格式构造服务目录，不替代生产中的模型发现。 */
@@ -183,7 +184,7 @@ it('keeps independent model and service choices, repairs changed catalogs and re
   expect(store.snapshot().reasoningEffort).toBe('ultra')
   await models.testAndSave({ ...draft, id: first, apiKey: '' })
   expect(store.snapshot().reasoningEffort).toBe('ultra')
-  const restored = new Store(path)
+  const restored = new StateService(new StateRepository(path))
   restored.authenticate(store.requireUser().id)
   expect(restored.snapshot().reasoningEffort).toBe('ultra')
   vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => Response.json({ data: [

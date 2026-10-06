@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { Alert, Button, Form, Input, Modal, Segmented, Select } from 'antd'
-import type { ProviderDraft, Snapshot, Theme } from '../../shared/types'
+import type { ProviderDraft, Snapshot, Theme } from '../../../../shared/types'
 
 /** 账号服务编辑器，依赖 preload Models API 读取模型列表后保存，主题操作仍由 Workspace.act 处理。 */
 export function ModelSettings({ snapshot, busy, onClose, onSaved, onTheme }: {

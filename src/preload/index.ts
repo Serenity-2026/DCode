@@ -8,7 +8,7 @@ import type { DCodeAPI, StreamEvent } from '../shared/types'
  * 不把原始 IPC 对象、Node API 或模型密钥交给界面。
  */
 const api: DCodeAPI = {
-  /** 向主进程请求 Store.snapshot，用于首次加载界面。 */
+  /** 向主进程请求 StateService.snapshot，用于首次加载界面。 */
   getState: () => ipcRenderer.invoke(channels.state),
   /** 由 Auth 注册并加密保存保持登录的令牌。 */
   register: (input) => ipcRenderer.invoke(channels.register, input),
@@ -20,7 +20,7 @@ const api: DCodeAPI = {
   saveProvider: (input) => ipcRenderer.invoke(channels.saveProvider, input),
   /** 由 Models 解密当前账号服务的密钥并刷新模型列表。 */
   refreshModels: () => ipcRenderer.invoke(channels.refreshModels),
-  /** 将用户、会话或主题 Action 交给主进程的 Store.apply。 */
+  /** 将用户、会话或主题 Action 交给主进程的 StateService.apply。 */
   action: (action) => ipcRenderer.invoke(channels.action, action),
   /** 请求主进程的 Chat.send 开始或重试生成，返回初始快照。 */
   send: (input) => ipcRenderer.invoke(channels.send, input),

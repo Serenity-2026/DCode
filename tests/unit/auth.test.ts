@@ -1,8 +1,9 @@
+import { StateRepository } from '../../src/main/repositories/state-repository'
 import { afterEach, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
-import { Store } from '../../src/main/store'
-import { Auth } from '../../src/main/auth'
-import { Models } from '../../src/main/models'
+import { StateService } from '../../src/main/services/state-service'
+import { Auth } from '../../src/main/services/auth-service'
+import { Models } from '../../src/main/services/model-service'
 import { create, cleanup, config, secrets } from './helpers'
 
 afterEach(cleanup)
@@ -29,13 +30,13 @@ it('rejects wrong credentials and duplicate normalized accounts', async () => {
 
 it('restores remembered sessions but never trusts activeUserId alone', async () => {
   const { store, path } = await create()
-  const restored = new Store(path)
+  const restored = new StateService(new StateRepository(path))
   expect(restored.snapshot().activeUserId).toBeNull()
   const auth = new Auth(restored, secrets, new Models(restored, secrets, config))
   await auth.restore()
   expect(restored.snapshot().activeUserId).toBe(store.requireUser().id)
   auth.logout()
-  const loggedOut = new Store(path)
+  const loggedOut = new StateService(new StateRepository(path))
   await new Auth(loggedOut, secrets, new Models(loggedOut, secrets, config)).restore()
   expect(loggedOut.snapshot().activeUserId).toBeNull()
   expect(loggedOut.state.session).toBeNull()
@@ -44,7 +45,7 @@ it('restores remembered sessions but never trusts activeUserId alone', async () 
 it('invalidates tampered session tokens', async () => {
   const { store, path } = await create()
   store.state.session!.tokenHash = '0'.repeat(64); store.save()
-  const restored = new Store(path)
+  const restored = new StateService(new StateRepository(path))
   await new Auth(restored, secrets, new Models(restored, secrets, config)).restore()
   expect(restored.snapshot().activeUserId).toBeNull()
   expect(restored.state.session).toBeNull()
@@ -56,7 +57,7 @@ it('rejects a remembered token reassigned to another account on disk', async () 
   auth.logout()
   const other = await auth.register({ username: 'another', password: 'another-password' })
   store.state.session = { ...previous, userId: other.activeUserId! }; store.save()
-  const restored = new Store(path)
+  const restored = new StateService(new StateRepository(path))
   await new Auth(restored, secrets, new Models(restored, secrets, config)).restore()
   expect(restored.snapshot().activeUserId).toBeNull()
   expect(restored.state.session).toBeNull()

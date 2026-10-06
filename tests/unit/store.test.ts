@@ -1,18 +1,39 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import type { StoredState } from '../../src/main/domain/state'
+import { contextMessages } from '../../src/shared/context'
+import { StateRepository } from '../../src/main/repositories/state-repository'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync, writeFileSync } from 'node:fs'
-import { contextMessages, Store, type StoredState } from '../../src/main/store'
+import { StateService } from '../../src/main/services/state-service'
 import { create, cleanup } from './helpers'
 import type { Action } from '../../src/shared/types'
 
-afterEach(cleanup)
+afterEach(() => { vi.restoreAllMocks(); cleanup() })
 
 describe('account-owned conversations', () => {
+  it('rolls back both repository data and service authentication when persistence fails', async () => {
+    const { store, path } = await create()
+    const repository = new StateRepository(path)
+    const state = new StateService(repository)
+    const id = store.requireUser().id
+    state.authenticate(id)
+    const before = structuredClone(repository.state)
+    const bytes = readFileSync(path, 'utf8')
+    vi.spyOn(repository, 'save').mockImplementation(() => { throw new Error('磁盘不可写') })
+    expect(() => state.transaction(() => {
+      state.state.users[0].name = '未保存的修改'
+      state.clearAuthentication()
+    })).toThrow('磁盘不可写')
+    expect(repository.state).toEqual(before)
+    expect(state.snapshot().activeUserId).toBe(id)
+    expect(readFileSync(path, 'utf8')).toBe(bytes)
+  })
+
   it('persists messages and recovers interrupted streams on restart', async () => {
     const { store, path } = await create()
     const { message } = store.begin('测试问题', false, 'test-model')
     message.content = '部分回答'
     store.save()
-    const restored = new Store(path)
+    const restored = new StateService(new StateRepository(path))
     expect(restored.state.conversations[0].messages[1]).toMatchObject({ content: '部分回答', status: 'stopped' })
     expect(restored.state.activeConversationId).toBe(store.state.activeConversationId)
     expect(restored.snapshot().conversations).toEqual([])
@@ -83,7 +104,7 @@ describe('account-owned conversations', () => {
     ]
     for (const broken of invalidStates) {
       writeFileSync(path, broken)
-      expect(() => new Store(path)).toThrow('无法读取')
+      expect(() => new StateService(new StateRepository(path))).toThrow('无法读取')
       expect(readFileSync(path, 'utf8')).toBe(broken)
     }
   })

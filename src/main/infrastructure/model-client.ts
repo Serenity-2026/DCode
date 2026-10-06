@@ -1,4 +1,41 @@
-import type { ModelConfig } from './config'
+import type { ModelDetails, ReasoningEffort } from '../../shared/types'
+import { reasoningEfforts } from '../../shared/context'
+import type { ModelConfig, ProviderConfig } from '../domain/model-config'
+
+/** 用账号服务的 URL 与密钥获取模型 ID、窗口和强度元数据，供 Models 保存验证与登录后刷新共用。 */
+export async function listModels(config: ProviderConfig): Promise<{ ids: string[]; details: Record<string, ModelDetails> }> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 15_000)
+  try {
+    const response = await fetch(`${config.baseUrl}/models`, {
+      headers: { Authorization: `Bearer ${config.apiKey}`, Accept: 'application/json' },
+      redirect: 'error', signal: controller.signal
+    })
+    if (!response.ok) {
+      await response.body?.cancel()
+      throw new Error(response.status === 401 || response.status === 403 ? 'API 密钥无效或无权获取模型列表。' : response.status === 404 ? '服务的模型列表接口不存在，请检查服务地址。' : `获取模型列表失败（${response.status}）。`)
+    }
+    const payload: unknown = await response.json()
+    const data = payload && typeof payload === 'object' ? (payload as { data?: unknown }).data : undefined
+    if (!Array.isArray(data) || data.some(item => !item || typeof item.id !== 'string' || !item.id.trim())) throw new Error('服务返回的模型列表格式不正确。')
+    const ids = [...new Set<string>(data.map(item => item.id))]
+    if (!ids.length) throw new Error('该服务没有返回可用模型。')
+    const details = Object.fromEntries(data.map(item => {
+      const detail: ModelDetails = {}
+      const window = [item.context_window, item.context_length, item.top_provider?.context_length].find(value => Number.isSafeInteger(value) && value > 0)
+      if (window !== undefined) detail.contextWindow = window
+      if (Array.isArray(item.effort?.supported_levels)) detail.reasoningEfforts = [...new Set<ReasoningEffort>(item.effort.supported_levels.filter((level: unknown) => reasoningEfforts.includes(level as ReasoningEffort)))]
+      if (detail.reasoningEfforts?.includes(item.effort?.default_level)) detail.defaultEffort = item.effort.default_level
+      return [item.id, detail]
+    }))
+    return { ids, details }
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error('获取模型列表超时，请重试。')
+    if (error instanceof TypeError) throw new Error('无法连接模型服务，请检查网络和服务地址。')
+    if (error instanceof SyntaxError) throw new Error('服务返回的模型列表格式不正确。')
+    throw error
+  } finally { clearTimeout(timeout) }
+}
 
 /** 模型单次增量的文本与推理内容，由 consumeSSE 解析后交给 Chat 追加到消息。 */
 export interface Delta { content?: string; reasoning?: string }
@@ -6,7 +43,7 @@ export interface Delta { content?: string; reasoning?: string }
 /**
  * 消费模型响应的 SSE 字节流，用 TextDecoder 处理跨网络分块的 UTF-8 文本。
  * 通过 onDelta 交付内容增量、onActivity 通知连接活跃；缺少 [DONE] 或异常结束时抛错。
- * 不依赖 Store/Chat，由 streamModel 调用，便于单独测试流协议。
+ * 不依赖 StateService/Chat，由 streamModel 调用，便于单独测试流协议。
  */
 export async function consumeSSE(body: ReadableStream<Uint8Array>, onDelta: (delta: Delta) => void, onActivity: () => void = () => {}): Promise<void> {
   const reader = body.getReader()

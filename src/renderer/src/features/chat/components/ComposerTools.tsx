@@ -1,7 +1,7 @@
 import { type ReactNode } from 'react'
 import { Button, ConfigProvider, Dropdown, Progress, Tooltip } from 'antd'
 import { UpOutlined, PlusOutlined, FileOutlined, FolderOpenOutlined, ReloadOutlined, SettingOutlined, ThunderboltFilled, ThunderboltOutlined } from '@ant-design/icons'
-import type { ReasoningEffort, Snapshot } from '../../shared/types'
+import type { ReasoningEffort, Snapshot } from '../../../../../shared/types'
 import { EffortControl } from './EffortControl'
 
 /** 输入框工具栏，依赖 Workspace 的账号快照与操作回调，Ant Design 提供菜单、圆环和强度滑块。 */
