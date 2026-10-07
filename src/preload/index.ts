@@ -22,17 +22,17 @@ const api: DCodeAPI = {
   refreshModels: () => ipcRenderer.invoke(channels.refreshModels),
   /** 将用户、会话或主题 Action 交给主进程的 StateService.apply。 */
   action: (action) => ipcRenderer.invoke(channels.action, action),
-  /** 请求主进程的 Chat.send 开始或重试生成，返回初始快照。 */
+  /** 请求主进程的 AgentSession.send 开始或重试生成，返回初始快照。 */
   send: (input) => ipcRenderer.invoke(channels.send, input),
   /** 由主进程打开系统选择器并读取已选择的文本，不提供通用文件系统权限。 */
   selectAttachments: (kind) => ipcRenderer.invoke(channels.selectAttachments, kind),
-  /** 请求 Chat.stop 取消生成，等待主进程保存后获取最终快照。 */
+  /** 请求 AgentSession.stop 取消生成，等待主进程保存后获取最终快照。 */
   stop: () => ipcRenderer.invoke(channels.stop),
   /** 将链接交给主进程校验，再由 Electron shell 打开系统浏览器。 */
   openLink: (url) => ipcRenderer.invoke(channels.openLink, url),
   /** 将文本交给主进程的 Electron clipboard 复制，不暴露剪贴板读取能力。 */
   copyText: (text) => ipcRenderer.invoke(channels.copyText, text),
-  /** 订阅 Chat 推送的 StreamEvent；返回退订函数，供 React effect 卸载时清理监听。 */
+  /** 订阅 AgentSession 推送的 StreamEvent；返回退订函数，供 React effect 卸载时清理监听。 */
   onStream: (callback) => {
     // 只将业务数据传给回调，避免暴露 Electron 事件对象及其 sender。
     const listener = (_event: Electron.IpcRendererEvent, data: StreamEvent): void => callback(data)

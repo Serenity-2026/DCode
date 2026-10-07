@@ -2,9 +2,9 @@ import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { IpcRouter } from '../../src/main/ipc/ipc-router'
 import { registerChatController } from '../../src/main/controllers/chat-controller'
-import { Chat } from '../../src/main/services/chat-service'
+import { AgentSession } from '../../src/main/services/agent-session'
 import { channels } from '../../src/shared/channels'
-import { cleanup, create } from './helpers'
+import { cleanup, create, createAgent } from './helpers'
 
 const handlers = vi.hoisted(() => new Map<string, (event: IpcMainInvokeEvent, input?: unknown) => Promise<unknown>>())
 vi.mock('electron', () => ({ ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, input?: unknown) => Promise<unknown>) => handlers.set(channel, handler) } }))
@@ -53,15 +53,15 @@ it('rejects overlapping operations and releases its guard after success or failu
   await expect(router.exclusive(() => 'next')).resolves.toBe('next')
 })
 
-it('routes stop through the actual chat controller even while generation blocks send', async () => {
+it('routes stop through the actual session controller even while generation blocks send', async () => {
   const { store, models } = await create()
-  const chat = new Chat(store, () => {})
-  vi.spyOn(chat, 'busy', 'get').mockReturnValue(true)
-  const stop = vi.spyOn(chat, 'stop').mockResolvedValue(store.snapshot())
+  const session = new AgentSession(store, () => {}, createAgent())
+  vi.spyOn(session, 'busy', 'get').mockReturnValue(true)
+  const stop = vi.spyOn(session, 'stop').mockResolvedValue(store.snapshot())
   const selected = vi.spyOn(models, 'selected')
   const { window, event } = source()
-  const router = new IpcRouter(() => window, () => chat.busy)
-  registerChatController(router, chat, models, store)
+  const router = new IpcRouter(() => window, () => session.busy)
+  registerChatController(router, session, models, store)
   await expect(handlers.get(channels.send)!(event, { content: 'blocked' })).resolves.toMatchObject({ ok: false })
   expect(selected).not.toHaveBeenCalled()
   await expect(handlers.get(channels.stop)!(event)).resolves.toMatchObject({ ok: true })

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { ModelRefresh, ProviderDraft, Snapshot } from '../../shared/types'
 import { selectedEffort } from '../../shared/context'
+import { resolveModelApi } from '../../shared/model-api'
 import { validateBaseUrl, type ModelConfig, type ProviderConfig } from '../domain/model-config'
 import type { SecretCodec } from '../domain/ports'
 import type { StoredUser } from '../domain/state'
@@ -16,15 +17,15 @@ export class Models {
   /** 加密导入环境服务，由 Auth.register 调用；不内置或读取环境中的模型 ID。 */
   async bootstrap(): Promise<StoredUser['providers'][number] | null> {
     if (!this.initial.baseUrl || !this.initial.apiKey) return null
-    return { id: randomUUID(), name: '环境默认', baseUrl: this.initial.baseUrl, availableModels: [], encryptedApiKey: await this.secrets.encrypt(this.initial.apiKey) }
+    return { id: randomUUID(), name: '环境默认', baseUrl: this.initial.baseUrl, api: resolveModelApi(this.initial.baseUrl, this.initial.api), availableModels: [], encryptedApiKey: await this.secrets.encrypt(this.initial.apiKey) }
   }
 
-  /** 仅允许使用服务返回列表中的模型，解密当前服务密钥并为 Chat 组装单次请求配置。 */
+  /** 仅允许使用服务返回列表中的模型，解密当前服务密钥并为 AgentSession 组装单次请求配置。 */
   async selected(): Promise<ModelConfig> {
     const user = this.store.requireUser()
     const provider = user.providers.find(p => p.id === user.activeProviderId)
     if (!provider || !user.selectedModel || !provider.availableModels.includes(user.selectedModel)) throw new Error('请先配置服务并选择可用模型。')
-    return { baseUrl: provider.baseUrl, model: user.selectedModel, fastMode: user.fastMode, reasoningEffort: selectedEffort(provider, user.selectedModel), apiKey: await this.secrets.decrypt(provider.encryptedApiKey) }
+    return { baseUrl: provider.baseUrl, api: resolveModelApi(provider.baseUrl, provider.api), model: user.selectedModel, fastMode: user.fastMode, reasoningEffort: selectedEffort(provider, user.selectedModel), apiKey: await this.secrets.decrypt(provider.encryptedApiKey) }
   }
 
   /** 获取当前账号各服务的列表；失败服务保留缓存，失效的模型选择改为返回列表的第一项。 */
@@ -33,7 +34,7 @@ export class Models {
     const results = await Promise.all(user.providers.map(async provider => {
       try {
         const apiKey = await this.secrets.decrypt(provider.encryptedApiKey)
-        return { provider, catalog: await listModels({ baseUrl: provider.baseUrl, apiKey }), error: '' }
+        return { provider, catalog: await listModels({ baseUrl: provider.baseUrl, apiKey, api: resolveModelApi(provider.baseUrl, provider.api) }), error: '' }
       } catch (error) { return { provider, catalog: null, error: `${provider.name}：${error instanceof Error ? error.message : '获取模型列表失败。'}` } }
     }))
     if (results.some(r => r.catalog)) this.store.transaction(() => {
@@ -57,17 +58,18 @@ export class Models {
     if (input.id && !existing) throw new Error('服务配置不存在。')
     const name = textInput(input.name, 40)
     const baseUrl = validateBaseUrl(input.baseUrl)
+    const api = resolveModelApi(baseUrl, input.api === undefined ? existing?.api : input.api)
     if (typeof input.apiKey !== 'string' || input.apiKey.length > 4096) throw new Error('API 密钥无效。')
     const apiKey = input.apiKey.trim() || (existing ? await this.secrets.decrypt(existing.encryptedApiKey) : '')
     if (!apiKey) throw new Error('请输入 API 密钥。')
     let catalog: Awaited<ReturnType<typeof listModels>>
-    try { catalog = await listModels({ baseUrl, apiKey }) }
+    try { catalog = await listModels({ baseUrl, apiKey, api }) }
     catch (error) {
       const detail = error instanceof Error ? error.message.split(apiKey).join('[密钥]') : '服务连接失败。'
       throw new Error(`连通测试未通过：${detail}`)
     }
     const { ids: availableModels, details: modelDetails } = catalog
-    const profile = { id: existing?.id || randomUUID(), name, baseUrl, availableModels, modelDetails, selectedEfforts: { ...existing?.selectedEfforts }, encryptedApiKey: await this.secrets.encrypt(apiKey) }
+    const profile = { id: existing?.id || randomUUID(), name, baseUrl, api, availableModels, modelDetails, selectedEfforts: { ...existing?.selectedEfforts }, encryptedApiKey: await this.secrets.encrypt(apiKey) }
     this.store.reconcileEfforts(profile)
     this.store.transaction(() => {
       if (this.store.requireUser().id !== user.id) throw new Error('登录状态已变化，请重试。')

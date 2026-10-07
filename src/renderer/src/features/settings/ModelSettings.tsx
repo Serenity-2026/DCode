@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { Alert, Button, Form, Input, Modal, Segmented, Select } from 'antd'
 import type { ProviderDraft, Snapshot, Theme } from '../../../../shared/types'
+import { resolveModelApi } from '../../../../shared/model-api'
 
 /** 账号服务编辑器，依赖 preload Models API 读取模型列表后保存，主题操作仍由 Workspace.act 处理。 */
 export function ModelSettings({ snapshot, busy, onClose, onSaved, onTheme }: {
@@ -34,14 +35,17 @@ export function ModelSettings({ snapshot, busy, onClose, onSaved, onTheme }: {
       <Select className="model-editor-select" aria-label="编辑服务配置" disabled={testing || busy} value={editing} options={[...snapshot.providers.map(m => ({ label: m.name, value: m.id })), { label: '添加服务', value: 'new' }]} onChange={id => {
         setEditing(id); setStatus(null)
         const model = snapshot.providers.find(m => m.id === id)
-        form.setFieldsValue({ name: model?.name || '', baseUrl: model?.baseUrl || '', apiKey: '' })
+        form.setFieldsValue({ name: model?.name || '', baseUrl: model?.baseUrl || '', apiKey: '', api: resolveModelApi(model?.baseUrl || '', model?.api) })
       }} />
-      <Form form={form} className="model-form" layout="vertical" initialValues={{ name: profile?.name || '', baseUrl: profile?.baseUrl || '', apiKey: '' }} disabled={testing || busy} onFinish={values => void save(values)} onValuesChange={() => setStatus(null)}>
-        <Form.Item name="name" label="配置名称" rules={[{ required: true, message: '请输入配置名称。' }]}><Input aria-label="配置名称" maxLength={40} placeholder="例如：我的模型服务" /></Form.Item>
+      <Form form={form} className="model-form" layout="vertical" initialValues={{ name: profile?.name || '', baseUrl: profile?.baseUrl || '', apiKey: '', api: resolveModelApi(profile?.baseUrl || '', profile?.api) }} disabled={testing || busy} onFinish={values => void save(values)} onValuesChange={() => setStatus(null)}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <Form.Item name="name" label="配置名称" rules={[{ required: true, message: '请输入配置名称。' }]}><Input aria-label="配置名称" maxLength={40} placeholder="例如：我的模型服务" /></Form.Item>
+          <Form.Item name="api" label="API 协议"><Select aria-label="API 协议" options={[{ value: 'openai-completions', label: 'OpenAI 兼容' }, { value: 'anthropic-messages', label: 'Anthropic Messages' }]} /></Form.Item>
+        </div>
         <Form.Item name="baseUrl" label="服务地址" rules={[{ required: true, message: '请输入服务地址。' }]}><Input aria-label="服务地址" maxLength={2048} placeholder="https://api.example.com/v1" /></Form.Item>
         <Form.Item name="apiKey" label="API Key" rules={[{ required: editing === 'new', message: '请输入 API Key。' }]}><Input.Password aria-label="API Key" maxLength={4096} autoComplete="off" placeholder={profile ? '已保存，留空保持不变' : 'API Key'} /></Form.Item>
         {status && <Alert className="model-result" title={status.text} type={status.ok ? 'success' : 'error'} showIcon />}
-        <Button type="primary" block htmlType="submit" loading={testing} disabled={busy}>测试并保存</Button>
+        <Button type="primary" block htmlType="submit" aria-label="测试并保存" loading={testing} disabled={busy}>测试并保存</Button>
       </Form>
     </div>
   </Modal>

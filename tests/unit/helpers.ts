@@ -7,6 +7,16 @@ import { Models } from '../../src/main/services/model-service'
 import { StateService } from '../../src/main/services/state-service'
 import type { SecretCodec } from '../../src/main/domain/ports'
 import type { ModelConfig } from '../../src/main/domain/model-config'
+import type { AgentTool } from '../../src/main/domain/llm'
+import { AgentLoop } from '../../src/main/services/agent-loop'
+import { Agent } from '../../src/main/services/agent'
+import { streamModel } from '../../src/main/infrastructure/model-client'
+
+/** 注入测试工具但使用正式协议适配器，生产不注册这些测试能力。 */
+export function createAgent(tools: AgentTool[] = []): Agent {
+  const loop = new AgentLoop((config, messages, controller, onDelta, tools) => streamModel(config, messages, controller, onDelta, { tools }))
+  return new Agent(loop, tools)
+}
 
 /** 仅用于单元测试的替身；Electron E2E 会验证真实 safeStorage，不在生产降级加密。 */
 export const secrets: SecretCodec = {

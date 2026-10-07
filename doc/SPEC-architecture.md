@@ -20,7 +20,7 @@ src/main/
   windows/main-window.ts           窗口创建、网页权限、加载、关闭和流事件推送
   ipc/ipc-router.ts                来源校验、Result 包装、互斥操作
   controllers/                    按账号、模型、聊天、状态、桌面操作注册接口
-  services/                       Chat、Auth、Models、StateService、DesktopService
+  services/                       AgentSession、Agent、AgentLoop、Auth、Models、StateService、DesktopService
   repositories/state-repository.ts JSON 读取、格式验证、原子保存与内存回滚
   infrastructure/                 模型 HTTP/SSE、附件文件读取、系统密钥、环境配置、原生桌面适配
   domain/                         主进程内部数据类型、模型配置、系统能力契约、纯校验函数
@@ -52,6 +52,7 @@ StateRepository 保持一份 schema 3 的 JSON 数据和一个事务边界，避
 
 - 新 IPC 操作：shared 定义 DTO/通道 → preload 白名单 → 对应 Controller → Service。
 - 新模型协议：infrastructure 实现请求/解析，Service 管理请求生命周期。
+- 工具循环与消息转换：domain 定义统一消息和 ModelStream 契约，infrastructure 做供应商适配与参数 schema 编译，AgentLoop 顺序执行工具并继续请求，通过事件更新 Agent 的消息与运行状态；AgentSession 负责应用会话与保存，不持有取消控制器。Agent/AgentLoop 不依赖会话、存储或 IPC，app 装配三个对象并注入工具。范围及 pi 参考版本见 `SPEC-agent-loop.md`。
 - 新持久化规则：领域数据类型和 Repository；业务权限检查放 Service。
 - 新桌面能力：领域能力契约 → infrastructure 原生适配 → Service → Controller。
 - 新页面：features 下对应业务目录；跨业务复用的展示组件放 components。

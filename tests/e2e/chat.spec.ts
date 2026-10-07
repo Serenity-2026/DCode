@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { AddressInfo } from 'node:net'
+import { anthropicEvents, testCall } from '../unit/llm-fixtures'
 
 let server: Server
 let baseUrl: string
@@ -13,6 +14,7 @@ let page: Page
 let failDiscovery = false
 const discoveries: { path: string; authorization?: string }[] = []
 const requests: { model: string; max_tokens: number; service_tier?: string; reasoning_effort?: string; messages: { role: string; content: string }[]; authorization?: string }[] = []
+const nativeRequests: { system: string; model: string; messages: { role: string; content: { type: string; tool_use_id?: string; is_error?: boolean }[] }[] }[] = []
 
 /** 使用隔离的数据目录启动真实 Electron，live 模式改用本地环境里的服务配置。 */
 async function launch(live = false): Promise<void> {
@@ -83,6 +85,11 @@ test.beforeAll(async () => {
       if (request.url === '/missing/models') {
         response.writeHead(404); response.end('Not found'); return
       }
+      if (request.url === '/anthropic/v1/models') {
+        if (request.headers['x-api-key'] !== 'e2e-anthropic-key' || request.headers['anthropic-version'] !== '2023-06-01') { response.writeHead(401); response.end(); return }
+        response.writeHead(200, { 'Content-Type': 'application/json' })
+        response.end(JSON.stringify({ data: [{ id: 'native-model' }], has_more: false, last_id: 'native-model' })); return
+      }
       response.writeHead(200, { 'Content-Type': 'application/json' })
       const ids = request.headers.authorization === 'Bearer e2e-second-key' ? ['other-fast-model', 'other-chat'] : ['gpt-6-astra', 'gpt-6-sol', 'gpt-5.6-sol']
       response.end(JSON.stringify({ data: ids.map(id => ({ id, object: 'model', ...(id === 'gpt-6-astra' || id === 'gpt-6-sol' ? { context_window: id === 'gpt-6-astra' ? 4096 : 8192, effort: { supported_levels: id === 'gpt-6-astra' ? ['low', 'high', 'max'] : ['low', 'medium', 'high', 'max', 'ultra'], default_level: id === 'gpt-6-astra' ? 'high' : 'medium' } } : id === 'other-fast-model' ? { effort: { supported_levels: ['high'] } } : id === 'other-chat' ? { effort: { supported_levels: [] } } : {}) })) })); return
@@ -91,6 +98,14 @@ test.beforeAll(async () => {
     request.on('data', chunk => { body += chunk })
     request.on('end', () => {
       const payload = JSON.parse(body)
+      if (request.url === '/anthropic/v1/messages') {
+        if (request.headers['x-api-key'] !== 'e2e-anthropic-key' || request.headers['anthropic-version'] !== '2023-06-01') { response.writeHead(401); response.end(); return }
+        nativeRequests.push(payload)
+        const hasResult = payload.messages.at(-1)?.content?.some((block: { type: string }) => block.type === 'tool_result')
+        const events = hasResult ? anthropicEvents('Anthropic 循环完成') : anthropicEvents('准备调用。', [{ ...testCall('toolu_test'), name: 'not_registered' }])
+        response.writeHead(200, { 'Content-Type': 'text/event-stream' })
+        response.end(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join('')); return
+      }
       requests.push({ ...payload, authorization: request.headers.authorization })
       if (request.headers.authorization === 'Bearer invalid-key') {
         response.writeHead(401); response.end('Invalid key'); return
@@ -109,7 +124,7 @@ test.beforeAll(async () => {
   baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
 })
 
-test.beforeEach(() => { failDiscovery = false; discoveries.length = 0; requests.length = 0; directory = mkdtempSync(join(tmpdir(), 'dcode-e2e-')) })
+test.beforeEach(() => { failDiscovery = false; discoveries.length = 0; requests.length = 0; nativeRequests.length = 0; directory = mkdtempSync(join(tmpdir(), 'dcode-e2e-')) })
 test.afterEach(async () => {
   await application?.close().catch(() => undefined)
   rmSync(directory, { recursive: true, force: true })
@@ -763,6 +778,36 @@ test('message navigation previews, scroll tracking and streaming history reading
   await page.getByRole('button', { name: title, exact: true }).click()
   await expect(navigation.getByRole('button')).toHaveCount(12)
   await expect(navigation.getByRole('button', { name: '跳转到第 12 轮对话', exact: true })).toHaveAttribute('aria-current', 'step')
+})
+
+test('native protocol selection, safe tool failure loop and restart', async () => {
+  await launch()
+  await authenticate('native-api', true)
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByRole('combobox', { name: '编辑服务配置', exact: true }).click()
+  await page.getByText('添加服务', { exact: true }).click()
+  await page.getByRole('textbox', { name: '配置名称', exact: true }).fill('原生服务')
+  await page.getByRole('textbox', { name: '服务地址', exact: true }).fill(`${baseUrl}/anthropic/v1`)
+  await page.getByRole('textbox', { name: 'API Key', exact: true }).fill('e2e-anthropic-key')
+  await page.getByRole('combobox', { name: 'API 协议', exact: true }).click()
+  await page.getByText('Anthropic Messages', { exact: true }).click()
+  await page.getByRole('button', { name: '测试并保存', exact: true }).click()
+  await expect(page.getByText('连通测试通过，配置已保存。', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '关闭', exact: true }).click()
+  await expect(page.getByRole('button', { name: '切换模型', exact: true })).toContainText('native-model')
+  await page.getByRole('textbox', { name: '消息', exact: true }).fill('工具循环验证')
+  await page.getByRole('button', { name: '发送消息', exact: true }).click()
+  await expect(page.locator('article[data-status="complete"][data-role="assistant"]')).toContainText('Anthropic 循环完成')
+  expect(nativeRequests).toHaveLength(2)
+  expect(nativeRequests[1].messages.at(-1)).toEqual({ role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_test', content: '工具未注册。', is_error: true }] })
+  expect(nativeRequests[0].system).toContain('DCode')
+  const state = await page.evaluate(() => window.dcode.getState())
+  expect(state.ok && state.value.providers.find(provider => provider.name === '原生服务')?.api).toBe('anthropic-messages')
+  expect(JSON.stringify(state)).not.toContain('e2e-anthropic-key')
+  await application.close()
+  await launch()
+  await expect(page.getByRole('button', { name: '切换模型', exact: true })).toContainText('native-model')
+  await expect(page.locator('article[data-role="assistant"]')).toContainText('Anthropic 循环完成')
 })
 
 test('live DeepSeek model test and streaming smoke', async () => {

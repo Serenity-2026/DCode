@@ -6,7 +6,10 @@ import { Secrets } from '../infrastructure/secrets'
 import { ElectronDesktop } from '../infrastructure/electron-desktop'
 import { StateRepository } from '../repositories/state-repository'
 import { StateService } from '../services/state-service'
-import { Chat } from '../services/chat-service'
+import { AgentSession } from '../services/agent-session'
+import { AgentLoop } from '../services/agent-loop'
+import { Agent } from '../services/agent'
+import { streamModel } from '../infrastructure/model-client'
 import { Auth } from '../services/auth-service'
 import { Models } from '../services/model-service'
 import { DesktopService } from '../services/desktop-service'
@@ -22,7 +25,7 @@ import { registerDesktopController } from '../controllers/desktop-controller'
 export function startApplication(): void {
   const here = dirname(fileURLToPath(import.meta.url))
   const icon = app.isPackaged ? join(process.resourcesPath, 'icon.png') : join(here, '../../build/icon.png')
-  let chat: Chat | undefined
+  let session: AgentSession | undefined
   let windows: MainWindow | undefined
   let quitting = false
   if (process.env.DCODE_USER_DATA_DIR) app.setPath('userData', process.env.DCODE_USER_DATA_DIR)
@@ -37,8 +40,10 @@ export function startApplication(): void {
     const models = new Models(state, secrets, config)
     const auth = new Auth(state, secrets, models)
     await auth.restore()
-    const generation = new Chat(state, event => windows?.publish(event))
-    chat = generation
+    const loop = new AgentLoop((config, messages, controller, onDelta, tools) => streamModel(config, messages, controller, onDelta, { tools }))
+    const agent = new Agent(loop, [])
+    const generation = new AgentSession(state, event => windows?.publish(event), agent)
+    session = generation
     const mainWindow = new MainWindow(generation, {
       icon, preload: join(here, '../preload/index.cjs'), renderer: join(here, '../renderer/index.html')
     })
@@ -59,10 +64,10 @@ export function startApplication(): void {
 
   // 退出前等待生成服务保存；再次触发退出时不重复等待。
   app.on('before-quit', event => {
-    if (chat?.busy && !quitting) {
+    if (session?.busy && !quitting) {
       event.preventDefault()
       quitting = true
-      void chat.stop().finally(() => app.quit())
+      void session.stop().finally(() => app.quit())
     }
   })
   // macOS 关闭窗口后保留应用，其他平台关闭最后一个窗口即退出。

@@ -1,14 +1,14 @@
 import { BrowserWindow } from 'electron'
 import { channels } from '../../shared/channels'
 import type { StreamEvent } from '../../shared/types'
-import { Chat } from '../services/chat-service'
+import { AgentSession } from '../services/agent-session'
 
-/** 主窗口生命周期，依赖 Chat 安全停止生成，资源路径由启动装配提供；不注册业务 IPC。 */
+/** 主窗口生命周期，依赖 AgentSession 安全停止生成，资源路径由启动装配提供；不注册业务 IPC。 */
 export class MainWindow {
   private window: BrowserWindow | null = null
 
   /** 注入生成服务与构建产物路径，创建窗口前不加载页面。 */
-  constructor(private chat: Chat, private paths: { icon: string; preload: string; renderer: string }) {}
+  constructor(private session: AgentSession, private paths: { icon: string; preload: string; renderer: string }) {}
 
   /** 返回当前窗口引用，供 IPC 来源校验和原生对话框使用。 */
   get current(): BrowserWindow | null { return this.window }
@@ -20,7 +20,7 @@ export class MainWindow {
 
   /**
    * 使用 Electron BrowserWindow 创建并加载工作台，连接 preload 提供的受限桌面 API。
-   * 依赖已初始化的 Chat：关闭窗口前停止生成并保存结果；同时限制导航、新窗口与权限请求。
+   * 依赖已初始化的 AgentSession：关闭窗口前停止生成并保存结果；同时限制导航、新窗口与权限请求。
    */
   create(): void {
     this.window = new BrowserWindow({
@@ -34,11 +34,11 @@ export class MainWindow {
     this.window.webContents.on('will-navigate', event => event.preventDefault())
     this.window.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
     this.window.once('ready-to-show', () => this.window?.show())
-    // 生成尚未结束时先等待 Chat.stop 收尾，再真正关闭窗口，避免丢失部分回复。
+    // 生成尚未结束时先等待 AgentSession.stop 收尾，再真正关闭窗口，避免丢失部分回复。
     this.window.on('close', event => {
-      if (this.chat.busy) {
+      if (this.session.busy) {
         event.preventDefault()
-        void this.chat.stop().finally(() => this.window?.close())
+        void this.session.stop().finally(() => this.window?.close())
       }
     })
     this.window.on('closed', () => { this.window = null })
