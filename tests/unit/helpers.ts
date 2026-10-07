@@ -7,13 +7,6 @@ import { Models } from '../../src/main/services/model-service'
 import { StateService } from '../../src/main/services/state-service'
 import type { SecretCodec } from '../../src/main/domain/ports'
 import type { ModelConfig } from '../../src/main/domain/model-config'
-import type { AgentTool } from '../../src/main/domain/agent'
-import { AgentLoop } from '../../src/main/services/agent-loop'
-import { ToolRegistry } from '../../src/main/services/tool-registry'
-import { ModelClient } from '../../src/main/infrastructure/model-client'
-
-/** 走正式模型适配器的循环装配，可注入测试工具，不向生产注册测试能力。 */
-export function createAgent(tools: AgentTool[] = []): AgentLoop { return new AgentLoop(new ModelClient(), new ToolRegistry(tools)) }
 
 /** 仅用于单元测试的替身；Electron E2E 会验证真实 safeStorage，不在生产降级加密。 */
 export const secrets: SecretCodec = {

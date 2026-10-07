@@ -17,12 +17,7 @@ export class StateService {
       for (const profile of user.providers) this.reconcileEfforts(profile)
     }
     for (const conversation of this.state.conversations) {
-      for (const message of conversation.messages) {
-        if (message.status === 'streaming') message.status = 'stopped'
-        for (const round of message.agentRounds || []) for (const execution of round.toolCalls) {
-          if (execution.status === 'pending' || execution.status === 'running') execution.status = 'stopped'
-        }
-      }
+      for (const message of conversation.messages) if (message.status === 'streaming') message.status = 'stopped'
     }
     this.save()
   }

@@ -4,7 +4,7 @@ import { IpcRouter } from '../../src/main/ipc/ipc-router'
 import { registerChatController } from '../../src/main/controllers/chat-controller'
 import { Chat } from '../../src/main/services/chat-service'
 import { channels } from '../../src/shared/channels'
-import { cleanup, create, createAgent } from './helpers'
+import { cleanup, create } from './helpers'
 
 const handlers = vi.hoisted(() => new Map<string, (event: IpcMainInvokeEvent, input?: unknown) => Promise<unknown>>())
 vi.mock('electron', () => ({ ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, input?: unknown) => Promise<unknown>) => handlers.set(channel, handler) } }))
@@ -55,7 +55,7 @@ it('rejects overlapping operations and releases its guard after success or failu
 
 it('routes stop through the actual chat controller even while generation blocks send', async () => {
   const { store, models } = await create()
-  const chat = new Chat(store, () => {}, createAgent())
+  const chat = new Chat(store, () => {})
   vi.spyOn(chat, 'busy', 'get').mockReturnValue(true)
   const stop = vi.spyOn(chat, 'stop').mockResolvedValue(store.snapshot())
   const selected = vi.spyOn(models, 'selected')
