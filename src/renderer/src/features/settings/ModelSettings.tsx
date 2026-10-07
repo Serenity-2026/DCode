@@ -45,7 +45,7 @@ export function ModelSettings({ snapshot, busy, onClose, onSaved, onTheme }: {
         <Form.Item name="baseUrl" label="服务地址" rules={[{ required: true, message: '请输入服务地址。' }]}><Input aria-label="服务地址" maxLength={2048} placeholder="https://api.example.com/v1" /></Form.Item>
         <Form.Item name="apiKey" label="API Key" rules={[{ required: editing === 'new', message: '请输入 API Key。' }]}><Input.Password aria-label="API Key" maxLength={4096} autoComplete="off" placeholder={profile ? '已保存，留空保持不变' : 'API Key'} /></Form.Item>
         {status && <Alert className="model-result" title={status.text} type={status.ok ? 'success' : 'error'} showIcon />}
-        <Button type="primary" block htmlType="submit" loading={testing} disabled={busy}>测试并保存</Button>
+        <Button type="primary" block htmlType="submit" aria-label="测试并保存" loading={testing} disabled={busy}>测试并保存</Button>
       </Form>
     </div>
   </Modal>
