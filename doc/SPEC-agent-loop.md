@@ -40,3 +40,10 @@ schema 3 增加可选 `agentRounds`，旧数据无需迁移；普通用户消息
 在主进程实现工具的定义与 handler，由 bootstrap 注入 ToolRegistry；JSON Schema 明确 required、类型及 additionalProperties。handler 只获取已校验参数与 AbortSignal，不获取模型密钥。系统能力通过 domain 契约和 infrastructure 实现，工具权限、业务工具与展示作为后续独立需求。
 
 协议依据：[Chat Completions 工具调用](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)、[流式事件](https://developers.openai.com/api/reference/resources/chat/subresources/completions/streaming-events)、[Ajv schema 管理](https://github.com/ajv-validator/ajv/blob/master/docs/guide/managing-schemas.md)，实施前通过 Context7 查阅。
+
+## 验证结果（2026-10-07）
+
+- `npm run typecheck` 通过；`npm test` 11 个文件、94 个测试通过，含分层与循环依赖检查。
+- `npm run test:e2e` 生产构建通过、5 个本地 Electron 场景通过，真实服务 smoke 跳过，未请求真实服务。
+- 三轮、三次顺序工具调用走正式模型/SSE 适配器验证参数与结果回传，最终记录可由 StateRepository 重新读取。
+- 验证错误参数/未知工具不执行、handler 异常不泄漏、参数/结果大小限制、非合作工具取消与超时、总体运行超时、预算耗尽、重复调用 ID、断流拒绝执行、检查点保存失败及中断恢复。
