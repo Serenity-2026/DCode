@@ -7,6 +7,9 @@ import { ElectronDesktop } from '../infrastructure/electron-desktop'
 import { StateRepository } from '../repositories/state-repository'
 import { StateService } from '../services/state-service'
 import { Chat } from '../services/chat-service'
+import { AgentLoop } from '../services/agent-loop'
+import { ToolRegistry } from '../services/tool-registry'
+import { ModelClient } from '../infrastructure/model-client'
 import { Auth } from '../services/auth-service'
 import { Models } from '../services/model-service'
 import { DesktopService } from '../services/desktop-service'
@@ -37,7 +40,8 @@ export function startApplication(): void {
     const models = new Models(state, secrets, config)
     const auth = new Auth(state, secrets, models)
     await auth.restore()
-    const generation = new Chat(state, event => windows?.publish(event))
+    const agent = new AgentLoop(new ModelClient(), new ToolRegistry([]))
+    const generation = new Chat(state, event => windows?.publish(event), agent)
     chat = generation
     const mainWindow = new MainWindow(generation, {
       icon, preload: join(here, '../preload/index.cjs'), renderer: join(here, '../renderer/index.html')

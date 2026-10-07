@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { consumeSSE, streamModel } from '../../src/main/infrastructure/model-client'
+import { agentLimits } from '../../src/main/domain/agent'
 
 function bytes(text: string, step = 1): ReadableStream<Uint8Array> {
   const data = new TextEncoder().encode(text)
@@ -12,6 +13,37 @@ const config = { baseUrl: 'https://api.example.com', apiKey: 'test-secret', mode
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
 
 describe('SSE protocol and model requests', () => {
+  it('assembles interleaved tool arguments by index across split UTF-8 chunks', async () => {
+    const frames = [
+      { delta: { tool_calls: [{ index: 1, id: 'b', type: 'function', function: { name: 'echo', arguments: '{"text":' } }, { index: 0, id: 'a', type: 'function', function: { name: 'echo', arguments: '{"text":"' } }] } },
+      { delta: { tool_calls: [{ index: 0, function: { arguments: '你好"}' } }, { index: 1, function: { arguments: '"二"}' } }] } },
+      { delta: {}, finish_reason: 'tool_calls' }
+    ]
+    const result = await consumeSSE(bytes(frames.map(choice => `data: ${JSON.stringify({ choices: [choice] })}\r\n\r\n`).join('') + 'data: [DONE]\r\n\r\n'), () => {})
+    expect(result).toEqual({ content: '', reasoning: '', finishReason: 'tool_calls', toolCalls: [
+      { id: 'a', name: 'echo', arguments: '{"text":"你好"}' }, { id: 'b', name: 'echo', arguments: '{"text":"二"}' }
+    ] })
+  })
+
+  it.each([
+    { calls: [{ index: -1 }], finish: 'tool_calls' },
+    { calls: [{ index: 8 }], finish: 'tool_calls' },
+    { calls: [{ index: 0, id: 'a', type: 'custom', function: { name: 'echo', arguments: '{}' } }], finish: 'tool_calls' },
+    { calls: [{ index: 0, function: { name: 'echo', arguments: '{}' } }], finish: 'tool_calls' },
+    { calls: [{ index: 0, id: 'a', function: { name: 'echo', arguments: '{}' } }], finish: 'stop' },
+    { calls: [{ index: 0, id: 'a', function: { name: 'echo', arguments: '{}' } }], finish: null },
+    { calls: [], finish: 'tool_calls' },
+    { calls: [0, 1].map(index => ({ index, id: 'same', function: { name: 'echo', arguments: '{}' } })), finish: 'tool_calls' }
+  ])('rejects malformed or incomplete tool streams: %j', async ({ calls, finish }) => {
+    const text = `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: calls }, finish_reason: finish }] })}\n\ndata: [DONE]\n\n`
+    await expect(consumeSSE(bytes(text, 1024), () => {})).rejects.toThrow('工具')
+  })
+
+  it('limits streamed argument bytes before returning a call', async () => {
+    const text = `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'a', function: { name: 'echo', arguments: 'x'.repeat(agentLimits.maxArgumentBytes + 1) } }] }, finish_reason: 'tool_calls' }] })}\n\ndata: [DONE]\n\n`
+    await expect(consumeSSE(bytes(text, 1024), () => {})).rejects.toThrow('大小上限')
+  })
+
   it('decodes split UTF-8, CRLF, heartbeat, reasoning and completion', async () => {
     const chunks: string[] = []
     const reasoning: string[] = []
@@ -51,6 +83,8 @@ describe('SSE protocol and model requests', () => {
     expect(options.headers.Authorization).toBe('Bearer test-secret')
     expect(JSON.parse(options.body)).toMatchObject({ stream: true, model: 'test' })
     expect(options.body).not.toContain('test-secret')
+    expect(JSON.parse(options.body)).not.toHaveProperty('tools')
+    expect(JSON.parse(options.body)).not.toHaveProperty('tool_choice')
   })
 
   it('limits the DeepSeek thinking parameter to the official service', async () => {
@@ -112,7 +146,7 @@ describe('SSE protocol and model requests', () => {
       }, 90_000)
     } }))))
     const promise = streamModel(config, [], controller, () => {})
-    const assertion = expect(promise).resolves.toBeUndefined()
+    const assertion = expect(promise).resolves.toMatchObject({ content: 'OK', finishReason: 'stop' })
     await vi.advanceTimersByTimeAsync(90_000)
     await assertion
     expect(controller.signal.aborted).toBe(false)

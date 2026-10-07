@@ -15,6 +15,22 @@ export interface AttachmentSelection { attachments: Attachment[]; skipped: numbe
 /** Chat 的发送输入，重试复用已保存的附件，不能通过此接口要求读取本机路径。 */
 export interface SendInput { content: string; retry?: boolean; attachments?: Attachment[] }
 
+/** 模型提出的完整工具调用；参数为原始 JSON 文本，主进程校验后才能执行。 */
+export interface ToolCall { id: string; name: string; arguments: string }
+
+/** 工具回传结果；失败同样回传模型，但不能冒充成功。 */
+export interface ToolResult { ok: boolean; content: string }
+
+/** 可持久化的工具执行记录；运行中的记录在重启后转为 stopped，不自动重放。 */
+export interface ToolExecution {
+  call: ToolCall
+  status: 'pending' | 'running' | 'complete' | 'error' | 'stopped'
+  result?: ToolResult
+}
+
+/** AgentLoop 每次模型请求的记录，Chat 保存并经已有流事件公开。 */
+export interface AgentRound { content: string; reasoning: string; toolCalls: ToolExecution[] }
+
 /** 公开账号信息，不包含密码哈希、会话令牌或模型密钥。 */
 export interface User { id: string; name: string; username: string; createdAt: string }
 
@@ -28,6 +44,7 @@ export interface Message {
   error?: string
   createdAt: string
   attachments?: Attachment[]
+  agentRounds?: AgentRound[]
 }
 
 /** 属于一个账号的完整对话，StateService 持久化，Chat 构建模型上下文。 */

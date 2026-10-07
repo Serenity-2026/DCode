@@ -1,6 +1,8 @@
 import type { ModelDetails, ReasoningEffort } from '../../shared/types'
 import { reasoningEfforts } from '../../shared/context'
 import type { ModelConfig, ProviderConfig } from '../domain/model-config'
+import { agentLimits, type ModelDelta, type ModelGateway, type ModelMessage, type ModelTurn, type ToolDefinition } from '../domain/agent'
+import type { ToolCall } from '../../shared/types'
 
 /** 用账号服务的 URL 与密钥获取模型 ID、窗口和强度元数据，供 Models 保存验证与登录后刷新共用。 */
 export async function listModels(config: ProviderConfig): Promise<{ ids: string[]; details: Record<string, ModelDetails> }> {
@@ -38,30 +40,54 @@ export async function listModels(config: ProviderConfig): Promise<{ ids: string[
 }
 
 /** 模型单次增量的文本与推理内容，由 consumeSSE 解析后交给 Chat 追加到消息。 */
-export interface Delta { content?: string; reasoning?: string }
+export type Delta = ModelDelta
 
 /**
  * 消费模型响应的 SSE 字节流，用 TextDecoder 处理跨网络分块的 UTF-8 文本。
  * 通过 onDelta 交付内容增量、onActivity 通知连接活跃；缺少 [DONE] 或异常结束时抛错。
  * 不依赖 StateService/Chat，由 streamModel 调用，便于单独测试流协议。
  */
-export async function consumeSSE(body: ReadableStream<Uint8Array>, onDelta: (delta: Delta) => void, onActivity: () => void = () => {}): Promise<void> {
+export async function consumeSSE(body: ReadableStream<Uint8Array>, onDelta: (delta: Delta) => void, onActivity: () => void = () => {}): Promise<ModelTurn> {
   const reader = body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
   let complete = false
   let finish: string | null = null
+  let content = ''
+  let reasoning = ''
+  const calls = new Map<number, ToolCall>()
   /** 解析一个完整 SSE 帧，跳过心跳，提取 Delta 或记录服务端的结束标记。 */
   const frame = (value: string): void => {
     const data = value.split('\n').filter(line => line.startsWith('data:')).map(line => line.slice(5).trimStart()).join('\n')
     if (!data) return
     if (data.trim() === '[DONE]') { complete = true; return }
-    let chunk: { error?: unknown; choices?: { delta?: { content?: string; reasoning_content?: string }; finish_reason?: string | null }[] }
-    try { chunk = JSON.parse(data) } catch { throw new Error('模型返回了无法解析的数据，请重试。') }
+    let chunk: { error?: unknown; choices?: { delta?: { content?: string; reasoning_content?: string; tool_calls?: { index: number; id?: string; type?: string; function?: { name?: string; arguments?: string } }[] }; finish_reason?: string | null }[] }
+    try {
+      chunk = JSON.parse(data)
+      if (!chunk || typeof chunk !== 'object' || (chunk.choices !== undefined && !Array.isArray(chunk.choices))) throw new Error()
+    } catch { throw new Error('模型返回了无法解析的数据，请重试。') }
     if (chunk.error) throw new Error('模型服务返回错误，请重试。')
     const choice = chunk.choices?.[0]
     if (choice?.delta) {
-      onDelta({ content: choice.delta.content || '', reasoning: choice.delta.reasoning_content || '' })
+      if (finish) throw new Error('模型结束后仍返回增量，请重试。')
+      const delta = choice.delta
+      if ([delta.content, delta.reasoning_content].some(value => value != null && typeof value !== 'string')) throw new Error('模型文本格式无效。')
+      content += delta.content || ''
+      reasoning += delta.reasoning_content || ''
+      onDelta({ content: delta.content || '', reasoning: delta.reasoning_content || '' })
+      if (delta.tool_calls !== undefined) {
+        if (!Array.isArray(delta.tool_calls)) throw new Error('模型工具调用格式无效。')
+        for (const part of delta.tool_calls) {
+          if (!part || !Number.isSafeInteger(part.index) || part.index < 0 || part.index >= agentLimits.maxCallsPerRound || (part.type !== undefined && part.type !== 'function')) throw new Error('模型工具调用格式无效。')
+          if ([part.id, part.function?.name, part.function?.arguments].some(value => value !== undefined && typeof value !== 'string')) throw new Error('模型工具参数格式无效。')
+          const call = calls.get(part.index) || { id: '', name: '', arguments: '' }
+          call.id += part.id || ''
+          call.name += part.function?.name || ''
+          call.arguments += part.function?.arguments || ''
+          if (call.id.length > 256 || call.name.length > 64 || new TextEncoder().encode(call.arguments).length > agentLimits.maxArgumentBytes) throw new Error('模型工具参数超过大小上限。')
+          calls.set(part.index, call)
+        }
+      }
     }
     if (choice?.finish_reason) finish = choice.finish_reason
   }
@@ -85,7 +111,12 @@ export async function consumeSSE(body: ReadableStream<Uint8Array>, onDelta: (del
     if (!complete) throw new Error('连接中断，回复尚未完成。请重试。')
     if (finish === 'length') throw new Error('回复达到长度上限，内容已保留。')
     if (finish === 'content_filter') throw new Error('回复被服务过滤，内容已保留。')
-    if (finish && finish !== 'stop') throw new Error('模型未返回完整文本回复，请重试。')
+    if (finish && finish !== 'stop' && finish !== 'tool_calls') throw new Error('模型未返回完整文本回复，请重试。')
+    const toolCalls = [...calls.entries()].sort(([a], [b]) => a - b).map(([, call]) => call)
+    if (toolCalls.length || finish === 'tool_calls') {
+      if (finish !== 'tool_calls' || !toolCalls.length || toolCalls.some(call => !call.id || !/^[a-zA-Z0-9_-]{1,64}$/.test(call.name)) || new Set(toolCalls.map(call => call.id)).size !== toolCalls.length) throw new Error('模型工具调用不完整或结束原因无效。')
+    }
+    return { content, reasoning, toolCalls, finishReason: finish === 'tool_calls' ? 'tool_calls' : 'stop' }
   } finally {
     await reader.cancel().catch(() => undefined)
     reader.releaseLock()
@@ -99,11 +130,12 @@ export async function consumeSSE(body: ReadableStream<Uint8Array>, onDelta: (del
  */
 export async function streamModel(
   config: ModelConfig,
-  messages: { role: string; content: string }[],
+  messages: ModelMessage[],
   controller: AbortController,
   onDelta: (delta: Delta) => void,
-  options: { maxTokens?: number; timeoutMs?: number } = {}
-): Promise<void> {
+  options: { maxTokens?: number; timeoutMs?: number; tools?: ToolDefinition[] } = {}
+): Promise<ModelTurn> {
+  controller.signal.throwIfAborted()
   if (!config.apiKey) throw new Error('请先在设置中填写 API 密钥。')
   let timedOut = false
   let timer: ReturnType<typeof setTimeout>
@@ -121,7 +153,15 @@ export async function streamModel(
       redirect: 'error',
       headers: { Authorization: `Bearer ${config.apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: config.model, messages, stream: true, max_tokens: options.maxTokens || 8192,
+        model: config.model, messages: messages.map(message => ({
+          role: message.role, content: message.content,
+          ...(message.role === 'tool' ? { tool_call_id: message.toolCallId } : {}),
+          ...(message.role === 'assistant' && message.toolCalls?.length ? {
+            tool_calls: message.toolCalls.map(call => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.arguments } })),
+            ...(message.reasoning ? { reasoning_content: message.reasoning } : {})
+          } : {})
+        })), stream: true, max_tokens: options.maxTokens || 8192,
+        ...(options.tools?.length ? { tools: options.tools.map(definition => ({ type: 'function', function: definition })), tool_choice: 'auto' } : {}),
         ...(deepseek && config.reasoningEffort ? { thinking: { type: 'enabled' } } : !deepseek && config.fastMode ? { service_tier: 'priority' } : {}),
         ...(config.reasoningEffort ? { reasoning_effort: config.reasoningEffort } : {})
       }),
@@ -140,7 +180,7 @@ export async function streamModel(
       throw new Error(errors[response.status] || `模型服务暂不可用（${response.status}），请稍后重试。`)
     }
     if (!response.body) throw new Error('模型服务没有返回响应内容。')
-    await consumeSSE(response.body, onDelta, resetTimeout)
+    return await consumeSSE(response.body, onDelta, resetTimeout)
   } catch (error) {
     if (timedOut) throw new Error('模型响应超时，请重试。')
     if (controller.signal.aborted) throw error
@@ -148,5 +188,18 @@ export async function streamModel(
     throw error
   } finally {
     clearTimeout(timer!)
+  }
+}
+
+/** 模型端口的 HTTP 实现；连接外部取消信号，单轮超时不污染 Chat 的用户停止信号。 */
+export class ModelClient implements ModelGateway {
+  /** 调用流适配器并在结束时解除监听，不持有会话或工具执行器。 */
+  async stream(config: ModelConfig, messages: ModelMessage[], signal: AbortSignal, onDelta: (delta: ModelDelta) => void, tools: ToolDefinition[]): Promise<ModelTurn> {
+    signal.throwIfAborted()
+    const controller = new AbortController()
+    const abort = (): void => controller.abort(signal.reason)
+    signal.addEventListener('abort', abort, { once: true })
+    try { return await streamModel(config, messages, controller, onDelta, { tools }) }
+    finally { controller.abort(); signal.removeEventListener('abort', abort) }
   }
 }

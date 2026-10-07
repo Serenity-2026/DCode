@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { StoredState } from '../domain/state'
+import { validAgentRounds } from '../domain/agent-records'
 import { reasoningEfforts, validateAttachments } from '../../shared/context'
 
 /** 校验当前磁盘结构、唯一性及账号/会话归属，不转换其他版本的数据。 */
@@ -33,6 +34,7 @@ function validState(value: unknown): boolean {
     conversationIds.add(c.id)
     if (c.messages.some(m => !m || typeof m.id !== 'string' || !['user', 'assistant'].includes(m.role) || typeof m.content !== 'string' || typeof m.reasoning !== 'string' || !['complete', 'streaming', 'stopped', 'error'].includes(m.status) || typeof m.createdAt !== 'string' || (m.error !== undefined && typeof m.error !== 'string'))) return false
     if (new Set(c.messages.map(m => m.id)).size !== c.messages.length) return false
+    if (c.messages.some(m => !validAgentRounds(m.agentRounds) || (m.role === 'user' && m.agentRounds !== undefined))) return false
     try { for (const message of c.messages) validateAttachments(message.attachments) } catch { return false }
   }
   if (state.activeUserId !== null && !ids.has(state.activeUserId)) return false
