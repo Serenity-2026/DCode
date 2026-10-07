@@ -15,16 +15,27 @@ export interface AssistantMessage {
   source?: { api: ModelApi; baseUrl: string; model: string }
 }
 
+/** 工具读取的图片由适配器转换到供应商格式，不向应用磁盘保存 base64。 */
+export interface ToolImage { type: 'image'; data: string; mimeType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp' }
+/** 保留字符串返回兼容，文件读取可同时提供文字与图片。 */
+export interface ToolOutput { content: string; images?: ToolImage[] }
+
 /** 循环统一上下文，包括工具结果；应用历史在模型边界前转换为此类型。 */
 export type LlmMessage =
   | { role: 'system'; content: string }
   | { role: 'user'; content: string }
   | AssistantMessage
-  | { role: 'toolResult'; toolCallId: string; content: string; isError: boolean }
+  | ({ role: 'toolResult'; toolCallId: string; isError: boolean } & ToolOutput)
 
 /** 工具定义与主进程 handler，参数 JSON Schema 在启动装配时编译。 */
 export interface ToolDefinition { name: string; description: string; parameters: Record<string, unknown> }
-export interface AgentTool extends ToolDefinition { execute(argumentsValue: Record<string, unknown>, signal: AbortSignal): Promise<string> }
+export interface AgentTool extends ToolDefinition { execute(argumentsValue: Record<string, unknown>, signal: AbortSignal): Promise<string | ToolOutput> }
+
+/** 可向模型展示的预期工具错误；其他异常仍由循环隐藏细节。 */
+export class ToolExecutionError extends Error {}
+
+/** 会话只配置本轮目录，系统工具实现磁盘与进程访问。 */
+export interface ToolWorkspace { setDirectory(directory?: string): void }
 
 /** AgentSession 只消费文本增量，完整内容块由模型端口返回给循环。 */
 export interface LlmDelta { content?: string; reasoning?: string }

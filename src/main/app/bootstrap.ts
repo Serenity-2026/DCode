@@ -10,6 +10,7 @@ import { AgentSession } from '../services/agent-session'
 import { AgentLoop } from '../services/agent-loop'
 import { Agent } from '../services/agent'
 import { streamModel } from '../infrastructure/model-client'
+import { CodingTools } from '../infrastructure/tools/coding-tools'
 import { Auth } from '../services/auth-service'
 import { Models } from '../services/model-service'
 import { DesktopService } from '../services/desktop-service'
@@ -41,8 +42,10 @@ export function startApplication(): void {
     const auth = new Auth(state, secrets, models)
     await auth.restore()
     const loop = new AgentLoop((config, messages, controller, onDelta, tools) => streamModel(config, messages, controller, onDelta, { tools }))
-    const agent = new Agent(loop, [])
-    const generation = new AgentSession(state, event => windows?.publish(event), agent)
+    const codingTools = new CodingTools()
+    const agent = new Agent(loop, codingTools.tools)
+    const generation = new AgentSession(state, event => windows?.publish(event), agent, codingTools)
+    app.on('will-quit', () => codingTools.dispose())
     session = generation
     const mainWindow = new MainWindow(generation, {
       icon, preload: join(here, '../preload/index.cjs'), renderer: join(here, '../renderer/index.html')

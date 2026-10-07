@@ -1,4 +1,4 @@
-import { waitForTool, type ModelStream } from '../domain/llm'
+import { ToolExecutionError, waitForTool, type ModelStream, type ToolOutput } from '../domain/llm'
 import type { AgentContext, AgentLoopEvent, ToolResultMessage } from '../domain/agent'
 import type { ModelConfig } from '../domain/model-config'
 
@@ -55,17 +55,20 @@ export class AgentLoop {
         emit({ type: 'tool_execution_start', toolCallId: call.id, name: call.name })
         const registered = context.tools.find(item => item.tool.name === call.name)
         let content = '工具未注册。'
+        let images: ToolOutput['images']
         let isError = true
         if (registered) {
           if (!registered.validate(call.arguments)) content = '工具参数不符合 JSON Schema。'
           else try {
             //waitForTool:工具正常完成，就返回工具结果；用户提前取消，就让等待工具的代码立即收到异常。
-            content = await waitForTool(() => registered.tool.execute(call.arguments, controller.signal), controller.signal)
+            const output = await waitForTool(() => registered.tool.execute(call.arguments, controller.signal), controller.signal)
+            content = typeof output === 'string' ? output : output.content
+            images = typeof output === 'string' ? undefined : output.images
             if (typeof content !== 'string') throw new Error('工具结果无效。')
             isError = false
-          } catch { controller.signal.throwIfAborted(); content = '工具执行失败。' }
+          } catch (error) { controller.signal.throwIfAborted(); content = error instanceof ToolExecutionError ? error.message : '工具执行失败。' }
         }
-        const result: ToolResultMessage = { role: 'toolResult', toolCallId: call.id, content, isError }
+        const result: ToolResultMessage = { role: 'toolResult', toolCallId: call.id, content, isError, ...(images?.length ? { images } : {}) }
         messages.push(result)
         toolResults.push(result)
         emit({ type: 'tool_execution_end', toolCallId: call.id, name: call.name, result })

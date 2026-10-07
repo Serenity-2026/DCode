@@ -8,8 +8,8 @@ export type MessageStatus = 'streaming' | 'complete' | 'stopped' | 'error'
 /** Models 从服务元数据确认的推理档位，StateService 保存账号选择，streamModel 发送实际参数。 */
 export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra'
 
-/** 系统选择器读取的文本快照，由 AgentSession 随消息保存，界面只展示名称与文件数。 */
-export interface Attachment { id: string; name: string; kind: 'file' | 'folder'; fileCount: number; content: string }
+/** 系统选择器读取的文本快照；目录另存绝对路径，AgentSession 为本轮工具恢复 cwd。 */
+export interface Attachment { id: string; name: string; kind: 'file' | 'folder'; fileCount: number; content: string; path?: string }
 
 /** 附件选择结果，提示被跳过的文件，不静默把非文本文件当成已添加。 */
 export interface AttachmentSelection { attachments: Attachment[]; skipped: number }
@@ -108,7 +108,7 @@ export interface DCodeAPI {
   action(action: Action): Promise<Result<Snapshot>>
   /** 使用当前账号选中的模型生成回复。 */
   send(input: SendInput): Promise<Result<Snapshot>>
-  /** 打开系统文件或目录选择器，只读取用户主动选择的文本附件。 */
+  /** 打开系统选择器，读取文本快照并记录所选文件夹的工具工作目录。 */
   selectAttachments(kind: 'file' | 'folder'): Promise<Result<AttachmentSelection>>
   /** 停止生成并等待结果保存。 */
   stop(): Promise<Result<Snapshot>>

@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { AddressInfo } from 'node:net'
-import { anthropicEvents, testCall } from '../unit/llm-fixtures'
+import { anthropicEvents, openAIResponse, testCall } from '../unit/llm-fixtures'
 
 let server: Server
 let baseUrl: string
@@ -110,6 +110,19 @@ test.beforeAll(async () => {
       if (request.headers.authorization === 'Bearer invalid-key') {
         response.writeHead(401); response.end('Invalid key'); return
       }
+      const fileToolPrompt = payload.messages.some((message: { role: string; content: unknown }) => message.role === 'user' && typeof message.content === 'string' && message.content.includes('文件工具集成验证'))
+      if (fileToolPrompt) {
+        const hasResults = payload.messages.some((message: { role: string }) => message.role === 'tool')
+        const calls = [
+          { id: 'file_write', name: 'write', arguments: JSON.stringify({ path: 'generated.txt', content: 'before' }) },
+          { id: 'file_read', name: 'read', arguments: JSON.stringify({ path: 'generated.txt' }) },
+          { id: 'file_edit', name: 'edit', arguments: JSON.stringify({ path: 'generated.txt', edits: [{ oldText: 'before', newText: 'after' }] }) },
+          { id: 'file_bash', name: 'bash', arguments: JSON.stringify({ command: 'cat generated.txt' }) }
+        ]
+        const stream = openAIResponse(hasResults ? '文件工具执行完成' : '', hasResults ? [] : calls)
+        response.writeHead(200, { 'Content-Type': 'text/event-stream' })
+        void stream.text().then(body => response.end(body)); return
+      }
       const prompt = payload.messages.at(-1)?.content || ''
       response.writeHead(200, { 'Content-Type': 'text/event-stream' })
       response.write('data: {"choices":[{"delta":{"content":"正在分析…"}}]}\n\n')
@@ -130,6 +143,32 @@ test.afterEach(async () => {
   rmSync(directory, { recursive: true, force: true })
 })
 test.afterAll(async () => { await new Promise<void>(resolve => server.close(() => resolve())) })
+
+test('production read/bash/edit/write use the selected folder and recover it after restart', async () => {
+  await launch()
+  await authenticate('filetools', true)
+  const project = join(directory, 'tool-project')
+  mkdirSync(project)
+  await application.evaluate(({ dialog }, project) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [project] }) }, project)
+  await page.getByRole('button', { name: '添加附件', exact: true }).click()
+  await page.getByRole('menuitem', { name: /添加文件夹/ }).click()
+  const input = page.getByRole('textbox', { name: '消息', exact: true })
+  await input.fill('文件工具集成验证')
+  await page.getByRole('button', { name: '发送消息', exact: true }).click()
+  await expect(page.locator('article[data-role="assistant"][data-status="complete"]')).toContainText('文件工具执行完成')
+  expect(readFileSync(join(project, 'generated.txt'), 'utf8')).toBe('after')
+  const results = requests.at(-1)!.messages.filter(message => message.role === 'tool')
+  expect(results.map(message => message.content)).toEqual([expect.stringContaining('已写入'), 'before', expect.stringMatching(/-before\n[\s\S]*\+after/), 'after'])
+  expect(requests[0].messages[0].content).toContain(project)
+  expect(JSON.parse(readFileSync(join(directory, 'state.json'), 'utf8')).conversations[0].messages[0].attachments[0].path).toBe(project)
+  await application.close()
+  await launch()
+  await expect(page.getByRole('textbox', { name: '消息', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '重新生成', exact: true }).click()
+  await expect(page.locator('article[data-role="assistant"][data-status="complete"]')).toContainText('文件工具执行完成')
+  expect(readFileSync(join(project, 'generated.txt'), 'utf8')).toBe('after')
+  expect(requests.at(-1)!.messages[0].content).toContain(project)
+})
 
 test('accounts, model discovery/switch, fast mode, streaming and restart', async () => {
   test.setTimeout(90_000)
