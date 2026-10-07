@@ -1,9 +1,11 @@
+import { contextMessages } from '../../src/shared/context'
+import { StateRepository } from '../../src/main/repositories/state-repository'
 import { afterEach, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { readAttachments } from '../../src/main/attachments'
-import { contextMessages, Store } from '../../src/main/store'
+import { readAttachments } from '../../src/main/infrastructure/attachments'
+import { StateService } from '../../src/main/services/state-service'
 import { attachmentByteLimit, estimateContext, validateAttachments } from '../../src/shared/context'
 import type { Attachment } from '../../src/shared/types'
 import { create, cleanup } from './helpers'
@@ -66,7 +68,7 @@ it('reads folders beyond the former file count, per-file size and total byte lim
   const { store, path } = await create()
   const first = store.begin('读取目录', false, 'test', result.attachments)
   expect(contextMessages(first.conversation).at(-1)?.content).toContain(large)
-  expect(new Store(path).state.conversations[0].messages[0].attachments?.[0]).toEqual(result.attachments[0])
+  expect(new StateService(new StateRepository(path)).state.conversations[0].messages[0].attachments?.[0]).toEqual(result.attachments[0])
   store.begin('', true, 'test')
   expect(contextMessages(first.conversation).at(-1)?.content).toContain('file-59')
 })
@@ -106,7 +108,7 @@ it('persists attachment snapshots, supports attachment-only messages and reuses 
   expect(first.conversation.messages[0].attachments?.[0].content).toBe('export const answer = 42')
   store.begin('', true, 'test')
   expect(contextMessages(first.conversation).at(-1)?.content).toContain('export const answer = 42')
-  expect(new Store(path).state.conversations[0].messages[0].attachments?.[0].name).toBe('code.ts')
+  expect(new StateService(new StateRepository(path)).state.conversations[0].messages[0].attachments?.[0].name).toBe('code.ts')
   expect(readFileSync(path, 'utf8')).not.toContain('modified elsewhere')
 })
 

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Button, Splitter, Tooltip } from 'antd'
 import { MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons'
-import type { Theme } from '../../shared/types'
+import type { Theme } from '../../../shared/types'
 
 /** 工作台分栏布局；依赖 Ant Design Splitter 和 Workspace 提供的内容，独立处理拖动以避免重绘聊天消息。 */
 export function WorkspaceLayout({ theme, sidebar, header, children }: {

@@ -1,8 +1,10 @@
 import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto'
-import type { AuthInput, Snapshot } from '../shared/types'
-import type { SecretCodec } from './secrets'
-import type { Models } from './models'
-import { Store, textInput, type RememberedSession, type StoredUser } from './store'
+import type { AuthInput, Snapshot } from '../../shared/types'
+import type { SecretCodec } from '../domain/ports'
+import type { RememberedSession, StoredUser } from '../domain/state'
+import { textInput } from '../domain/validation'
+import type { Models } from './model-service'
+import { StateService } from './state-service'
 
 /** 校验账号格式并统一大小写，供注册去重与登录查找共用；密码不经过文本裁剪。 */
 function username(value: unknown): string {
@@ -24,10 +26,10 @@ function matches(left: string, right: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b)
 }
 
-/** 本机账号认证与保持登录，依赖 Store 保存账号、Secrets 保护令牌、Models 导入首个账号配置。 */
+/** 本机账号认证与保持登录，依赖 StateService 保存账号、Secrets 保护令牌、Models 导入首个账号配置。 */
 export class Auth {
   /** 注入持久化与秘密保护；主进程注册 IPC 前调用 restore 恢复有效会话。 */
-  constructor(private store: Store, private secrets: SecretCodec, private models: Models) {}
+  constructor(private store: StateService, private secrets: SecretCodec, private models: Models) {}
 
   /** 将账号 ID 与随机令牌一起 OS 加密，防止修改磁盘账号 ID 后复用另一个账号的令牌。 */
   private async session(userId: string): Promise<RememberedSession> {
@@ -35,7 +37,7 @@ export class Auth {
     return { userId, tokenHash: createHash('sha256').update(token).digest('hex'), encryptedToken: await this.secrets.encrypt(JSON.stringify({ userId, token })) }
   }
 
-  /** 创建本机账号，依赖 Store 保存密码哈希与会话，Models 为首个账号导入环境配置。 */
+  /** 创建本机账号，依赖 StateService 保存密码哈希与会话，Models 为首个账号导入环境配置。 */
   async register(input: AuthInput): Promise<Snapshot> {
     if (this.store.snapshot().activeUserId) throw new Error('请先退出当前账号。')
     const name = username(input?.username)

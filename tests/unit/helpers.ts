@@ -1,11 +1,12 @@
+import { StateRepository } from '../../src/main/repositories/state-repository'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Auth } from '../../src/main/auth'
-import { Models } from '../../src/main/models'
-import { Store } from '../../src/main/store'
-import type { SecretCodec } from '../../src/main/secrets'
-import type { ModelConfig } from '../../src/main/config'
+import { Auth } from '../../src/main/services/auth-service'
+import { Models } from '../../src/main/services/model-service'
+import { StateService } from '../../src/main/services/state-service'
+import type { SecretCodec } from '../../src/main/domain/ports'
+import type { ModelConfig } from '../../src/main/domain/model-config'
 
 /** 仅用于单元测试的替身；Electron E2E 会验证真实 safeStorage，不在生产降级加密。 */
 export const secrets: SecretCodec = {
@@ -20,7 +21,7 @@ export async function create(initial: ModelConfig = config) {
   const directory = mkdtempSync(join(tmpdir(), 'dcode-unit-'))
   directories.push(directory)
   const path = join(directory, 'state.json')
-  const store = new Store(path)
+  const store = new StateService(new StateRepository(path))
   const models = new Models(store, secrets, initial)
   const auth = new Auth(store, secrets, models)
   await auth.register({ username: 'developer', password: 'test-password' })

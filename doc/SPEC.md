@@ -34,6 +34,8 @@
 
 ## 4. 技术架构
 
+详细目录、依赖约束和新功能落点见 [分层架构规范](SPEC-architecture.md)。主进程入口只启动 app 装配，业务接口位于 controllers，业务规则位于 services，JSON 持久化位于 repositories，外部系统适配位于 infrastructure；界面按 app / features / components 组织。
+
 ```text
 src/main        Electron 窗口、IPC、环境配置、JSON 数据存储、模型流式请求
 src/preload     contextBridge 白名单 API、流事件订阅/退订

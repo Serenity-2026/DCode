@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { consumeSSE, streamModel } from '../../src/main/model'
+import { consumeSSE, streamModel } from '../../src/main/infrastructure/model-client'
 
 function bytes(text: string, step = 1): ReadableStream<Uint8Array> {
   const data = new TextEncoder().encode(text)

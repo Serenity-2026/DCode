@@ -1,53 +1,28 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react'
-import { Alert, App as AntApp, Button, ConfigProvider, Dropdown, Input, Modal, theme } from 'antd'
-import zhCN from 'antd/locale/zh_CN'
+import { Alert, App as AntApp, Button, Dropdown, Input, Modal } from 'antd'
 import {
   ArrowUpOutlined, PlusOutlined, SearchOutlined, MessageOutlined, MoreOutlined,
   SettingOutlined, CodeOutlined, BugOutlined, BranchesOutlined, CopyOutlined,
   ReloadOutlined, StopOutlined, DeleteOutlined, EditOutlined, LogoutOutlined,
   DownOutlined, RightOutlined, FolderOpenOutlined
 } from '@ant-design/icons'
-import type { Action, Attachment, Message, ModelRefresh, Result, Snapshot, StreamEvent } from '../../shared/types'
-import { estimateContext, validateAttachments } from '../../shared/context'
-import { Markdown } from './Markdown'
-import { AuthScreen } from './AuthScreen'
-import { ModelSettings } from './ModelSettings'
-import { ComposerTools } from './ComposerTools'
-import { AttachmentList } from './AttachmentList'
-import { WorkspaceLayout } from './WorkspaceLayout'
-import { MessageNavigation } from './MessageNavigation'
-import { BrandMark } from './BrandMark'
-import { WelcomeCloud } from './WelcomeCloud'
-
-/**
- * 界面根组件：通过 preload 的 window.dcode 读取 Snapshot，并配置 Ant Design 主题与提示容器。
- * 根据登录快照渲染 AuthScreen 或 Workspace；不直接访问主进程的 Store、Auth 或 Chat。
- */
-export default function Root(): ReactNode {
-  const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
-  const [error, setError] = useState('')
-  // 首次挂载时取得主进程快照；连接或读取失败时显示错误，不创建虚假的本地状态。
-  useEffect(() => {
-    void window.dcode.getState().then(result => {
-      if (result.ok) setSnapshot(result.value)
-      else setError(result.error)
-    }).catch(() => setError('无法连接桌面服务，请重启应用。'))
-  }, [])
-  const dark = snapshot?.theme === 'dark'
-  return <ConfigProvider locale={zhCN} button={{ autoInsertSpace: false }} theme={{
-    algorithm: dark ? theme.darkAlgorithm : theme.defaultAlgorithm,
-    token: { colorPrimary: dark ? '#8ac8a3' : '#303b33', borderRadius: 8, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif' }
-  }}><AntApp>
-    {snapshot ? snapshot.activeUserId ? <Workspace key={snapshot.activeUserId} snapshot={snapshot} setSnapshot={setSnapshot} /> : <AuthScreen onLogin={setSnapshot} /> : error ? <div className="load-error"><Alert title={error} type="error" showIcon /></div> : <div className="loading">正在打开工作台…</div>}
-  </AntApp></ConfigProvider>
-}
+import type { Action, Attachment, Message, ModelRefresh, Result, Snapshot, StreamEvent } from '../../../../shared/types'
+import { estimateContext, validateAttachments } from '../../../../shared/context'
+import { Markdown } from './components/Markdown'
+import { ModelSettings } from '../settings/ModelSettings'
+import { ComposerTools } from './components/ComposerTools'
+import { AttachmentList } from './components/AttachmentList'
+import { WorkspaceLayout } from '../../components/WorkspaceLayout'
+import { MessageNavigation } from './components/MessageNavigation'
+import { BrandMark } from '../../components/BrandMark'
+import { WelcomeCloud } from './components/WelcomeCloud'
 
 /**
  * 对话工作台组件，组织会话侧栏、输入框、用户管理和设置弹窗。
  * 依赖 Root 的账号快照、Ant Design、Markdown 与 ModelSettings 组件；
- * 所有数据修改和生成操作都通过 window.dcode 间接交给主进程 Store/Chat。
+ * 所有数据修改和生成操作都通过 window.dcode 间接交给主进程 StateService/Chat。
  */
-function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot: React.Dispatch<React.SetStateAction<Snapshot | null>> }): ReactNode {
+export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot: React.Dispatch<React.SetStateAction<Snapshot | null>> }): ReactNode {
   const { message: toast, modal } = AntApp.useApp()
   const [draft, setDraft] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -233,7 +208,7 @@ function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot:
     finally { inFlight.current = false; setPending(false) }
   }
 
-  /** 使用 Ant Design modal 确认删除会话，再交给 act 与主进程 Store 检查账号归属。 */
+  /** 使用 Ant Design modal 确认删除会话，再交给 act 与主进程 StateService 检查账号归属。 */
   function confirmDelete(id: string, name: string): void {
     modal.confirm({
       title: '删除这段对话？', content: name,

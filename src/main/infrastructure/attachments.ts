@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { lstat, readFile, readdir } from 'node:fs/promises'
 import { basename, join, relative } from 'node:path'
-import type { Attachment, AttachmentSelection } from '../shared/types'
-import { attachmentByteLimit, validateAttachments } from '../shared/context'
+import type { Attachment, AttachmentSelection } from '../../shared/types'
+import { attachmentByteLimit, validateAttachments } from '../../shared/context'
 
 /** 读取系统选择器返回的路径，供主进程附件 IPC 使用；不会执行文件或跟随目录符号链接。 */
 export async function readAttachments(paths: string[], kind: 'file' | 'folder'): Promise<AttachmentSelection> {

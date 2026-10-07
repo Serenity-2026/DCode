@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { Button, Popover } from 'antd'
 import { FileOutlined } from '@ant-design/icons'
-import type { Message, Theme } from '../../shared/types'
+import type { Message, Theme } from '../../../../../shared/types'
 import { Markdown } from './Markdown'
 
 /** 对话左侧短线导航；依赖 Workspace 的滚动容器与消息、Ant Design 浮层和 Markdown，独立同步阅读位置。 */

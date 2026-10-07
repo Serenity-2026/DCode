@@ -1,9 +1,9 @@
 /** 账号保存的外观偏好，由 Root 映射到 Ant Design 主题。 */
 export type Theme = 'light' | 'dark'
-/** Chat 维护的回复状态，Store 会将上次遗留的生成标记为停止。 */
+/** Chat 维护的回复状态，StateService 会将上次遗留的生成标记为停止。 */
 export type MessageStatus = 'streaming' | 'complete' | 'stopped' | 'error'
 
-/** Models 从服务元数据确认的推理档位，Store 保存账号选择，streamModel 发送实际参数。 */
+/** Models 从服务元数据确认的推理档位，StateService 保存账号选择，streamModel 发送实际参数。 */
 export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra'
 
 /** 系统选择器读取的文本快照，由 Chat 随消息保存，界面只展示名称与文件数。 */
@@ -30,7 +30,7 @@ export interface Message {
   attachments?: Attachment[]
 }
 
-/** 属于一个账号的完整对话，Store 持久化，Chat 构建模型上下文。 */
+/** 属于一个账号的完整对话，StateService 持久化，Chat 构建模型上下文。 */
 export interface Conversation {
   id: string
   userId: string
@@ -71,7 +71,7 @@ export interface ModelRefresh { snapshot: Snapshot; errors: string[] }
 /** 本机账号的注册/登录输入，由 Auth 校验账号格式与密码长度。 */
 export interface AuthInput { username: string; password: string }
 
-/** 已登录账号允许执行的操作，Store 再次校验账号与数据归属。 */
+/** 已登录账号允许执行的操作，StateService 再次校验账号与数据归属。 */
 export type Action =
   | { type: 'user:rename'; id: string; name: string }
   | { type: 'conversation:select'; id: string | null }
@@ -88,7 +88,7 @@ export interface StreamEvent { conversationId: string; message: Message }
 /** 主进程 IPC 的成功/失败结果，不向界面泄露秘密。 */
 export type Result<T> = { ok: true; value: T } | { ok: false; error: string }
 
-/** preload 的业务白名单；依赖主进程 Auth、Models、Store 和 Chat，不暴露原始 IPC。 */
+/** preload 的业务白名单；依赖主进程 Auth、Models、StateService 和 Chat，不暴露原始 IPC。 */
 export interface DCodeAPI {
   /** 获取当前登录状态及账号快照。 */
   getState(): Promise<Result<Snapshot>>
