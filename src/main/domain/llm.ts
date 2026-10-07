@@ -38,7 +38,9 @@ export function toLlmMessages(messages: { role: 'system' | 'user' | 'assistant';
 /** 停止等待不配合取消的异步工具，避免阻塞现有 AgentSession.stop；不能撤销已发生的副作用。 */
 export function waitForTool<T>(operation: () => Promise<T>, signal: AbortSignal): Promise<T> {
   signal.throwIfAborted()
+  //resolve(结果)：告诉 Promise“成功了，这是结果”；reject(原因)：告诉 Promise“失败了，这是原因”。
   return new Promise((resolve, reject) => {
+
     const abort = (): void => { signal.removeEventListener('abort', abort); reject(signal.reason) }
     signal.addEventListener('abort', abort, { once: true })
     Promise.resolve().then(() => { signal.throwIfAborted(); return operation() }).then(resolve, reject).finally(() => signal.removeEventListener('abort', abort))

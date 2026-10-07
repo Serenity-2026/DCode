@@ -32,13 +32,16 @@ export class Agent {
     this.current.messages = structuredClone(messages)
   }
 
-  /** 订阅同步生命周期事件，返回退订函数；每位订阅者收到独立副本。 */
+  /** 订阅同步生命周期事件，返回退订函数；每位订阅者收到独立副本。
+   * */
   subscribe(listener: (event: AgentEvent) => void): () => void {
     this.listeners.add(listener)
     return () => { this.listeners.delete(listener) }
   }
 
-  /** 追加问题并启动循环，立即占用运行状态；模型失败通过终止事件和状态返回。 */
+  /** 追加问题并启动循环，立即占用运行状态；模型失败通过终止事件和状态返回。
+   * Extract<LlmMessage, { role: 'user' }>表示只能传入role: 'user'类型的消息
+   * */
   prompt(config: ModelConfig, message: Extract<LlmMessage, { role: 'user' }>): Promise<void> {
     if (this.busy) throw new Error('请先停止当前生成。')
     const selected = { ...config }

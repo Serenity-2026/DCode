@@ -85,7 +85,6 @@ export async function streamModel(
   try {
     const api = resolveModelApi(config.baseUrl, config.api)
     const transport = providerTransport(config)
-    const deepseek = new URL(config.baseUrl).hostname === 'api.deepseek.com'
     const tools = options.tools || []
     const request = api === 'anthropic-messages' ? anthropicRequest : openAIRequest
     const response = await fetch(`${transport.baseUrl}/${api === 'anthropic-messages' ? 'messages' : 'chat/completions'}`, {
@@ -96,7 +95,7 @@ export async function streamModel(
     })
     if (!response.ok) {
       const errors: Record<number, string> = {
-        400: api === 'openai-completions' && config.reasoningEffort ? '请求参数或模型强度不受支持，请调整强度并检查模型配置。' : api === 'openai-completions' && config.fastMode && !deepseek ? '请求参数或快速模式不受支持，请关闭快速模式并检查模型配置。' : '请求参数或模型不受支持，请检查模型配置。',
+        400: api === 'openai-completions' && config.reasoningEffort ? '请求参数或模型强度不受支持，请调整强度并检查模型配置。' : api === 'openai-completions' && config.fastMode ? '请求参数或快速模式不受支持，请关闭快速模式并检查模型配置。' : '请求参数或模型不受支持，请检查模型配置。',
         401: 'API 密钥无效，请检查模型配置。',
         402: '模型账户余额不足，请充值后重试。',
         403: '无权访问该模型，请检查账户权限。',

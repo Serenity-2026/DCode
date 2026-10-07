@@ -8,10 +8,12 @@ import { StateService } from './state-service'
 
 /** 应用会话层：准备上下文、保存正文和推送界面；运行控制由独立 Agent 负责。 */
 export class AgentSession {
+  //表示这次生成对应哪一个会话、哪一条 assistant 占位消息，以及上次保存、推送的时间。
   private target?: { conversation: Conversation; message: Message; lastSave: number; lastEmit: number }
 
   /** 订阅 Agent 事件，生命周期与应用实例一致，不持有模型或取消控制器。 */
   constructor(private store: StateService, private emit: (event: StreamEvent) => void, private readonly agent: Agent) {
+    //Agent 有事件时，调用该函数；这个函数再把事件交给 onEvent() 处理。
     this.agent.subscribe(event => this.onEvent(event))
   }
 

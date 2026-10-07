@@ -54,17 +54,22 @@ describe('SSE protocol and model requests', () => {
     expect(options.body).not.toContain('test-secret')
   })
 
-  it('limits the DeepSeek thinking parameter to the official service', async () => {
+  it('keeps configured request options identical across official, proxy and custom addresses', async () => {
     const fetchMock = vi.fn().mockImplementation(async () => new Response(bytes('data: {"choices":[{"delta":{"content":"OK"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')))
     vi.stubGlobal('fetch', fetchMock)
-    for (const baseUrl of ['https://api.deepseek.com', 'https://compatible.example.com/v1']) {
-      await streamModel({ ...config, baseUrl, reasoningEffort: 'max' }, [], new AbortController(), () => {})
+    const addresses = ['https://api.deepseek.com', 'https://proxy.example.com/v1', 'https://compatible.example.com/v1']
+    for (const baseUrl of addresses) {
+      await streamModel({ ...config, baseUrl, reasoningEffort: 'max', fastMode: true }, [], new AbortController(), () => {})
     }
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body).thinking).toEqual({ type: 'enabled' })
-    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).not.toHaveProperty('thinking')
+    const requests = fetchMock.mock.calls.map(([, options]) => JSON.parse(options.body))
+    expect(requests[0]).toMatchObject({ reasoning_effort: 'max', service_tier: 'priority' })
+    expect(requests[0]).not.toHaveProperty('thinking')
+    expect(requests[1]).toEqual(requests[0])
+    expect(requests[2]).toEqual(requests[0])
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(addresses.map(baseUrl => `${baseUrl}/chat/completions`))
   })
 
-  it('sends priority only with fast mode on and avoids unsupported DeepSeek fields', async () => {
+  it('sends priority only with fast mode on regardless of hostname', async () => {
     const fetchMock = vi.fn().mockImplementation(async () => new Response(bytes('data: {"choices":[{"delta":{"content":"OK"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')))
     vi.stubGlobal('fetch', fetchMock)
     await streamModel({ ...config, fastMode: true }, [], new AbortController(), () => {})
@@ -72,7 +77,12 @@ describe('SSE protocol and model requests', () => {
     await streamModel({ ...config, baseUrl: 'https://api.deepseek.com', fastMode: true }, [], new AbortController(), () => {})
     expect(JSON.parse(fetchMock.mock.calls[0][1].body).service_tier).toBe('priority')
     expect(JSON.parse(fetchMock.mock.calls[1][1].body)).not.toHaveProperty('service_tier')
-    expect(JSON.parse(fetchMock.mock.calls[2][1].body)).not.toHaveProperty('service_tier')
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body).service_tier).toBe('priority')
+  })
+
+  it.each(['https://api.deepseek.com', 'https://proxy.example.com/v1'])('reports rejected fast-mode options at %s', async baseUrl => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('test-secret', { status: 400 })))
+    await expect(streamModel({ ...config, baseUrl, fastMode: true }, [], new AbortController(), () => {})).rejects.toThrow('关闭快速模式')
   })
 
   it('sends selected reasoning effort and leaves defaults untouched when effort metadata is unknown', async () => {
@@ -83,7 +93,8 @@ describe('SSE protocol and model requests', () => {
     await streamModel({ ...config, reasoningEffort: null }, [], new AbortController(), () => {})
     await streamModel({ ...config, baseUrl: 'https://api.deepseek.com', reasoningEffort: null }, [], new AbortController(), () => {})
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ reasoning_effort: 'medium' })
-    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({ reasoning_effort: 'max', thinking: { type: 'enabled' } })
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({ reasoning_effort: 'max' })
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).not.toHaveProperty('thinking')
     expect(JSON.parse(fetchMock.mock.calls[2][1].body)).not.toHaveProperty('reasoning_effort')
     expect(JSON.parse(fetchMock.mock.calls[3][1].body)).not.toHaveProperty('reasoning_effort')
     expect(JSON.parse(fetchMock.mock.calls[3][1].body)).not.toHaveProperty('thinking')
