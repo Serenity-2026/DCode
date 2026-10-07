@@ -2,25 +2,25 @@
 export type Theme = 'light' | 'dark'
 /** 服务使用的实际传输协议，与模型名称无关。 */
 export type ModelApi = 'openai-completions' | 'anthropic-messages'
-/** Chat 维护的回复状态，StateService 会将上次遗留的生成标记为停止。 */
+/** AgentSession 维护的回复状态，StateService 会将上次遗留的生成标记为停止。 */
 export type MessageStatus = 'streaming' | 'complete' | 'stopped' | 'error'
 
 /** Models 从服务元数据确认的推理档位，StateService 保存账号选择，streamModel 发送实际参数。 */
 export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra'
 
-/** 系统选择器读取的文本快照，由 Chat 随消息保存，界面只展示名称与文件数。 */
+/** 系统选择器读取的文本快照，由 AgentSession 随消息保存，界面只展示名称与文件数。 */
 export interface Attachment { id: string; name: string; kind: 'file' | 'folder'; fileCount: number; content: string }
 
 /** 附件选择结果，提示被跳过的文件，不静默把非文本文件当成已添加。 */
 export interface AttachmentSelection { attachments: Attachment[]; skipped: number }
 
-/** Chat 的发送输入，重试复用已保存的附件，不能通过此接口要求读取本机路径。 */
+/** AgentSession 的发送输入，重试复用已保存的附件，不能通过此接口要求读取本机路径。 */
 export interface SendInput { content: string; retry?: boolean; attachments?: Attachment[] }
 
 /** 公开账号信息，不包含密码哈希、会话令牌或模型密钥。 */
 export interface User { id: string; name: string; username: string; createdAt: string }
 
-/** 单条对话消息，由 Chat 更新，Workspace 与 Markdown 展示。 */
+/** 单条对话消息，由 AgentSession 更新，Workspace 与 Markdown 展示。 */
 export interface Message {
   id: string
   role: 'user' | 'assistant'
@@ -32,7 +32,7 @@ export interface Message {
   attachments?: Attachment[]
 }
 
-/** 属于一个账号的完整对话，StateService 持久化，Chat 构建模型上下文。 */
+/** 属于一个账号的完整对话，StateService 持久化，AgentSession 构建模型上下文。 */
 export interface Conversation {
   id: string
   userId: string
@@ -90,7 +90,7 @@ export interface StreamEvent { conversationId: string; message: Message }
 /** 主进程 IPC 的成功/失败结果，不向界面泄露秘密。 */
 export type Result<T> = { ok: true; value: T } | { ok: false; error: string }
 
-/** preload 的业务白名单；依赖主进程 Auth、Models、StateService 和 Chat，不暴露原始 IPC。 */
+/** preload 的业务白名单；依赖主进程 Auth、Models、StateService 和 AgentSession，不暴露原始 IPC。 */
 export interface DCodeAPI {
   /** 获取当前登录状态及账号快照。 */
   getState(): Promise<Result<Snapshot>>

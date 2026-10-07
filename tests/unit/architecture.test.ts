@@ -100,3 +100,20 @@ it('has no circular source dependencies, including type-only imports', () => {
   for (const path of paths) visit(path, [])
   expect(cycles).toEqual([])
 })
+
+it('keeps the Agent runtime and loop independent of application sessions and storage', () => {
+  const boundaries: Record<string, string[]> = {
+    'main/services/agent-loop.ts': ['main/domain/'],
+    'main/services/agent.ts': ['main/domain/', 'main/services/agent-loop.ts', 'main/infrastructure/tool-schema.ts'],
+    'main/services/agent-session.ts': ['shared/', 'main/domain/', 'main/services/agent.ts', 'main/services/state-service.ts']
+  }
+  const violations: string[] = []
+  for (const [source, allowed] of Object.entries(boundaries)) {
+    const path = join(root, source)
+    for (const module of dependencies.get(path) || []) {
+      const destination = module.startsWith('.') ? target(path, module) : undefined
+      if (!destination || !allowed.some(prefix => relative(root, destination).startsWith(prefix))) violations.push(`${source} -> ${module}`)
+    }
+  }
+  expect(violations).toEqual([])
+})

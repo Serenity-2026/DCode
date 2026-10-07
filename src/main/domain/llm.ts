@@ -26,7 +26,7 @@ export type LlmMessage =
 export interface ToolDefinition { name: string; description: string; parameters: Record<string, unknown> }
 export interface AgentTool extends ToolDefinition { execute(argumentsValue: Record<string, unknown>, signal: AbortSignal): Promise<string> }
 
-/** Chat 只消费文本增量，完整内容块由模型端口返回给循环。 */
+/** AgentSession 只消费文本增量，完整内容块由模型端口返回给循环。 */
 export interface LlmDelta { content?: string; reasoning?: string }
 export type ModelStream = (config: ModelConfig, messages: LlmMessage[], controller: AbortController, onDelta: (delta: LlmDelta) => void, tools: ToolDefinition[]) => Promise<AssistantMessage>
 
@@ -35,7 +35,7 @@ export function toLlmMessages(messages: { role: 'system' | 'user' | 'assistant';
   return messages.map(message => message.role === 'assistant' ? { role: 'assistant', content: [{ type: 'text', text: message.content }], stopReason: 'stop' } : { role: message.role, content: message.content })
 }
 
-/** 停止等待不配合取消的异步工具，避免阻塞现有 Chat.stop；不能撤销已发生的副作用。 */
+/** 停止等待不配合取消的异步工具，避免阻塞现有 AgentSession.stop；不能撤销已发生的副作用。 */
 export function waitForTool<T>(operation: () => Promise<T>, signal: AbortSignal): Promise<T> {
   signal.throwIfAborted()
   return new Promise((resolve, reject) => {

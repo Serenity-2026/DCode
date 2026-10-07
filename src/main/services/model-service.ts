@@ -20,7 +20,7 @@ export class Models {
     return { id: randomUUID(), name: '环境默认', baseUrl: this.initial.baseUrl, api: resolveModelApi(this.initial.baseUrl, this.initial.api), availableModels: [], encryptedApiKey: await this.secrets.encrypt(this.initial.apiKey) }
   }
 
-  /** 仅允许使用服务返回列表中的模型，解密当前服务密钥并为 Chat 组装单次请求配置。 */
+  /** 仅允许使用服务返回列表中的模型，解密当前服务密钥并为 AgentSession 组装单次请求配置。 */
   async selected(): Promise<ModelConfig> {
     const user = this.store.requireUser()
     const provider = user.providers.find(p => p.id === user.activeProviderId)

@@ -1,8 +1,9 @@
 import { afterEach, expect, it, vi } from 'vitest'
+import { Agent } from '../../src/main/services/agent'
 import { AgentLoop } from '../../src/main/services/agent-loop'
-import { Chat } from '../../src/main/services/chat-service'
+import { AgentSession } from '../../src/main/services/agent-session'
 import { StateRepository } from '../../src/main/repositories/state-repository'
-import { toLlmMessages, type AgentTool } from '../../src/main/domain/llm'
+import type { AgentTool } from '../../src/main/domain/llm'
 import type { StreamEvent, ModelApi } from '../../src/shared/types'
 import { create, cleanup, createAgent, config } from './helpers'
 import { anthropicResponse, echoTool, openAIResponse, testCall } from './llm-fixtures'
@@ -16,7 +17,11 @@ it.each<ModelApi>(['openai-completions', 'anthropic-messages'])('executes ordere
     .mockResolvedValueOnce(response('', [testCall('c', '三')])).mockResolvedValueOnce(response('最终答案'))
   vi.stubGlobal('fetch', fetchMock)
   let content = ''
-  await createAgent([{ ...echoTool, execute }]).run({ ...config, api }, toLlmMessages([{ role: 'system', content: '提示' }, { role: 'user', content: '问题' }]), new AbortController(), delta => { content += delta.content || '' })
+  const agent = createAgent([{ ...echoTool, execute }])
+  agent.replaceMessages([{ role: 'system', content: '提示' }])
+  agent.subscribe(event => { if (event.type === 'message_update') content += event.delta.content || '' })
+  await agent.prompt({ ...config, api }, { role: 'user', content: '问题' })
+  expect(agent.state.outcome).toBe('complete')
   expect(content).toBe('先检查。最终答案')
   expect(execute.mock.calls.map(call => call[0])).toEqual([{ text: '一' }, { text: '二' }, { text: '三' }])
   const second = JSON.parse(fetchMock.mock.calls[1][1].body)
@@ -36,7 +41,9 @@ it.each<ModelApi>(['openai-completions', 'anthropic-messages'])('feeds unknown, 
   const fetchMock = vi.fn().mockResolvedValueOnce(response('', [{ ...testCall('a'), name: 'shell' }, { ...testCall('b'), arguments: '{"text":1}' }, testCall('c')]))
     .mockResolvedValueOnce(response('已处理工具错误'))
   vi.stubGlobal('fetch', fetchMock)
-  await createAgent([{ ...echoTool, execute }]).run({ ...config, api }, [], new AbortController(), () => {})
+  const agent = createAgent([{ ...echoTool, execute }])
+  await agent.prompt({ ...config, api }, { role: 'user', content: '问题' })
+  expect(agent.state.outcome).toBe('complete')
   expect(execute).toHaveBeenCalledOnce()
   const messages = JSON.parse(fetchMock.mock.calls[1][1].body).messages
   expect(JSON.stringify(messages)).not.toContain('private-key')
@@ -50,12 +57,13 @@ it('stops during a tool and never executes later calls or sends another model re
   const execute = vi.fn<AgentTool['execute']>(async () => { started(); return new Promise<string>(() => {}) })
   const fetchMock = vi.fn().mockResolvedValue(openAIResponse('', [testCall('a'), testCall('b')]))
   vi.stubGlobal('fetch', fetchMock)
-  const controller = new AbortController()
-  const pending = createAgent([{ ...echoTool, execute }]).run(config, [], controller, () => {})
-  const assertion = expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+  const agent = createAgent([{ ...echoTool, execute }])
+  const pending = agent.prompt(config, { role: 'user', content: '问题' })
   await running
-  controller.abort()
-  await assertion
+  agent.abort()
+  await pending
+  expect(agent.state.outcome).toBe('stopped')
+  expect(agent.state.pendingToolCalls).toEqual([])
   expect(execute).toHaveBeenCalledOnce()
   expect(execute.mock.calls[0][1].aborted).toBe(true)
   expect(fetchMock).toHaveBeenCalledOnce()
@@ -65,36 +73,42 @@ it('does not execute truncated calls and stops repeated IDs and unbounded loops'
   const execute = vi.fn(echoTool.execute)
   const agent = createAgent([{ ...echoTool, execute }])
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(openAIResponse('', [testCall('a')], '', 'length')))
-  await expect(agent.run(config, [], new AbortController(), () => {})).rejects.toThrow('长度上限')
+  await agent.prompt(config, { role: 'user', content: '问题' })
+  expect(agent.state.errorMessage).toContain('长度上限')
   expect(execute).not.toHaveBeenCalled()
   vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => openAIResponse('', [testCall('a')])) )
-  await expect(agent.run(config, [], new AbortController(), () => {})).rejects.toThrow('重复')
+  agent.replaceMessages([])
+  await agent.prompt(config, { role: 'user', content: '问题' })
+  expect(agent.state.errorMessage).toContain('重复')
   expect(execute).toHaveBeenCalledOnce()
   execute.mockClear()
   let index = 0
   vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => openAIResponse('', [testCall(`call_${++index}`)])))
-  await expect(agent.run(config, [], new AbortController(), () => {})).rejects.toThrow('循环上限')
+  agent.replaceMessages([])
+  await agent.prompt(config, { role: 'user', content: '问题' })
+  expect(agent.state.errorMessage).toContain('循环上限')
   expect(fetch).toHaveBeenCalledTimes(8)
   expect(execute).toHaveBeenCalledTimes(7)
 })
 
 it('rejects duplicate tool definitions and invalid schemas before starting', () => {
   const stream = vi.fn()
-  expect(() => new AgentLoop(stream, [echoTool, echoTool])).toThrow('重复')
-  expect(() => new AgentLoop(stream, [{ ...echoTool, parameters: { type: 'string' } }])).toThrow('工具定义')
-  expect(() => new AgentLoop(stream, [{ ...echoTool, parameters: { type: 'object', misspelled: true } }])).toThrow()
+  const loop = new AgentLoop(stream)
+  expect(() => new Agent(loop, [echoTool, echoTool])).toThrow('重复')
+  expect(() => new Agent(loop, [{ ...echoTool, parameters: { type: 'string' } }])).toThrow('工具定义')
+  expect(() => new Agent(loop, [{ ...echoTool, parameters: { type: 'object', misspelled: true } }])).toThrow()
   expect(stream).not.toHaveBeenCalled()
 })
 
-it('keeps the existing chat lifecycle and text persistence when tools are used', async () => {
+it('keeps the existing session lifecycle and text persistence when tools are used', async () => {
   const { store, path } = await create()
   vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(openAIResponse('', [testCall('a')])).mockResolvedValueOnce(openAIResponse('最终正文')))
   let finish!: (event: StreamEvent) => void
   const done = new Promise<StreamEvent>(resolve => { finish = resolve })
-  const chat = new Chat(store, event => { if (event.message.status !== 'streaming') finish(event) }, createAgent([echoTool]))
-  chat.send({ content: '请调用工具' }, config)
+  const session = new AgentSession(store, event => { if (event.message.status !== 'streaming') finish(event) }, createAgent([echoTool]))
+  session.send({ content: '请调用工具' }, config)
   expect((await done).message).toMatchObject({ status: 'complete', content: '最终正文' })
-  expect(chat.busy).toBe(false)
+  expect(session.busy).toBe(false)
   expect(new StateRepository(path).state.conversations[0].messages[1].content).toBe('最终正文')
   expect(store.state.schemaVersion).toBe(3)
 })

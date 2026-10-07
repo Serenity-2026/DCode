@@ -20,7 +20,7 @@ import { WelcomeCloud } from './components/WelcomeCloud'
 /**
  * 对话工作台组件，组织会话侧栏、输入框、用户管理和设置弹窗。
  * 依赖 Root 的账号快照、Ant Design、Markdown 与 ModelSettings 组件；
- * 所有数据修改和生成操作都通过 window.dcode 间接交给主进程 StateService/Chat。
+ * 所有数据修改和生成操作都通过 window.dcode 间接交给主进程 StateService/AgentSession。
  */
 export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSnapshot: React.Dispatch<React.SetStateAction<Snapshot | null>> }): ReactNode {
   const { message: toast, modal } = AntApp.useApp()
@@ -166,7 +166,7 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
   }, [act, busy])
 
   /**
-   * 发送草稿或重新生成最后一条回复，依赖 window.dcode.send 调用主进程 Chat。
+   * 发送草稿或重新生成最后一条回复，依赖 window.dcode.send 调用主进程 AgentSession。
    * 通过 installSnapshot 合并初始消息与流事件；发送成功才清空草稿，失败则保留输入。
    */
   async function send(retry = false): Promise<void> {
@@ -184,7 +184,7 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
     finally { inFlight.current = false; setPending(false); composer.current?.focus() }
   }
 
-  /** 请求 window.dcode.stop 等待 Chat 取消并保存，再用 installSnapshot 显示最终回复状态。 */
+  /** 请求 window.dcode.stop 等待 AgentSession 取消并保存，再用 installSnapshot 显示最终回复状态。 */
   async function stop(): Promise<void> {
     if (stopping) return
     setStopping(true)

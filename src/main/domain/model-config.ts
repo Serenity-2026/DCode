@@ -7,7 +7,7 @@ export interface ProviderConfig {
   api?: ModelApi
 }
 
-/** Chat 从账号的服务、列表选择及快速模式组装单次请求，Models 不固定模型 ID。 */
+/** AgentSession 从账号的服务、列表选择及快速模式组装单次请求，Models 不固定模型 ID。 */
 export interface ModelConfig extends ProviderConfig {
   model: string
   fastMode?: boolean

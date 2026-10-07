@@ -5,7 +5,7 @@ import type { StoredState, StoredUser } from '../domain/state'
 import { textInput } from '../domain/validation'
 import { StateRepository } from '../repositories/state-repository'
 
-/** 管理认证身份、账号隔离、偏好、会话及公开快照；依赖 StateRepository 保存数据，Auth/Models/Chat 调用业务方法。 */
+/** 管理认证身份、账号隔离、偏好、会话及公开快照；依赖 StateRepository 保存数据，Auth/Models/AgentSession 调用业务方法。 */
 export class StateService {
   /** 返回仓库内业务数据引用，仅供主进程服务使用，界面只能取得 snapshot。 */
   get state(): StoredState { return this.repository.state }
@@ -33,7 +33,7 @@ export class StateService {
     }
   }
 
-  /** 将当前业务状态交给 StateRepository 原子保存，Chat 用它周期性保存流式内容。 */
+  /** 将当前业务状态交给 StateRepository 原子保存，AgentSession 用它周期性保存流式内容。 */
   save(): void { this.repository.save() }
 
   /** 由仓库回滚数据，服务同时回滚认证身份，保证账号与会话修改在同一事务内。 */
@@ -142,8 +142,8 @@ export class StateService {
   }
 
   /**
-   * 为 Chat.send 准备一次生成：校验附件快照，必要时新建会话，保存问题并添加 streaming 回复占位。
-   * 重试时只替换最后的 assistant 消息；返回仓库内对象的引用，供 Chat 持续追加文本。
+   * 为 AgentSession.send 准备一次生成：校验附件快照，必要时新建会话，保存问题并添加 streaming 回复占位。
+   * 重试时只替换最后的 assistant 消息；返回仓库内对象的引用，供 AgentSession 持续追加文本。
    */
   begin(content: unknown, retry: boolean, model: string, inputAttachments?: Attachment[]): { conversation: Conversation; message: Message } {
     const user = this.requireUser()

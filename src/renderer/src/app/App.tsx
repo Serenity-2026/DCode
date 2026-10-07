@@ -7,7 +7,7 @@ import { Workspace } from '../features/chat/Workspace'
 
 /**
  * 界面根组件：通过 preload 的 window.dcode 读取 Snapshot，并配置 Ant Design 主题与提示容器。
- * 根据登录快照渲染 AuthScreen 或 Workspace；不直接访问主进程的 StateService、Auth 或 Chat。
+ * 根据登录快照渲染 AuthScreen 或 Workspace；不直接访问主进程的 StateService、Auth 或 AgentSession。
  */
 export default function Root(): ReactNode {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
