@@ -52,6 +52,7 @@ StateRepository 保持一份 schema 3 的 JSON 数据和一个事务边界，避
 
 - 新 IPC 操作：shared 定义 DTO/通道 → preload 白名单 → 对应 Controller → Service。
 - 新模型协议：infrastructure 实现请求/解析，Service 管理请求生命周期。
+- 工具循环与消息转换：domain 定义统一消息和 ModelStream 契约，infrastructure 做供应商适配与参数 schema 编译，AgentLoop 顺序执行工具并继续请求，Chat 保留已有会话生命周期；app 注入具体工具。范围及 pi 参考版本见 `SPEC-agent-loop.md`。
 - 新持久化规则：领域数据类型和 Repository；业务权限检查放 Service。
 - 新桌面能力：领域能力契约 → infrastructure 原生适配 → Service → Controller。
 - 新页面：features 下对应业务目录；跨业务复用的展示组件放 components。
