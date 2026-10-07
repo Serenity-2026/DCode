@@ -39,6 +39,8 @@ Agent 提供 replaceMessages、prompt、subscribe、abort、waitForIdle 和只�
 
 OpenAI 使用 Bearer、`/chat/completions`、`tool_calls` 和 `role: tool`；Anthropic 使用 x-api-key、anthropic-version、`/v1/messages`、独立 system、`tool_use` 和用户消息中的 `tool_result`。原生 Anthropic 的模型列表支持分页。Anthropic 不发送 OpenAI 专用的快速模式/强度字段。
 
+OpenAI 兼容请求不按 DeepSeek 等服务域名特判参数：所选强度控制 `reasoning_effort`，快速模式控制 `service_tier: "priority"`，不自动追加供应商专有 `thinking`。Base URL 只用于请求地址和同源判断；同一协议与选项在官方地址、代理和自定义网关上生成相同请求体。服务拒绝选项时返回对应提示，不自动降级重发。
+
 ## 循环与消息转换
 
 应用会话文本先转换为统一消息。适配器将供应商 SSE 转为统一内容块与结束原因，AgentSession 仅消费正文/推理增量。完整 assistant 消息与工具结果在本次运行内保留，下一次请求再转换到目标供应商格式；Anthropic 同轮多个结果合并为紧随 assistant 的用户消息。

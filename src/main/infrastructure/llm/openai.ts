@@ -2,9 +2,8 @@ import type { AssistantMessage, LlmContent, LlmDelta, LlmMessage, ToolDefinition
 import type { ModelConfig } from '../../domain/model-config'
 import { consumeEvents, parseEvent, parseToolArguments } from './sse'
 
-/** 将统一消息与工具转换为 OpenAI Chat Completions，保留同源工具轮次的推理内容。 */
+/** 将统一消息与工具转换为 OpenAI Chat Completions，按配置发送选项并保留同源工具轮次的推理内容。 */
 export function openAIRequest(config: ModelConfig, messages: LlmMessage[], tools: ToolDefinition[], maxTokens: number): object {
-  const deepseek = new URL(config.baseUrl).hostname === 'api.deepseek.com'
   return {
     model: config.model, stream: true, max_tokens: maxTokens,
     messages: messages.map(message => {
@@ -19,7 +18,7 @@ export function openAIRequest(config: ModelConfig, messages: LlmMessage[], tools
       }
     }),
     ...(tools.length ? { tools: tools.map(tool => ({ type: 'function', function: tool })), tool_choice: 'auto' } : {}),
-    ...(deepseek && config.reasoningEffort ? { thinking: { type: 'enabled' } } : !deepseek && config.fastMode ? { service_tier: 'priority' } : {}),
+    ...(config.fastMode ? { service_tier: 'priority' } : {}),
     ...(config.reasoningEffort ? { reasoning_effort: config.reasoningEffort } : {})
   }
 }
