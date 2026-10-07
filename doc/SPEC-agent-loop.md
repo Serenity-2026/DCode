@@ -6,7 +6,7 @@
 
 阅读 [agent-loop.ts](https://github.com/earendil-works/pi/blob/v1.0.4/packages/agent/src/agent-loop.ts)、[消息类型](https://github.com/earendil-works/pi/blob/v1.0.4/packages/ai/src/types.ts)、[OpenAI 适配](https://github.com/earendil-works/pi/blob/v1.0.4/packages/ai/src/api/openai-completions.ts)、[Anthropic 适配](https://github.com/earendil-works/pi/blob/v1.0.4/packages/ai/src/api/anthropic-messages.ts)及 [跨模型转换](https://github.com/earendil-works/pi/blob/v1.0.4/packages/ai/src/api/transform-messages.ts)。借鉴其统一内容块与工具结果消息、在模型边界转换协议、工具结果追加上下文后继续循环的结构，自行实现项目需要的子集，不引入 pi 包或复制完整运行时。
 
-本轮仅实现文本/推理/工具调用统一消息、OpenAI Chat Completions 与 Anthropic Messages 双向适配、顺序 function call、agent loop。生产工具列表为空，后续由 bootstrap 注入具体工具。暂不加队列、steering、并行工具、审批、压缩、后台运行、执行记录持久化、断点恢复或业务工具。
+实现文本/推理/工具调用统一消息、OpenAI Chat Completions 与 Anthropic Messages 双向适配、顺序 function call、agent loop。生产工具列表为空，后续由 bootstrap 注入具体工具。暂不加队列、steering、并行工具、审批、压缩、后台运行、执行记录持久化、断点恢复或业务工具。
 
 ## 分层
 
@@ -14,8 +14,22 @@
 - `infrastructure/llm/`：共享 SSE 解码，OpenAI 与 Anthropic 请求/回复转换；外部协议只在这里出现。
 - `infrastructure/model-client.ts`：选择适配器、模型发现、HTTP、现有空闲超时与错误处理。
 - `infrastructure/tool-schema.ts`：编译工具 JSON Schema；不修正或隐式转换参数。
-- `services/agent-loop.ts`：一个循环服务，获取完整统一回复、验证并顺序执行工具、追加结果，无工具调用时返回；默认最多 8 次模型请求以阻止无限循环。
-- `Chat`：沿用已有发送、保存正文、流推送、停止和重试；app 手动装配，不增加工具 IPC 或新的存储结构。
+- `domain/agent.ts`：循环上下文、编译后的工具、AgentState 与生命周期事件契约。
+- `services/agent-loop.ts`：只执行一次运行的模型/工具循环，通过事件上报消息、轮次与工具结果；没有持久会话状态或取消控制器。默认最多 8 次模型请求。
+- `services/agent.ts`：独立 Agent 运行时，拥有统一消息、工具、公开模型配置、运行状态、取消控制器与事件订阅；用循环事件更新状态。
+- `services/agent-session.ts`：应用会话层，替代原 Chat；准备成功历史、保存正文、订阅 Agent 事件并推送现有 StreamEvent，停止时调用 Agent.abort/waitForIdle。app 手动装配，不增加工具 IPC 或新的存储结构。
+
+## Agent 分层与事件
+
+对应 pi v1.0.4 的 [AgentSession](https://github.com/earendil-works/pi/blob/v1.0.4/packages/coding-agent/src/core/agent-session.ts) → [Agent](https://github.com/earendil-works/pi/blob/v1.0.4/packages/agent/src/agent.ts) → agent loop：应用会话服务依赖 Agent，Agent 依赖 AgentLoop；Agent/AgentLoop 不依赖存储、IPC、窗口或会话服务。复现职责边界，保留当前项目的最小功能，不照搬 pi 的全部 API。
+
+Agent 提供 replaceMessages、prompt、subscribe、abort、waitForIdle 和只读状态快照。prompt 追加用户消息，运行前同步占用执行状态，实际循环延迟到微任务，因此调用后立即取消可以阻止首次模型请求。成功与失败都在 agent_end 后释放运行状态；waitForIdle 包含会话订阅者的同步保存收尾。
+
+事件包括 agent_start/end、turn_start/end、message_start/update/end 与 tool_execution_start/end。订阅回调为同步接口；本轮没有异步插件回调或事件队列。message_update 带正文/推理增量，message_end 带完整统一消息；Agent 保存完整工具记录，AgentSession 沿用一条回复的展示与磁盘格式。公开模型配置不包含 API Key，handler 不进入公开状态；状态与订阅事件均复制，避免外部修改运行上下文。
+
+每次应用发送前，AgentSession 用成功问答历史替换 Agent 内存消息，随后 prompt 当前问题，防止会话或账号切换时混入前一轮上下文。独立使用 Agent 时可以连续 prompt 保留完整工具上下文。停止调用 abort 并等待 idle；工具仍需要配合 AbortSignal。
+
+验证：独立 Agent 无 Electron/存储依赖；完整事件顺序与状态、工具上下文保留、快照/订阅隔离、并发拒绝、取消前后不继续请求、失败后可再次运行；会话停止等待最终保存，旧 IPC/重试/双协议与桌面场景继续通过。
 
 ## 协议选择
 
@@ -27,7 +41,7 @@ OpenAI 使用 Bearer、`/chat/completions`、`tool_calls` 和 `role: tool`；Ant
 
 ## 循环与消息转换
 
-应用会话文本先转换为统一消息。适配器将供应商 SSE 转为统一内容块与结束原因，Chat 仅消费正文/推理增量。完整 assistant 消息与工具结果在本次运行内保留，下一次请求再转换到目标供应商格式；Anthropic 同轮多个结果合并为紧随 assistant 的用户消息。
+应用会话文本先转换为统一消息。适配器将供应商 SSE 转为统一内容块与结束原因，AgentSession 仅消费正文/推理增量。完整 assistant 消息与工具结果在本次运行内保留，下一次请求再转换到目标供应商格式；Anthropic 同轮多个结果合并为紧随 assistant 的用户消息。
 
 同次调用保留供应商原生推理签名/加密推理块，仅向原 API、服务地址和模型回传；跨供应商或跨模型不发送旧签名。跨用户轮次仍沿用现有成功问答文本，不重放工具调用或推理，不新增磁盘消息格式。
 
