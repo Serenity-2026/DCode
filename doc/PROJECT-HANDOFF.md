@@ -1,6 +1,6 @@
 # DCode 项目交接摘要
 
-用途：给新对话恢复开发上下文。按 2026-10-07 的源码整理，只保留当前实现与设计约定，不记录问答、迭代过程和 GitHub 操作历史。详细规范在 `doc/SPEC*.md`，若早期文档与源码冲突，以当前源码和测试为准。
+用途：给新窗口恢复功能开发上下文。按 2026-10-07 的源码整理，只保留已实现功能、分层契约、已知边界和开发入口，不记录代码问答、语法教学、迭代过程或 GitHub 操作历史。详细规范在 `doc/SPEC*.md`，若早期文档与源码冲突，以当前源码和测试为准。
 
 ## 1. 项目目标与当前范围
 
@@ -8,6 +8,7 @@
 - DCode 是 Electron 桌面 Coding Harness。目前完成本机账号、模型配置、流式对话和桌面交互框架。
 - 技术栈：TypeScript 5.9、Electron 44、React 19、Ant Design 6；electron-vite 构建，electron-builder 打包；Vitest 单元测试、Playwright Electron E2E。
 - 当前能与模型对话、把用户主动选择的文本文件/目录作为上下文，已接入简洁 function call / agent loop 和 OpenAI、Anthropic 统一消息层。生产工具列表为空，尚未实现终端执行、工程写入、云端账号同步或具体编码工具。不要把附件选择误认为已获得工程操作能力。
+- Agent 基本框架已经完成；本轮没有待完成的功能需求。下一步功能由用户在新窗口指定，开发时继续沿用当前分层，逐步增加能力。
 - 用户是 Java 程序员，了解部分 TS 语法；交流用中文。每个类和核心方法前写中文注释，说明职责与依赖。
 
 ## 2. 已有功能与界面约定
@@ -57,9 +58,18 @@ src/renderer/src/
 
 核心业务类：`Agent` 在 `agent.ts`，`AgentSession` 在 `agent-session.ts`；`Auth` 在 `auth-service.ts`，`Models` 在 `model-service.ts`；`StateService` 管理身份、账号归属、会话、偏好和公开快照；`StateRepository` 只管持久化；`DesktopService` 通过 `DesktopAccess` 契约使用 `ElectronDesktop`。`SecretCodec` 契约由 `Secrets` 实现。
 
-代理链路按 pi v1.0.4 的职责分为 `AgentSession → Agent → AgentLoop → ModelStream`。AgentSession 仅准备应用会话上下文、保存和推送；Agent 管理完整统一消息、工具、公开模型信息、运行状态、事件订阅与取消控制器；AgentLoop 只操作单次上下文，执行模型/工具循环并上报消息、工具和轮次事件。`domain/agent.ts` 定义状态、上下文与事件，`domain/llm.ts` 定义统一模型消息。Agent 与循环不依赖应用存储、IPC 或 Electron，可独立使用。
+Agent 框架参照 pi v1.0.4 的职责划分，自行实现最小子集，没有引入 pi 包或完整运行时。依赖方向为 `AgentSession → Agent → AgentLoop → ModelStream`；参考源码与范围见 `SPEC-agent-loop.md`。
 
-`infrastructure/llm/openai.ts` 与 `anthropic.ts` 做双向协议转换，`sse.ts` 处理共享字节解码，`model-client.ts` 负责 HTTP 与协议选择。Agent 构造时通过 `tool-schema.ts` 编译参数定义；bootstrap 装配 loop、Agent 与 AgentSession，生产工具列表为空。
+| 层与入口 | 当前职责 | 边界 |
+| --- | --- | --- |
+| `services/agent-loop.ts` · `run()` | 复制单次上下文，请求模型，顺序执行工具，追加结果并继续循环，上报消息/工具/轮次事件 | 不管理应用会话、存储或长期运行状态；模型调用函数由 bootstrap 注入 |
+| `services/agent.ts` · `prompt/replaceMessages/subscribe/abort/waitForIdle` | 注册工具并编译 Schema，拥有完整消息、草稿、公开状态、取消控制器与运行 Promise；更新状态后通知订阅者 | 不依赖应用存储、IPC 或 Electron；运行期间拒绝新 prompt 和上下文替换 |
+| `services/agent-session.ts` · `send/stop` | 准备当前应用会话历史，创建回复占位，订阅 Agent，保存并推送聊天消息 | 不直接请求模型、执行工具或创建取消控制器 |
+| `infrastructure/model-client.ts` 与 `llm/` | HTTP、协议选择、SSE 解码，以及 OpenAI/Anthropic 双向消息转换 | 供应商字段不进入循环或应用会话逻辑 |
+
+`domain/agent.ts` 定义状态、上下文和生命周期事件；`domain/llm.ts` 定义统一消息、模型端口与工具契约。`bootstrap.ts` 手动装配各层，生产入口为 `new Agent(loop, [])`。每个应用主进程启动时只创建一组 Loop、Agent 和 AgentSession；不同提问与会话复用这些实例，每次发送替换历史上下文，每次 prompt 创建独立取消控制器与运行 Promise。当前全应用只能同时运行一个生成任务。
+
+事件方向为 `Loop.emit → Agent.publish → 订阅者 → AgentSession.onEvent → StreamEvent → 窗口`。AgentSession 构造时登记同步订阅；AgentEvent 不含应用会话 ID，Session 用当前 target 将事件对应到聊天消息。对外状态快照、事件副本和推送消息均复制，工具 handler 与 API Key 不进入公开状态。
 
 依赖约束：app 装配各层；Controller 连接 Router/Service；Service 可用 Repository/infrastructure/domain，但不得导入 Electron、Controller、IPC 或窗口；Repository 不依赖业务层；infrastructure 不依赖 Service；domain/shared 不导入 Node/Electron/UI。renderer 不导入 main/preload/Node/Electron，通用 components 不反向依赖 features。架构测试检查边界与循环依赖，并单独约束 AgentSession/Agent/AgentLoop 的依赖方向。未引入 DI 框架或数据库。
 
@@ -73,7 +83,7 @@ src/renderer/src/
 
 1. ChatController 获取 `Models.selected()`，解密当前服务密钥并组装单次配置；互斥入口拒绝生成期间的新修改，停止入口不受此锁阻止。
 2. `AgentSession.send()` 校验并调用 `StateService.begin()`，保存用户消息和 streaming 回复占位；用成功历史替换 Agent 上下文，prompt 当前问题，立即返回初始 Snapshot。
-3. Agent.prompt 同步占用运行状态并创建取消控制器，微任务中启动 `AgentLoop → streamModel → fetch → 对应供应商 SSE 适配器`；解析正文、推理和完整工具调用。模型回复有工具调用时，校验 JSON Schema 后顺序执行，追加统一工具结果再请求；没有调用且返回正文时结束。循环最多 8 次模型请求，断流/截断/错误参数不执行半截调用，取消后不继续下一轮。
+3. Agent.prompt 同步占用运行状态并创建取消控制器，微任务中启动 `AgentLoop → streamModel → fetch → 对应供应商 SSE 适配器`；解析正文、推理和完整工具调用。模型回复有工具调用时，校验 JSON Schema 后顺序执行，追加统一工具结果再请求；没有调用、结束原因为 stop 且包含非空正文时结束。循环最多 8 次模型请求，第 8 次仍要求工具时在执行前报上限；断流/截断/错误参数不执行半截调用，取消后不继续下一轮。
 4. Agent 先用循环事件更新运行状态，再同步通知订阅者。AgentSession 消费 message_update 累加文本，约每 500ms 保存、每 30ms 推送完整消息副本；agent_end 中更新 complete/stopped/error、保存并推送最终消息，Agent 随后释放运行占用。
 5. 流事件经 `MainWindow.publish → webContents.send → preload.onStream → Workspace` 按消息 ID 合并。Workspace 缓存事件，避免初始 Snapshot 覆盖更新的流内容；不能依靠微任务调度保证跨进程响应先后。
 6. `AgentSession.stop()` 调用 Agent.abort，再 await Agent.waitForIdle 等循环及终止订阅者保存完成，然后返回快照；await 不阻塞事件循环。生成默认 60 秒空闲超时，每批非空字节（包括心跳）重置，不是整个回答的总时长；退出 finally 清掉计时器。模型列表是 15 秒总超时。
@@ -113,9 +123,9 @@ npm start               # 预览 out/ 构建
 npm run pack            # 当前系统应用目录到 release/
 ```
 
-本轮验证：类型检查与生产构建通过，12 个文件共 92 个单元测试通过，6 个本地 Electron E2E 通过；真实服务 smoke 默认跳过。此记录不是新对话当前状态的保证，修改后按范围重新验证。`DCODE_LIVE_TEST=1 npm run test:e2e` 才开启真实模型请求；不要在常规验证中自行开启。
+最近验证（2026-10-07）：当前源码类型检查、12 个文件共 94 个单元测试通过；生产构建在请求参数修正后通过，此后源码仅补充注释。最近一次本地 Electron E2E 为 Agent 分层和双协议框架的 6 项通过；请求参数修正后未重复 E2E。真实服务 smoke 默认跳过，未为本轮请求参数修正调用真实模型服务。
 
-2026-10-07 请求参数修正：移除 DeepSeek 域名特判，覆盖官方/代理/自定义地址的请求体一致性与快速模式错误提示；类型检查、生产构建和 94 个单元测试通过。本次未重复 Electron E2E，未请求真实模型服务。
+本交接整理只修改文档，使用差异与文件引用检查，不重复代码测试。上述验证记录不是新窗口当前状态的保证，后续修改需按范围重新验证。`DCODE_LIVE_TEST=1 npm run test:e2e` 才开启真实模型请求；不要在常规验证中自行开启。
 
 测试入口：`tests/unit/architecture.test.ts` 检查依赖边界/循环；`ipc.test.ts` 检查来源、结果、互斥和停止；其余覆盖认证、存储、配置、模型/SSE、附件；`tests/e2e/chat.spec.ts` 覆盖完整桌面交互。打包应用不会随着源码修改自动更新，需重新 pack。
 
@@ -127,8 +137,26 @@ npm run pack            # 当前系统应用目录到 release/
 - 前端统一 AntD；写组件前用 `npm exec -- antd info <组件>` 查实际 API，引用其他符号/类名前先搜索确认；不确定 Electron/TS API 时先查 Context7。
 - 新 IPC 功能按 shared DTO/通道 → preload 白名单 → Controller → Service 添加；网络/系统适配进 infrastructure，磁盘格式进 domain/Repository，新 UI 进对应 feature。不要把业务重新堆回 main/index.ts。
 - 功能先写必要 SPEC 再开发，修改应精准，避免猜测性功能/抽象；类和核心方法注释职责及依赖。界面只保留完成操作必需的文字，说明口径放 doc。
+- Git 提交使用中文，正文包含本次用户原始提示词；提交前核对作者与邮箱，并只记录本次相关文件。当前未跟踪的 `.idea/` 属于用户已有内容，不纳入功能提交或清理；本地数据、`.env.local` 同样保留。
 - 详细规格：`SPEC-architecture.md`（分层）、`SPEC-agent-loop.md`（pi v1.0.4 参考、简洁循环与统一消息层）、`SPEC-account-models.md`（账号）、`SPEC-model-discovery.md`（服务/模型）、`SPEC-composer-tools.md` / `SPEC-composer-motion.md`（工具/动画）、`SPEC-sidebar.md`、`SPEC-message-navigation.md`、`SPEC-welcome-workspace.md`、`SPEC-app-icon.md`。
-- 早期 README/SPEC 中的“所有附件都限额”“强度自动/默认三档”等已被当前实现替代，接手时优先看本摘要及相应源码。后续新需求由用户指定，当前没有额外待实现事项。
+- 早期 README/SPEC 中的“所有附件都限额”“强度自动/默认三档”“按 DeepSeek 域名追加 thinking 或跳过快速模式”等已被当前实现替代，接手时优先看本摘要及相应源码。
+
+## 9. Agent 扩展入口与当前边界
+
+- 统一消息：`LlmMessage` 包含 system/user/assistant/toolResult；assistant 内容块包含 text/thinking/toolCall，结束原因为 stop 或 toolCall。工具结果以 toolCallId 对应原调用。`ModelStream` 通过回调提供正文/思考增量，通过 Promise 提供完整 assistant 回复；完整工具参数由适配器拼接和解析后才交付循环。
+- 工具接入：实现 `AgentTool` 的 name、description、parameters 和 `execute(args, signal): Promise<string>`，从 bootstrap 注入 Agent。名称必须唯一、Schema 根类型为 object，Ajv 严格校验，不修正或转换模型参数。模型只接收声明，执行函数保留在主进程。未知工具、非法参数和执行失败形成错误 toolResult 供下一轮模型处理；测试工具只用于隔离测试。
+- 上下文归属：Loop 对输入历史深拷贝后维护局部请求消息；Agent 通过 message_end 保存完整正式消息，message_update 只更新草稿。应用会话每次 send 重载成功问答文本，完整工具记录不跨用户轮次重放，也不写入磁盘；多轮模型正文仍显示为同一条应用 assistant 回复。
+- 运行收尾：订阅者为同步回调，agent_end 通知完成后才释放 busy，waitForIdle 包含 Session 的最终同步保存。普通运行错误通过 outcome/error 记录；订阅者错误也可能使运行 Promise 拒绝，但最终清理仍执行。停止/失败后独立 Agent 不自动修复未配对工具消息，调用方需 replaceMessages 提供有效历史。
+- 工具取消：waitForTool 使取消时可以停止等待不配合的异步工具，不强行终止工具，也不撤销副作用；同步阻塞操作仍会阻塞事件循环。后续具体工具必须自行配合 AbortSignal。
+- 目前未实现：并行工具、生成队列、多 Agent 并发、steering/follow-up、上下文压缩、审批、单工具超时、后台任务、完整执行记录持久化与断点恢复。这里列出能力边界，不代表下一步自动实施的需求。
+
+| 新功能涉及的职责 | 修改入口 |
+| --- | --- |
+| 具体业务工具 | 工具实现、`domain/llm.ts` 契约、bootstrap 注册 |
+| 循环决策或工具调度 | `services/agent-loop.ts` |
+| 运行状态与生命周期事件 | `services/agent.ts`、`domain/agent.ts` |
+| 工具历史展示、会话保存与恢复 | `services/agent-session.ts`、shared DTO、存储层与 renderer |
+| 新模型协议或供应商参数能力 | `infrastructure/llm/`、model-client、模型配置；使用明确配置或元数据，避免域名/模型名猜测 |
 
 新对话可直接发送：
 
