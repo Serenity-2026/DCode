@@ -96,3 +96,8 @@ it('rejects repeated native pagination cursors', async () => {
   await expect(listModels({ ...config, api: 'anthropic-messages' })).rejects.toThrow('分页')
   expect(fetch).toHaveBeenCalledTimes(2)
 })
+
+it('does not blame unsent OpenAI options for native Anthropic request errors', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('secret', { status: 400 })))
+  await expect(streamModel({ ...config, api: 'anthropic-messages', fastMode: true, reasoningEffort: 'high' }, [], new AbortController(), () => {})).rejects.toThrow('请求参数或模型不受支持，请检查模型配置。')
+})

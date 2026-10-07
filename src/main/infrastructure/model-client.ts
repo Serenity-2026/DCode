@@ -61,7 +61,7 @@ export async function listModels(config: ProviderConfig): Promise<{ ids: string[
 }
 
 /**
- * 使用 ModelConfig 和 fetch 发起流式对话请求，由 consumeSSE 解析响应。
+ * 使用 ModelConfig 和 fetch 发起流式对话请求，由所选协议适配器解析响应。
  * 依赖调用方传入的 AbortController 支持停止，并将 HTTP、网络和空闲超时转为可读错误；
  * 通过 onDelta 返回增量，不直接修改会话或操作界面。
  */
@@ -96,7 +96,7 @@ export async function streamModel(
     })
     if (!response.ok) {
       const errors: Record<number, string> = {
-        400: config.reasoningEffort ? '请求参数或模型强度不受支持，请调整强度并检查模型配置。' : config.fastMode && !deepseek ? '请求参数或快速模式不受支持，请关闭快速模式并检查模型配置。' : '请求参数或模型不受支持，请检查模型配置。',
+        400: api === 'openai-completions' && config.reasoningEffort ? '请求参数或模型强度不受支持，请调整强度并检查模型配置。' : api === 'openai-completions' && config.fastMode && !deepseek ? '请求参数或快速模式不受支持，请关闭快速模式并检查模型配置。' : '请求参数或模型不受支持，请检查模型配置。',
         401: 'API 密钥无效，请检查模型配置。',
         402: '模型账户余额不足，请充值后重试。',
         403: '无权访问该模型，请检查账户权限。',
