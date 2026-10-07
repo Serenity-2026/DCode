@@ -20,6 +20,34 @@ it('imports no environment service unless both URL and key are configured', asyn
   }
 })
 
+it('saves and restores explicit native protocol and follows the selected service instead of model names', async () => {
+  const { store, models, path } = await create()
+  const fetchMock = vi.fn().mockImplementation(async () => response(['claude-through-gateway']))
+  vi.stubGlobal('fetch', fetchMock)
+  const native = await models.testAndSave({ ...draft, api: 'anthropic-messages' })
+  expect(native.providers[1].api).toBe('anthropic-messages')
+  expect(await models.selected()).toMatchObject({ api: 'anthropic-messages', model: 'claude-through-gateway' })
+  expect(fetchMock.mock.calls[0][0]).toBe(`${draft.baseUrl}/models`)
+  expect(fetchMock.mock.calls[0][1].headers['x-api-key']).toBe(draft.apiKey)
+  await models.testAndSave({ ...draft, id: native.activeProviderId!, apiKey: '' })
+  expect((await models.selected()).api).toBe('anthropic-messages')
+  const restored = new StateService(new StateRepository(path))
+  restored.authenticate(store.requireUser().id)
+  expect(restored.snapshot().providers[1].api).toBe('anthropic-messages')
+  const gateway = await models.testAndSave({ ...draft, api: 'openai-completions' })
+  expect(await models.selected()).toMatchObject({ api: 'openai-completions', model: 'claude-through-gateway' })
+  store.apply({ type: 'model:select', providerId: native.activeProviderId!, model: 'claude-through-gateway' })
+  expect((await models.selected()).api).toBe('anthropic-messages')
+  store.apply({ type: 'model:select', providerId: gateway.activeProviderId!, model: 'claude-through-gateway' })
+  expect((await models.selected()).api).toBe('openai-completions')
+  delete store.requireUser().providers[0].api
+  store.apply({ type: 'model:select', providerId: store.requireUser().providers[0].id, model: 'test' })
+  expect((await models.selected()).api).toBe('openai-completions')
+  const before = structuredClone(store.state)
+  await expect(models.testAndSave({ ...draft, api: 'bad' as never })).rejects.toThrow('协议无效')
+  expect(store.state).toEqual(before)
+})
+
 it('uses the candidate URL and key to discover models before saving, without a chat request', async () => {
   const { models, store } = await create()
   const fetchMock = vi.fn().mockImplementation(async () => response())

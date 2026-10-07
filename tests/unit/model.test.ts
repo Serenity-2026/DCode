@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { consumeSSE, streamModel } from '../../src/main/infrastructure/model-client'
+import { streamModel } from '../../src/main/infrastructure/model-client'
+import { consumeSSE } from '../../src/main/infrastructure/llm/openai'
 
 function bytes(text: string, step = 1): ReadableStream<Uint8Array> {
   const data = new TextEncoder().encode(text)
@@ -112,7 +113,7 @@ describe('SSE protocol and model requests', () => {
       }, 90_000)
     } }))))
     const promise = streamModel(config, [], controller, () => {})
-    const assertion = expect(promise).resolves.toBeUndefined()
+    const assertion = expect(promise).resolves.toMatchObject({ stopReason: 'stop', content: [{ type: 'text', text: 'OK' }] })
     await vi.advanceTimersByTimeAsync(90_000)
     await assertion
     expect(controller.signal.aborted).toBe(false)

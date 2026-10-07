@@ -1,25 +1,26 @@
 import type { SendInput, Snapshot, StreamEvent } from '../../shared/types'
 import type { ModelConfig } from '../domain/model-config'
-import { streamModel } from '../infrastructure/model-client'
+import { toLlmMessages } from '../domain/llm'
+import { AgentLoop } from './agent-loop'
 import { contextMessages } from '../../shared/context'
 import { StateService } from './state-service'
 
 /**
  * 管理一次对话生成的完整生命周期：发送、接收增量、保存结果和停止。
- * 依赖 StateService 管理会话，contextMessages 构建上下文，streamModel 请求模型；
+ * 依赖 StateService 管理会话，contextMessages 构建上下文，AgentLoop 调度模型与工具；
  * 主进程为每次请求传入当前账号选中的 ModelConfig，emit 将 StreamEvent 转发给界面。
  */
 export class Chat {
   private active?: { controller: AbortController; done: Promise<void> }
 
-  /** 注入数据仓库和事件发送函数；模型配置在每次发送时提供，不固定在构造函数中。 */
-  constructor(private store: StateService, private emit: (event: StreamEvent) => void) {}
+  /** 注入状态、事件发送与循环服务；模型配置在每次发送时提供。 */
+  constructor(private store: StateService, private emit: (event: StreamEvent) => void, private readonly agent: AgentLoop) {}
 
   /** 判断是否仍有未结束的生成任务，供主进程阻止并发操作及等待安全退出。 */
   get busy(): boolean { return Boolean(this.active) }
 
   /**
-   * 通过 StateService.begin 保存问题与回复占位，启动 streamModel 后立即返回界面快照。
+   * 通过 StateService.begin 保存问题与回复占位，启动 AgentLoop 后立即返回界面快照。
    * 后续文本通过 emit 推送；结束、失败或停止时保存最终状态。retry 会替换最后一条回复。
    */
   send(input: SendInput, config: ModelConfig): Snapshot {
@@ -34,7 +35,7 @@ export class Chat {
       let lastSave = Date.now()
       let lastEmit = 0
       try {
-        await streamModel(config, contextMessages(conversation), controller, delta => {
+        await this.agent.run(config, toLlmMessages(contextMessages(conversation)), controller, delta => {
           message.content += delta.content || ''
           message.reasoning += delta.reasoning || ''
           if (Date.now() - lastSave >= 500) { this.store.save(); lastSave = Date.now() }
@@ -43,7 +44,6 @@ export class Chat {
             lastEmit = Date.now()
           }
         })
-        if (!message.content.trim()) throw new Error('模型没有返回文本，请重试。')
         message.status = 'complete'
       } catch (error) {
         message.status = controller.signal.aborted && !(error instanceof Error && error.message.includes('超时')) ? 'stopped' : 'error'

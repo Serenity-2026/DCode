@@ -52,7 +52,7 @@ export function messageContent(content: string, attachments: Attachment[] = []):
 /** 构建真实请求上下文；只保留成功历史轮次和需要回答的问题，排除失败历史与推理文本。 */
 export function contextMessages(conversation: Pick<Conversation, 'messages'>, includePending = true): { role: 'system' | 'user' | 'assistant'; content: string }[] {
   const result: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
-    { role: 'system', content: '你是 DCode，一位严谨、简洁的编程助手。使用用户的语言回答，代码使用带语言标记的 Markdown 代码块。不要声称已经执行代码或访问文件。' }
+    { role: 'system', content: '你是 DCode，一位严谨、简洁的编程助手。使用用户的语言回答，代码使用带语言标记的 Markdown 代码块。只有工具结果明确证明操作成功时，才可声称已经执行代码或访问文件。' }
   ]
   for (let i = 0; i < conversation.messages.length; i += 2) {
     const user = conversation.messages[i]
