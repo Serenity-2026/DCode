@@ -2,7 +2,11 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
-import { CodingTools } from '../../src/main/infrastructure/tools/coding-tools'
+import { ToolRuntime, type WorkspaceTool } from '../../src/main/infrastructure/tools/tool-runtime'
+import { readTool } from '../../src/main/infrastructure/tools/read'
+import { bashTool } from '../../src/main/infrastructure/tools/bash'
+import { editTool } from '../../src/main/infrastructure/tools/edit'
+import { writeTool } from '../../src/main/infrastructure/tools/write'
 import { toolValidator } from '../../src/main/infrastructure/tool-schema'
 import { ToolExecutionError, type ToolOutput } from '../../src/main/domain/llm'
 import { AgentSession } from '../../src/main/services/agent-session'
@@ -12,21 +16,22 @@ import { create, createAgent, config, cleanup } from './helpers'
 import type { ModelApi } from '../../src/shared/types'
 import { contextMessages, estimateContext } from '../../src/shared/context'
 
-const fixtures: { directory: string; tools: CodingTools }[] = []
+const fixtures: { directory: string; runtime: ToolRuntime }[] = []
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6Z9sAAAAASUVORK5CYII=', 'base64')
 
 /** 每个测试仅访问自身临时目录，调用真实生产 handler 和参数校验。 */
 function fixture() {
   const directory = mkdtempSync(join(tmpdir(), 'dcode-tools-unit-'))
-  const tools = new CodingTools()
-  tools.setDirectory(directory)
-  fixtures.push({ directory, tools })
+  const runtime = new ToolRuntime()
+  const tools = [readTool, bashTool, editTool, writeTool].map(tool => runtime.bind(tool))
+  runtime.setDirectory(directory)
+  fixtures.push({ directory, runtime })
   const run = (name: string, args: Record<string, unknown>, signal = new AbortController().signal) => {
-    const tool = tools.tools.find(tool => tool.name === name)!
+    const tool = tools.find(tool => tool.name === name)!
     expect(toolValidator(tool)(args)).toBe(true)
     return tool.execute(args, signal)
   }
-  return { directory, tools, run }
+  return { directory, runtime, tools, run }
 }
 
 /** 等待真实子进程创建标记文件，避免依靠固定延迟触发取消。 */
@@ -40,13 +45,13 @@ async function waitFile(path: string): Promise<void> {
 
 afterEach(() => {
   vi.unstubAllGlobals(); cleanup()
-  for (const { directory, tools } of fixtures.splice(0)) { tools.dispose(); rmSync(directory, { recursive: true, force: true }) }
+  for (const { directory, runtime } of fixtures.splice(0)) { runtime.dispose(); rmSync(directory, { recursive: true, force: true }) }
 })
 
 it('registers only the four pi tools and rejects malformed arguments without conversion', () => {
   const { tools } = fixture()
-  expect(tools.tools.map(tool => tool.name)).toEqual(['read', 'bash', 'edit', 'write'])
-  const valid = (name: string, args: unknown) => toolValidator(tools.tools.find(tool => tool.name === name)!)(args)
+  expect(tools.map(tool => tool.name)).toEqual(['read', 'bash', 'edit', 'write'])
+  const valid = (name: string, args: unknown) => toolValidator(tools.find(tool => tool.name === name)!)(args)
   expect(valid('read', { path: 'a', offset: 0 })).toBe(false)
   expect(valid('read', { path: 'a', limit: 1.5 })).toBe(false)
   expect(valid('bash', { command: 'pwd', timeout: -1 })).toBe(false)
@@ -58,11 +63,61 @@ it('registers only the four pi tools and rejects malformed arguments without con
   expect(valid('write', { path: 'a', content: '', unknown: true })).toBe(false)
 })
 
+it('injects an independent workspace tool through Agent without changing the runtime or built-in tools', async () => {
+  const { directory, runtime } = fixture()
+  let temporary: string | undefined
+  const custom: WorkspaceTool = {
+    name: 'inspect_workspace', description: 'Inspect the current workspace.',
+    parameters: { type: 'object', additionalProperties: false, required: ['label'], properties: { label: { type: 'string' } } },
+    execute: async (args, signal, { cwd, temporaryDirectories }) => {
+      signal.throwIfAborted()
+      temporary = mkdtempSync(join(tmpdir(), 'dcode-custom-tool-'))
+      temporaryDirectories.add(temporary)
+      return `${args.label}:${cwd}`
+    }
+  }
+  const fetchMock = vi.fn().mockResolvedValueOnce(openAIResponse('', [{ id: 'custom', name: 'inspect_workspace', arguments: '{"label":"自定义"}' }])).mockResolvedValueOnce(openAIResponse('已检查'))
+  vi.stubGlobal('fetch', fetchMock)
+  const agent = createAgent([runtime.bind(custom)])
+  await agent.prompt(config, { role: 'user', content: '检查工作目录' })
+  expect(agent.state.outcome).toBe('complete')
+  expect(agent.state.tools.map(tool => tool.name)).toEqual(['inspect_workspace'])
+  expect(agent.state.messages.find(message => message.role === 'toolResult')).toMatchObject({ content: `自定义:${directory}`, isError: false })
+  const request = JSON.parse(fetchMock.mock.calls[0][1].body)
+  expect(request.tools[0].function).toMatchObject({ name: custom.name, parameters: custom.parameters })
+  expect(request.tools[0].function.execute).toBeUndefined()
+  expect(existsSync(temporary!)).toBe(true)
+  runtime.dispose()
+  expect(existsSync(temporary!)).toBe(false)
+})
+
+it('captures cwd at execution time and keeps separately bound runtime contexts isolated', async () => {
+  const first = fixture()
+  const second = fixture()
+  let finish!: () => void
+  const pending = new Promise<void>(resolve => { finish = resolve })
+  const custom: WorkspaceTool = {
+    name: 'capture', description: 'Capture directory.', parameters: { type: 'object', properties: {} },
+    execute: async (_args, _signal, { cwd }) => { await pending; return cwd }
+  }
+  const bound = first.runtime.bind(custom)
+  const signal = new AbortController().signal
+  const running = bound.execute({}, signal)
+  first.runtime.setDirectory(second.directory)
+  finish()
+  expect(await running).toBe(first.directory)
+  expect(await bound.execute({}, signal)).toBe(second.directory)
+  expect(await second.runtime.bind(custom).execute({}, signal)).toBe(second.directory)
+  first.runtime.setDirectory()
+  await expect(bound.execute({}, signal)).rejects.toThrow('选择工作文件夹')
+  expect(await second.runtime.bind(custom).execute({}, signal)).toBe(second.directory)
+})
+
 it('requires an explicit working directory and never inherits the application cwd', async () => {
-  const { tools, run } = fixture()
-  tools.setDirectory()
+  const { runtime, run } = fixture()
+  runtime.setDirectory()
   await expect(run('write', { path: 'should-not-exist', content: 'a' })).rejects.toThrow('选择工作文件夹')
-  tools.setDirectory('relative')
+  runtime.setDirectory('relative')
   await expect(run('bash', { command: 'pwd' })).rejects.toThrow('选择工作文件夹')
 })
 
@@ -179,7 +234,7 @@ it('executes bash in the selected cwd, captures both streams and preserves failu
 })
 
 it('retains bounded command tails and readable full logs, then removes its own logs', async () => {
-  const { tools, run } = fixture()
+  const { runtime, run } = fixture()
   const result = await run('bash', { command: 'for ((i=1;i<=2500;i++)); do printf "line-%s\n" "$i"; done' }) as string
   expect(result).toContain('line-2500')
   expect(result).not.toContain('line-1\n')
@@ -189,7 +244,7 @@ it('retains bounded command tails and readable full logs, then removes its own l
   const bytes = await run('bash', { command: 'for ((i=0;i<20000;i++)); do printf "中文😀"; done' }) as string
   expect(Buffer.byteLength(bytes.split('\n\n[')[0])).toBeLessThanOrEqual(50 * 1024)
   expect(bytes).not.toContain('\ufffd')
-  tools.dispose()
+  runtime.dispose()
   expect(existsSync(path)).toBe(false)
 })
 
@@ -221,7 +276,7 @@ it.each<ModelApi>(['openai-completions', 'anthropic-messages'])('runs real file 
   const response = api === 'anthropic-messages' ? anthropicResponse : openAIResponse
   const fetchMock = vi.fn().mockResolvedValueOnce(response('', calls)).mockResolvedValueOnce(response('工具完成'))
   vi.stubGlobal('fetch', fetchMock)
-  const agent = createAgent(tools.tools)
+  const agent = createAgent(tools)
   await agent.prompt({ ...config, api }, { role: 'user', content: '操作文件' })
   expect(agent.state.outcome).toBe('complete')
   expect(readFileSync(join(directory, 'actual.txt'), 'utf8')).toBe('changed')
@@ -241,11 +296,11 @@ it.each<ModelApi>(['openai-completions', 'anthropic-messages'])('runs real file 
 })
 
 it('recovers selected directories for followups/retries and clears them on conversation/account changes', async () => {
-  const { directory, tools } = fixture()
+  const { directory, runtime, tools } = fixture()
   const { store, auth, path } = await create()
-  const agent = createAgent(tools.tools)
+  const agent = createAgent(tools)
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(openAIResponse('已回复')))
-  const session = new AgentSession(store, () => {}, agent, tools)
+  const session = new AgentSession(store, () => {}, agent, runtime)
   const attachment = (await readAttachments([directory], 'folder')).attachments[0]
   session.send({ content: '第一问', attachments: [attachment] }, config)
   const id = store.state.activeConversationId!
@@ -257,10 +312,10 @@ it('recovers selected directories for followups/retries and clears them on conve
   expect(agent.state.messages[0]).toMatchObject({ content: expect.stringContaining(directory) })
   store.apply({ type: 'conversation:select', id: null })
   session.send({ content: '新会话' }, config); await agent.waitForIdle()
-  await expect(tools.tools[0].execute({ path: 'picture' }, new AbortController().signal)).rejects.toThrow('选择工作文件夹')
+  await expect(tools[0].execute({ path: 'picture' }, new AbortController().signal)).rejects.toThrow('选择工作文件夹')
   store.apply({ type: 'conversation:select', id })
   session.send({ content: '旧附件', attachments: [{ ...attachment, id: 'old', path: undefined }] }, config); await agent.waitForIdle()
-  await expect(tools.tools[0].execute({ path: 'picture' }, new AbortController().signal)).rejects.toThrow('选择工作文件夹')
+  await expect(tools[0].execute({ path: 'picture' }, new AbortController().signal)).rejects.toThrow('选择工作文件夹')
   await auth.logout()
   await auth.register({ username: 'another', password: 'another-password' })
   session.send({ content: '其他账号' }, config); await agent.waitForIdle()
@@ -281,15 +336,15 @@ it('includes the newly selected draft directory in the same token estimate as th
 })
 
 it('stops real bash through AgentSession and never starts later tool calls', async () => {
-  const { directory, tools } = fixture()
+  const { directory, runtime, tools } = fixture()
   const { store } = await create()
-  const agent = createAgent(tools.tools)
+  const agent = createAgent(tools)
   const fetchMock = vi.fn().mockResolvedValue(openAIResponse('', [
     { id: 'long', name: 'bash', arguments: '{"command":"touch ready; sleep 30"}' },
     { id: 'later', name: 'write', arguments: '{"path":"later","content":"bad"}' }
   ]))
   vi.stubGlobal('fetch', fetchMock)
-  const session = new AgentSession(store, () => {}, agent, tools)
+  const session = new AgentSession(store, () => {}, agent, runtime)
   session.send({ content: '停止工具', attachments: (await readAttachments([directory], 'folder')).attachments }, config)
   await waitFile(join(directory, 'ready'))
   expect((await session.stop()).conversations[0].messages[1].status).toBe('stopped')
@@ -298,11 +353,11 @@ it('stops real bash through AgentSession and never starts later tool calls', asy
 })
 
 it('returns actionable missing-workspace errors to the model', async () => {
-  const { tools } = fixture()
+  const { runtime, tools } = fixture()
   const fetchMock = vi.fn().mockResolvedValueOnce(openAIResponse('', [{ id: 'call', name: 'read', arguments: '{"path":"missing"}' }])).mockResolvedValueOnce(openAIResponse('请重新选择'))
   vi.stubGlobal('fetch', fetchMock)
-  tools.setDirectory()
-  const agent = createAgent(tools.tools)
+  runtime.setDirectory()
+  const agent = createAgent(tools)
   await agent.prompt(config, { role: 'user', content: '读取' })
   expect(agent.state.messages.find(message => message.role === 'toolResult')).toMatchObject({ isError: true, content: expect.stringContaining('选择工作文件夹') })
   expect(new ToolExecutionError('预期错误')).toBeInstanceOf(Error)

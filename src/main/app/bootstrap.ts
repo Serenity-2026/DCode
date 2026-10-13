@@ -10,7 +10,11 @@ import { AgentSession } from '../services/agent-session'
 import { AgentLoop } from '../services/agent-loop'
 import { Agent } from '../services/agent'
 import { streamModel } from '../infrastructure/model-client'
-import { CodingTools } from '../infrastructure/tools/coding-tools'
+import { ToolRuntime } from '../infrastructure/tools/tool-runtime'
+import { readTool } from '../infrastructure/tools/read'
+import { bashTool } from '../infrastructure/tools/bash'
+import { editTool } from '../infrastructure/tools/edit'
+import { writeTool } from '../infrastructure/tools/write'
 import { Auth } from '../services/auth-service'
 import { Models } from '../services/model-service'
 import { DesktopService } from '../services/desktop-service'
@@ -42,10 +46,11 @@ export function startApplication(): void {
     const auth = new Auth(state, secrets, models)
     await auth.restore()
     const loop = new AgentLoop((config, messages, controller, onDelta, tools) => streamModel(config, messages, controller, onDelta, { tools }))
-    const codingTools = new CodingTools()
-    const agent = new Agent(loop, codingTools.tools)
-    const generation = new AgentSession(state, event => windows?.publish(event), agent, codingTools)
-    app.on('will-quit', () => codingTools.dispose())
+    const toolRuntime = new ToolRuntime()
+    const tools = [readTool, bashTool, editTool, writeTool].map(tool => toolRuntime.bind(tool))
+    const agent = new Agent(loop, tools)
+    const generation = new AgentSession(state, event => windows?.publish(event), agent, toolRuntime)
+    app.on('will-quit', () => toolRuntime.dispose())
     session = generation
     const mainWindow = new MainWindow(generation, {
       icon, preload: join(here, '../preload/index.cjs'), renderer: join(here, '../renderer/index.html')
