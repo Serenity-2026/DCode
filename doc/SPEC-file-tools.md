@@ -12,12 +12,12 @@
 
 2026-10-13 将工具声明和实现拆为独立模块，保留现有参数、输出和取消行为：
 
-- `read.ts`、`bash.ts`、`edit.ts`、`write.ts` 各自导出 `WorkspaceTool` 对象，包含 name、description、parameters 和 execute。具体工具不依赖其他工具，也不依赖应用会话或存储。
+- `read.ts`、`bash.ts`、`edit.ts`、`write.ts` 分别导出 `ReadTool`、`BashTool`、`EditTool`、`WriteTool` 类，实现 `WorkspaceTool`，声明只读的 name、description、parameters，并显式标注 execute 的参数和返回类型。具体工具不依赖其他工具，也不依赖应用会话或存储。
 - `tool-runtime.ts` 定义 `WorkspaceTool` 与执行上下文，并提供 `ToolRuntime.bind(tool): AgentTool`。只负责本轮 cwd、取消检查、预期系统错误转换和临时目录清理；不导入、枚举或判断具体工具名称。
 - `file-operations.ts` 提供文件路径解析、UTF-8 解码及同路径写入互斥；`output.ts` 提供输出截断。公共模块不依赖具体工具。
-- `bootstrap.ts` 显式导入工具，用 `[readTool, bashTool, editTool, writeTool].map(tool => runtime.bind(tool))` 注入 Agent，为每个会话创建独立 runtime，并将该 runtime 作为 ToolWorkspace 注入对应 AgentSession。目录在每次执行开始时捕获；账号/会话目录恢复规则不变。
+- `bootstrap.ts` 显式导入工具类，在会话工厂中用 `[new ReadTool(), new BashTool(), new EditTool(), new WriteTool()].map(tool => runtime.bind(tool))` 注入 Agent，为每个会话创建独立工具实例与 runtime，并将该 runtime 作为 ToolWorkspace 注入对应 AgentSession。目录在每次执行开始时捕获；账号/会话目录恢复规则不变。
 
-新增本机工具时，在独立文件导出 WorkspaceTool，并在 bootstrap 的数组中注册。无需修改其他工具、ToolRuntime、Agent 或 AgentLoop。不需要工作目录的工具可以直接实现 AgentTool 注入 Agent。暂不引入基类继承、动态扫描、插件加载器或依赖注入框架。
+新增本机工具时，在独立文件导出实现 WorkspaceTool 的类，并在 bootstrap 的数组中创建实例注册。无需修改其他工具、ToolRuntime、Agent 或 AgentLoop。不需要工作目录的工具可以直接实现 AgentTool 注入 Agent。暂不引入基类继承、动态扫描、插件加载器或依赖注入框架。
 
 ## 行为
 

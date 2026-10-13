@@ -12,10 +12,10 @@ import { AgentLoop } from '../services/agent-loop'
 import { Agent } from '../services/agent'
 import { streamModel } from '../infrastructure/model-client'
 import { ToolRuntime } from '../infrastructure/tools/tool-runtime'
-import { readTool } from '../infrastructure/tools/read'
-import { bashTool } from '../infrastructure/tools/bash'
-import { editTool } from '../infrastructure/tools/edit'
-import { writeTool } from '../infrastructure/tools/write'
+import { ReadTool } from '../infrastructure/tools/read'
+import { BashTool } from '../infrastructure/tools/bash'
+import { EditTool } from '../infrastructure/tools/edit'
+import { WriteTool } from '../infrastructure/tools/write'
 import { Auth } from '../services/auth-service'
 import { Models } from '../services/model-service'
 import { DesktopService } from '../services/desktop-service'
@@ -49,7 +49,7 @@ export function startApplication(): void {
     const loop = new AgentLoop((config, messages, controller, onDelta, tools) => streamModel(config, messages, controller, onDelta, { tools }))
     const generation = new AgentSessions(state, () => {
       const toolRuntime = new ToolRuntime()
-      const tools = [readTool, bashTool, editTool, writeTool].map(tool => toolRuntime.bind(tool))
+      const tools = [new ReadTool(), new BashTool(), new EditTool(), new WriteTool()].map(tool => toolRuntime.bind(tool))
       const agent = new Agent(loop, tools)
       return { session: new AgentSession(state, event => windows?.publish(event), agent, toolRuntime), dispose: () => toolRuntime.dispose() }
     })

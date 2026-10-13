@@ -6,7 +6,7 @@ import { AgentSession } from '../../src/main/services/agent-session'
 import { Agent } from '../../src/main/services/agent'
 import { AgentLoop } from '../../src/main/services/agent-loop'
 import { ToolRuntime } from '../../src/main/infrastructure/tools/tool-runtime'
-import { readTool } from '../../src/main/infrastructure/tools/read'
+import { ReadTool } from '../../src/main/infrastructure/tools/read'
 import { readAttachments } from '../../src/main/infrastructure/attachments'
 import type { AssistantMessage, LlmDelta, LlmMessage, ModelStream } from '../../src/main/domain/llm'
 import type { StreamEvent } from '../../src/shared/types'
@@ -44,7 +44,7 @@ async function fixture() {
   const loop = new AgentLoop(stream)
   const sessions = new AgentSessions(base.store, () => {
     const runtime = new ToolRuntime()
-    const agent = new Agent(loop, [runtime.bind(readTool)])
+    const agent = new Agent(loop, [runtime.bind(new ReadTool())])
     agents.push(agent)
     return { session: new AgentSession(base.store, event => events.push(event), agent, runtime), dispose: () => runtime.dispose() }
   })

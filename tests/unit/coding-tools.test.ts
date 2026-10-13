@@ -3,10 +3,10 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { homedir, tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { ToolRuntime, type WorkspaceTool } from '../../src/main/infrastructure/tools/tool-runtime'
-import { readTool } from '../../src/main/infrastructure/tools/read'
-import { bashTool } from '../../src/main/infrastructure/tools/bash'
-import { editTool } from '../../src/main/infrastructure/tools/edit'
-import { writeTool } from '../../src/main/infrastructure/tools/write'
+import { ReadTool } from '../../src/main/infrastructure/tools/read'
+import { BashTool } from '../../src/main/infrastructure/tools/bash'
+import { EditTool } from '../../src/main/infrastructure/tools/edit'
+import { WriteTool } from '../../src/main/infrastructure/tools/write'
 import { toolValidator } from '../../src/main/infrastructure/tool-schema'
 import { ToolExecutionError, type ToolOutput } from '../../src/main/domain/llm'
 import { AgentSession } from '../../src/main/services/agent-session'
@@ -23,7 +23,7 @@ const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR
 function fixture() {
   const directory = mkdtempSync(join(tmpdir(), 'dcode-tools-unit-'))
   const runtime = new ToolRuntime()
-  const tools = [readTool, bashTool, editTool, writeTool].map(tool => runtime.bind(tool))
+  const tools = [new ReadTool(), new BashTool(), new EditTool(), new WriteTool()].map(tool => runtime.bind(tool))
   runtime.setDirectory(directory)
   fixtures.push({ directory, runtime })
   const run = (name: string, args: Record<string, unknown>, signal = new AbortController().signal) => {

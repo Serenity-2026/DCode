@@ -5,17 +5,17 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ToolExecutionError } from '../../domain/llm'
 import { maxOutputBytes, truncateOutput, utf8Tail } from './output'
-import type { WorkspaceTool } from './tool-runtime'
+import type { ToolExecutionContext, WorkspaceTool } from './tool-runtime'
 
 /** 独立命令工具；声明 bash 参数，临时输出目录交由公共运行层登记和清理。 */
-export const bashTool: WorkspaceTool = {
-  name: 'bash',
-  description: 'Execute a bash command in the working directory. Returns stdout/stderr, keeping the last 2000 lines or 50 KiB. Truncated output is saved to a temporary file. Optional timeout in seconds; no default timeout.',
-  parameters: { type: 'object', additionalProperties: false, required: ['command'], properties: {
+export class BashTool implements WorkspaceTool {
+  readonly name = 'bash'
+  readonly description = 'Execute a bash command in the working directory. Returns stdout/stderr, keeping the last 2000 lines or 50 KiB. Truncated output is saved to a temporary file. Optional timeout in seconds; no default timeout.'
+  readonly parameters = { type: 'object', additionalProperties: false, required: ['command'], properties: {
     command: { type: 'string', minLength: 1 }, timeout: { type: 'number', exclusiveMinimum: 0, maximum: 2_147_483.647 }
-  } },
+  } }
   /** 仅使用本次执行上下文启动进程，不读取其他工具或应用会话状态。 */
-  execute(args, signal, { cwd, temporaryDirectories }) {
+  execute(args: Record<string, unknown>, signal: AbortSignal, { cwd, temporaryDirectories }: ToolExecutionContext): Promise<string> {
     return runBash(args.command as string, cwd, args.timeout as number | undefined, signal, temporaryDirectories)
   }
 }

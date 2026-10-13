@@ -67,7 +67,7 @@ Agent 框架参照 pi v1.0.4 的职责划分，自行实现最小子集，没有
 | `services/agent-session.ts` · `send/stop` | 准备当前应用会话历史，创建回复占位，订阅 Agent，保存并推送聊天消息 | 不直接请求模型、执行工具或创建取消控制器 |
 | `infrastructure/model-client.ts` 与 `llm/` | HTTP、协议选择、SSE 解码，以及 OpenAI/Anthropic 双向消息转换 | 供应商字段不进入循环或应用会话逻辑 |
 
-`domain/agent.ts` 定义状态、上下文和生命周期事件；`domain/llm.ts` 定义统一消息、模型端口与工具契约。`bootstrap.ts` 手动装配各层，显式导入 readTool/bashTool/editTool/writeTool，通过 `toolRuntime.bind(tool)` 转为 AgentTool 后注入 Agent；`infrastructure/tools/tool-runtime.ts` 只管理目录、取消、预期错误和临时资源，不导入具体工具。AgentSession 通过 ToolWorkspace 契约在每次发送前配置目录。应用主进程创建一个 AgentSessions 和无状态 AgentLoop；每个会话第一次发送时，通过 app 注入的工厂创建独立 AgentSession、Agent 和 ToolRuntime，之后复用该会话实例。每次发送替换对应 Agent 的历史，每次 prompt 创建独立取消控制器与运行 Promise。不同会话可以同时生成，同一会话仍拒绝重复运行；当前页面选择不会改变后台任务的模型、目录或取消状态。
+`domain/agent.ts` 定义状态、上下文和生命周期事件；`domain/llm.ts` 定义统一消息、模型端口与工具契约。`bootstrap.ts` 手动装配各层，显式导入 ReadTool/BashTool/EditTool/WriteTool 类，在会话工厂中创建工具实例，通过 `toolRuntime.bind(tool)` 转为 AgentTool 后注入 Agent；`infrastructure/tools/tool-runtime.ts` 只管理目录、取消、预期错误和临时资源，不导入具体工具。AgentSession 通过 ToolWorkspace 契约在每次发送前配置目录。应用主进程创建一个 AgentSessions 和无状态 AgentLoop；每个会话第一次发送时，通过 app 注入的工厂创建独立 AgentSession、Agent 和 ToolRuntime，之后复用该会话实例。每次发送替换对应 Agent 的历史，每次 prompt 创建独立取消控制器与运行 Promise。不同会话可以同时生成，同一会话仍拒绝重复运行；当前页面选择不会改变后台任务的模型、目录或取消状态。
 
 事件方向为 `Loop.emit → Agent.publish → 订阅者 → AgentSession.onEvent → StreamEvent → 窗口`。AgentSession 构造时登记同步订阅；AgentEvent 不含应用会话 ID，Session 用目标会话/消息 ID 从当前仓库定位回复；其他操作事务回滚后也不会写入旧对象引用。对外状态快照、事件副本和推送消息均复制，工具 handler 与 API Key 不进入公开状态。
 
@@ -147,7 +147,7 @@ npm run pack            # 当前系统应用目录到 release/
 - 路径支持相对路径、绝对路径、`~/`。工作目录不是沙箱，bash 按系统账号权限执行；未新增审批或工程权限管理。Windows 需要可用的 bash；本轮实际验证平台为 macOS。工具结果、图片和日志路径只保留在本次运行，不写入聊天历史。
 
 - 统一消息：`LlmMessage` 包含 system/user/assistant/toolResult；assistant 内容块包含 text/thinking/toolCall，结束原因为 stop 或 toolCall。工具结果以 toolCallId 对应原调用。`ModelStream` 通过回调提供正文/思考增量，通过 Promise 提供完整 assistant 回复；完整工具参数由适配器拼接和解析后才交付循环。
-- 本机工具扩展：`read.ts`、`bash.ts`、`edit.ts`、`write.ts` 各自包含声明和执行逻辑，导出 WorkspaceTool；共享路径/UTF-8/写入互斥位于 `file-operations.ts`，输出截断位于 `output.ts`。新增本机工具只需新增独立模块，在 bootstrap 的工具数组中注册，通过 ToolRuntime.bind 绑定本次 cwd 与临时目录资源；无需修改其他工具、公共运行层或 Agent/Loop。不需要工作目录的工具直接实现 AgentTool 注入。
+- 本机工具扩展：`read.ts`、`bash.ts`、`edit.ts`、`write.ts` 分别导出 ReadTool、BashTool、EditTool、WriteTool 类，实现 WorkspaceTool；工具声明为只读字段，execute 显式标注参数与返回类型。共享路径/UTF-8/写入互斥位于 `file-operations.ts`，输出截断位于 `output.ts`。新增本机工具只需新增实现 WorkspaceTool 的独立类，在 bootstrap 的工具数组中创建实例注册，通过 ToolRuntime.bind 绑定本次 cwd 与临时目录资源；无需修改其他工具、公共运行层或 Agent/Loop。不需要工作目录的工具直接实现 AgentTool 注入。
 - 工具接入：实现 `AgentTool` 的 name、description、parameters 和 `execute(args, signal): Promise<string | ToolOutput>`，从 bootstrap 注入 Agent。名称必须唯一、Schema 根类型为 object，Ajv 严格校验，不修正或转换模型参数。模型只接收声明，执行函数保留在主进程。未知工具、非法参数和执行失败形成错误 toolResult 供下一轮模型处理；ToolOutput 可附带 PNG/JPEG/GIF/WebP 图片；OpenAI 在配对这一批工具结果后追加 user 图片消息，Anthropic 嵌入 tool_result。ToolExecutionError 仅用于可向模型公开的预期错误，其他异常仍隐藏细节。
 - 上下文归属：Loop 对输入历史深拷贝后维护局部请求消息；Agent 通过 message_end 保存完整正式消息，message_update 只更新草稿。应用会话每次 send 重载成功问答文本，完整工具记录不跨用户轮次重放，也不写入磁盘；多轮模型正文仍显示为同一条应用 assistant 回复。
 - 运行收尾：订阅者为同步回调，agent_end 通知完成后才释放 busy，waitForIdle 包含 Session 的最终同步保存。普通运行错误通过 outcome/error 记录；订阅者错误也可能使运行 Promise 拒绝，但最终清理仍执行。停止/失败后独立 Agent 不自动修复未配对工具消息，调用方需 replaceMessages 提供有效历史。
