@@ -8,7 +8,7 @@ export function anthropicRequest(config: ModelConfig, context: LlmMessage[], too
   for (const message of context) {
     if (message.role === 'system') continue
     const role = message.role === 'assistant' ? 'assistant' : 'user'
-    const content: object[] = message.role === 'toolResult' ? [{ type: 'tool_result', tool_use_id: message.toolCallId, content: message.content, is_error: message.isError }]
+    const content: object[] = message.role === 'toolResult' ? [{ type: 'tool_result', tool_use_id: message.toolCallId, content: message.images?.length ? [{ type: 'text', text: message.content }, ...message.images.map(image => ({ type: 'image', source: { type: 'base64', media_type: image.mimeType, data: image.data } }))] : message.content, is_error: message.isError }]
       : message.role === 'user' ? [{ type: 'text', text: message.content }]
         : message.content.flatMap((block): object[] => {
           if (block.type === 'text') return [{ type: 'text', text: block.text }]

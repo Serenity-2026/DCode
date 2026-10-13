@@ -117,3 +117,15 @@ it('keeps the Agent runtime and loop independent of application sessions and sto
   }
   expect(violations).toEqual([])
 })
+
+it('keeps concrete tools independent and shared tool infrastructure free of concrete tool imports', () => {
+  const directory = join(root, 'main/infrastructure/tools')
+  const concrete = new Set(['read.ts', 'bash.ts', 'edit.ts', 'write.ts'].map(name => join(directory, name)))
+  const shared = ['tool-runtime.ts', 'file-operations.ts', 'output.ts'].map(name => join(directory, name))
+  const violations: string[] = []
+  for (const path of [...concrete, ...shared]) for (const module of dependencies.get(path) || []) {
+    const destination = module.startsWith('.') ? target(path, module) : undefined
+    if (destination && concrete.has(destination)) violations.push(`${relative(root, path)} -> ${relative(root, destination)}`)
+  }
+  expect(violations).toEqual([])
+})

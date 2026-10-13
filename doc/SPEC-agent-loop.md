@@ -6,7 +6,7 @@
 
 阅读 [agent-loop.ts](https://github.com/earendil-works/pi/blob/v1.0.4/packages/agent/src/agent-loop.ts)、[消息类型](https://github.com/earendil-works/pi/blob/v1.0.4/packages/ai/src/types.ts)、[OpenAI 适配](https://github.com/earendil-works/pi/blob/v1.0.4/packages/ai/src/api/openai-completions.ts)、[Anthropic 适配](https://github.com/earendil-works/pi/blob/v1.0.4/packages/ai/src/api/anthropic-messages.ts)及 [跨模型转换](https://github.com/earendil-works/pi/blob/v1.0.4/packages/ai/src/api/transform-messages.ts)。借鉴其统一内容块与工具结果消息、在模型边界转换协议、工具结果追加上下文后继续循环的结构，自行实现项目需要的子集，不引入 pi 包或复制完整运行时。
 
-实现文本/推理/工具调用统一消息、OpenAI Chat Completions 与 Anthropic Messages 双向适配、顺序 function call、agent loop。生产工具列表为空，后续由 bootstrap 注入具体工具。暂不加队列、steering、并行工具、审批、压缩、后台运行、执行记录持久化、断点恢复或业务工具。
+实现文本/推理/工具调用统一消息、OpenAI Chat Completions 与 Anthropic Messages 双向适配、顺序 function call、agent loop。生产工具已由 bootstrap 注入 read、bash、edit、write，具体行为见 `SPEC-file-tools.md`。暂不加生成队列、steering、并行工具、审批、压缩、后台运行、执行记录持久化或断点恢复。
 
 ## 分层
 
@@ -17,7 +17,7 @@
 - `domain/agent.ts`：循环上下文、编译后的工具、AgentState 与生命周期事件契约。
 - `services/agent-loop.ts`：只执行一次运行的模型/工具循环，通过事件上报消息、轮次与工具结果；没有持久会话状态或取消控制器。默认最多 8 次模型请求。
 - `services/agent.ts`：独立 Agent 运行时，拥有统一消息、工具、公开模型配置、运行状态、取消控制器与事件订阅；用循环事件更新状态。
-- `services/agent-session.ts`：应用会话层，替代原 Chat；准备成功历史、保存正文、订阅 Agent 事件并推送现有 StreamEvent，停止时调用 Agent.abort/waitForIdle。app 手动装配，不增加工具 IPC 或新的存储结构。
+- `services/agent-session.ts`：应用会话层，替代原 Chat；准备成功历史、保存正文、订阅 Agent 事件并推送现有 StreamEvent，停止时调用 Agent.abort/waitForIdle。app 手动装配，不增加工具 IPC；目录附件可保存工作路径，其他消息存储结构不变。
 
 ## Agent 分层与事件
 

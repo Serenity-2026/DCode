@@ -4,19 +4,29 @@ import { consumeEvents, parseEvent, parseToolArguments } from './sse'
 
 /** 将统一消息与工具转换为 OpenAI Chat Completions，按配置发送选项并保留同源工具轮次的推理内容。 */
 export function openAIRequest(config: ModelConfig, messages: LlmMessage[], tools: ToolDefinition[], maxTokens: number): object {
+  // OpenAI 的 tool 消息不承载图片；先配对这一批所有工具结果，再追加 user 图片消息。
+  const converted: object[] = []
+  let images: object[] = []
+  for (const message of messages) {
+    if (message.role === 'toolResult') {
+      converted.push({ role: 'tool', tool_call_id: message.toolCallId, content: message.isError ? JSON.stringify({ error: message.content }) : message.content })
+      images.push(...(message.images || []).map(image => ({ type: 'image_url', image_url: { url: `data:${image.mimeType};base64,${image.data}` } })))
+      continue
+    }
+    if (images.length) { converted.push({ role: 'user', content: images }); images = [] }
+    if (message.role !== 'assistant') { converted.push(message); continue }
+    const toolCalls = message.content.filter(block => block.type === 'toolCall')
+    const sameSource = message.source?.api === 'openai-completions' && message.source.baseUrl === config.baseUrl && message.source.model === config.model
+    const reasoning = sameSource ? message.content.filter(block => block.type === 'thinking').map(block => block.thinking).join('') : ''
+    converted.push({
+      role: 'assistant', content: message.content.filter(block => block.type === 'text').map(block => block.text).join(''),
+      ...(toolCalls.length ? { tool_calls: toolCalls.map(call => ({ id: call.id, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.arguments) } })), ...(reasoning ? { reasoning_content: reasoning } : {}) } : {})
+    })
+  }
+  if (images.length) converted.push({ role: 'user', content: images })
   return {
     model: config.model, stream: true, max_tokens: maxTokens,
-    messages: messages.map(message => {
-      if (message.role === 'toolResult') return { role: 'tool', tool_call_id: message.toolCallId, content: message.isError ? JSON.stringify({ error: message.content }) : message.content }
-      if (message.role !== 'assistant') return message
-      const toolCalls = message.content.filter(block => block.type === 'toolCall')
-      const sameSource = message.source?.api === 'openai-completions' && message.source.baseUrl === config.baseUrl && message.source.model === config.model
-      const reasoning = sameSource ? message.content.filter(block => block.type === 'thinking').map(block => block.thinking).join('') : ''
-      return {
-        role: 'assistant', content: message.content.filter(block => block.type === 'text').map(block => block.text).join(''),
-        ...(toolCalls.length ? { tool_calls: toolCalls.map(call => ({ id: call.id, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.arguments) } })), ...(reasoning ? { reasoning_content: reasoning } : {}) } : {})
-      }
-    }),
+    messages: converted,
     ...(tools.length ? { tools: tools.map(tool => ({ type: 'function', function: tool })), tool_choice: 'auto' } : {}),
     ...(config.fastMode ? { service_tier: 'priority' } : {}),
     ...(config.reasoningEffort ? { reasoning_effort: config.reasoningEffort } : {})

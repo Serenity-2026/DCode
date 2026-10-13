@@ -1,7 +1,7 @@
 import type { Conversation, Message, SendInput, Snapshot, StreamEvent } from '../../shared/types'
-import { contextMessages } from '../../shared/context'
+import { contextMessages, conversationDirectory } from '../../shared/context'
 import type { AgentEvent } from '../domain/agent'
-import { toLlmMessages, type LlmMessage } from '../domain/llm'
+import { toLlmMessages, type LlmMessage, type ToolWorkspace } from '../domain/llm'
 import type { ModelConfig } from '../domain/model-config'
 import { Agent } from './agent'
 import { StateService } from './state-service'
@@ -12,7 +12,7 @@ export class AgentSession {
   private target?: { conversation: Conversation; message: Message; lastSave: number; lastEmit: number }
 
   /** 订阅 Agent 事件，生命周期与应用实例一致，不持有模型或取消控制器。 */
-  constructor(private store: StateService, private emit: (event: StreamEvent) => void, private readonly agent: Agent) {
+  constructor(private store: StateService, private emit: (event: StreamEvent) => void, private readonly agent: Agent, private readonly workspace?: ToolWorkspace) {
     //Agent 有事件时，调用该函数；这个函数再把事件交给 onEvent() 处理。
     this.agent.subscribe(event => this.onEvent(event))
   }
@@ -27,6 +27,7 @@ export class AgentSession {
     if (!input || typeof input !== 'object' || (input.retry !== undefined && typeof input.retry !== 'boolean')) throw new Error('无效请求。')
     if (!config.apiKey) throw new Error('请先配置模型 API 密钥。')
     const { conversation, message } = this.store.begin(input.content, Boolean(input.retry), config.model, input.attachments)
+    this.workspace?.setDirectory(conversationDirectory(conversation))
     const context = toLlmMessages(contextMessages(conversation))
     const prompt = context.pop() as Extract<LlmMessage, { role: 'user' }>
     this.agent.replaceMessages(context)

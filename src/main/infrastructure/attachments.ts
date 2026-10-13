@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { lstat, readFile, readdir } from 'node:fs/promises'
-import { basename, join, relative } from 'node:path'
+import { basename, join, relative, resolve } from 'node:path'
 import type { Attachment, AttachmentSelection } from '../../shared/types'
 import { attachmentByteLimit, validateAttachments } from '../../shared/context'
 
@@ -52,7 +52,7 @@ export async function readAttachments(paths: string[], kind: 'file' | 'folder'):
       if (error && typeof error === 'object' && 'code' in error) throw new Error(`无法读取“${basename(selected)}”，请检查文件是否存在及访问权限。`)
       throw error
     }
-    if (fileCount || selectedDirectory) attachments.push({ id: randomUUID(), name: basename(selected), kind, fileCount, content: parts.join('\n\n') })
+    if (fileCount || selectedDirectory) attachments.push({ id: randomUUID(), name: basename(selected), kind, fileCount, content: parts.join('\n\n'), ...(selectedDirectory ? { path: resolve(selected) } : {}) })
   }
   validateAttachments(attachments)
   return { attachments, skipped }

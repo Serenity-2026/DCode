@@ -2,7 +2,7 @@
 
 TypeScript + Electron 的 Coding Harness 基础框架。包含本机账号与密码登录、账号独立的会话和模型配置、模型流式对话，以及 React + Ant Design 桌面界面。
 
-输入框工具与附件见 [doc/SPEC-composer-tools.md](doc/SPEC-composer-tools.md)，模型列表与快速模式见 [doc/SPEC-model-discovery.md](doc/SPEC-model-discovery.md)，账号认证见 [doc/SPEC-account-models.md](doc/SPEC-account-models.md)，初始对话框架见 [doc/SPEC.md](doc/SPEC.md)。当前版本提供本机账号认证、对话和主动选择的文本附件，不执行终端命令、修改代码工程或同步云端账号。
+输入框工具与附件见 [doc/SPEC-composer-tools.md](doc/SPEC-composer-tools.md)，模型列表与快速模式见 [doc/SPEC-model-discovery.md](doc/SPEC-model-discovery.md)，账号认证见 [doc/SPEC-account-models.md](doc/SPEC-account-models.md)，初始对话框架见 [doc/SPEC.md](doc/SPEC.md)。当前版本提供本机账号认证、对话、主动选择的文本附件，以及 read、bash、edit、write 文件工具，详见 [doc/SPEC-file-tools.md](doc/SPEC-file-tools.md)。选择文件夹后，模型可在该会话中读取和修改文件、执行 bash 命令；工作目录会随会话保存。尚未实现云端账号同步。
 
 ## 开发与启动
 
@@ -24,7 +24,7 @@ npm run dev
 
 登录后自动读取服务提供的模型列表。在输入框下方选择要使用的模型，下一条消息使用该模型及其所属服务的密钥；菜单中的“刷新模型列表”可重新获取，失败保留上次列表。
 
-输入框左下角“+”可添加文件或文件夹，发送前可移除。当前支持 UTF-8 文本和代码，文件夹跳过隐藏项、依赖、构建目录与符号链接；每个文件最多 128 KiB，一次最多 50 个文件，每条消息最多 10 个附件、总文本最多 512 KiB。附件文本随消息发送并保存，重新生成复用当时的内容，不会重新读取磁盘。
+输入框左下角“+”可添加文件或文件夹，发送前可移除。当前支持 UTF-8 文本和代码，文件夹跳过隐藏项、依赖、构建目录与符号链接；独立文件最多 128 KiB，一次最多 50 个有效文件，每条消息最多 10 个独立文件附件、总文本最多 512 KiB；文件夹不受这些配额限制。附件文本随消息发送并保存，重新生成复用当时的附件快照；模型通过 read 获取当前磁盘内容。文件夹选择同时设定工具工作目录，后续提问和重启后沿用，旧附件没有目录路径时须重新选择。工具支持绝对路径与 `~/`，bash 具有当前系统账号的命令权限。
 
 右侧依次为模型选择、上下文圆环、快速模式和模型强度。圆环悬浮显示窗口大小、预估已用及剩余 token，包含有效历史、当前草稿与附件；估算按 UTF-8 字节数 / 3 加消息开销，实际 token 数以服务为准。窗口来自服务 `/models` 元数据，没有返回时显示未知。
 
