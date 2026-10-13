@@ -70,7 +70,7 @@ macOS 默认数据文件：`~/Library/Application Support/DCode/state.json`。Wi
 
 - `Enter` 发送，`Shift + Enter` 换行；中文输入法组词时不会发送。
 - `Cmd/Ctrl + N` 新对话。
-- 生成中点击停止按钮，保留部分回复；可重新生成最后一个回答。
+- 不同对话可同时运行任务；切换对话时后台任务继续，侧栏显示运行图标。同一对话一次运行一个任务，停止按钮只停止当前对话并保留部分回复；可重新生成最后一个回答。退出账号或关闭窗口会统一停止任务并保存。详见 [doc/SPEC-concurrent-conversations.md](doc/SPEC-concurrent-conversations.md)。
 - 搜索匹配标题与消息正文。每个账号只展示自己的会话、模型配置和主题。
 - 切换账号需先退出，再使用其他账号的密码登录；账号菜单可修改显示名称。
 - 删除会话需要确认。

@@ -15,7 +15,7 @@ export interface Attachment { id: string; name: string; kind: 'file' | 'folder';
 export interface AttachmentSelection { attachments: Attachment[]; skipped: number }
 
 /** AgentSession 的发送输入，重试复用已保存的附件，不能通过此接口要求读取本机路径。 */
-export interface SendInput { content: string; retry?: boolean; attachments?: Attachment[] }
+export interface SendInput { content: string; retry?: boolean; attachments?: Attachment[]; conversationId?: string | null }
 
 /** 公开账号信息，不包含密码哈希、会话令牌或模型密钥。 */
 export interface User { id: string; name: string; username: string; createdAt: string }
@@ -110,8 +110,8 @@ export interface DCodeAPI {
   send(input: SendInput): Promise<Result<Snapshot>>
   /** 打开系统选择器，读取文本快照并记录所选文件夹的工具工作目录。 */
   selectAttachments(kind: 'file' | 'folder'): Promise<Result<AttachmentSelection>>
-  /** 停止生成并等待结果保存。 */
-  stop(): Promise<Result<Snapshot>>
+  /** 停止指定会话的任务并等待结果保存，不影响其他会话。 */
+  stop(conversationId: string): Promise<Result<Snapshot>>
   /** 订阅消息更新，返回退订函数。 */
   onStream(callback: (event: StreamEvent) => void): () => void
   /** 校验后在系统浏览器打开链接。 */
