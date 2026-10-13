@@ -8,6 +8,17 @@
 
 路径支持相对工作目录、绝对路径及 `~/`；与 pi 一样，这不是文件系统沙箱，bash 具有当前系统账号的命令权限。选择器仍会读取文本快照；本次不改变既有附件展示，不增加审批、终端面板、执行记录持久化或后台任务。
 
+## 工具模块与注入
+
+2026-10-13 将工具声明和实现拆为独立模块，保留现有参数、输出和取消行为：
+
+- `read.ts`、`bash.ts`、`edit.ts`、`write.ts` 各自导出 `WorkspaceTool` 对象，包含 name、description、parameters 和 execute。具体工具不依赖其他工具，也不依赖应用会话或存储。
+- `tool-runtime.ts` 定义 `WorkspaceTool` 与执行上下文，并提供 `ToolRuntime.bind(tool): AgentTool`。只负责本轮 cwd、取消检查、预期系统错误转换和临时目录清理；不导入、枚举或判断具体工具名称。
+- `file-operations.ts` 提供文件路径解析、UTF-8 解码及同路径写入互斥；`output.ts` 提供输出截断。公共模块不依赖具体工具。
+- `bootstrap.ts` 显式导入工具，用 `[readTool, bashTool, editTool, writeTool].map(tool => runtime.bind(tool))` 注入 Agent，将同一个 runtime 作为 ToolWorkspace 注入 AgentSession。目录在每次执行开始时捕获；账号/会话目录恢复规则不变。
+
+新增本机工具时，在独立文件导出 WorkspaceTool，并在 bootstrap 的数组中注册。无需修改其他工具、ToolRuntime、Agent 或 AgentLoop。不需要工作目录的工具可以直接实现 AgentTool 注入 Agent。暂不引入基类继承、动态扫描、插件加载器或依赖注入框架。
+
 ## 行为
 
 - `read({ path, offset?, limit? })`：offset 为从 1 开始的整数，limit 为正整数。文本只读取有效 UTF-8，输出最多 2000 行或 50 KiB，优先保留完整行，返回可继续读取的 offset；单行超限时提示改用 bash。支持 PNG/JPEG/GIF/WebP 图片，以独立图片块传给模型；不增加图片缩放、BMP 转换或模型视觉能力猜测。
@@ -19,4 +30,4 @@
 
 ## 验证
 
-验证真实临时文件的分页、UTF-8/图片、截断、写入/覆盖、批量替换、失败不修改、BOM/CRLF/容错、取消及写入互斥；真实 bash 的 stdout/stderr、退出码、超时、停止子进程、截断和完整日志；会话目录恢复、重试、跨账号/会话隔离、旧数据兼容；双协议真实工具循环及图片回传。最后运行类型检查、单元测试、生产构建、本地 Electron E2E，不开启真实付费服务 smoke。
+验证真实临时文件的分页、UTF-8/图片、截断、写入/覆盖、批量替换、失败不修改、BOM/CRLF/容错、取消及写入互斥；真实 bash 的 stdout/stderr、退出码、超时、停止子进程、截断和完整日志；会话目录恢复、重试、跨账号/会话隔离、旧数据兼容；双协议真实工具循环及图片回传。重构前后保留同一套行为测试，增加独立自定义工具的注入/上下文测试，并检查工具模块之间、公共运行层与具体工具之间无反向依赖。最后运行类型检查、单元测试、生产构建、本地 Electron E2E，不开启真实付费服务 smoke。
