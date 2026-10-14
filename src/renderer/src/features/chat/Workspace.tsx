@@ -4,7 +4,7 @@ import {
   ArrowUpOutlined, PlusOutlined, SearchOutlined, MessageOutlined, MoreOutlined,
   SettingOutlined, CodeOutlined, BugOutlined, BranchesOutlined, CopyOutlined,
   ReloadOutlined, StopOutlined, DeleteOutlined, EditOutlined, LogoutOutlined,
-  DownOutlined, RightOutlined, FolderOpenOutlined
+  DownOutlined, RightOutlined, FolderOpenOutlined, LoadingOutlined
 } from '@ant-design/icons'
 import type { Action, Attachment, Message, ModelRefresh, Result, Snapshot, StreamEvent } from '../../../../shared/types'
 import { estimateContext, validateAttachments } from '../../../../shared/context'
@@ -43,7 +43,8 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
   const active = snapshot.conversations.find(c => c.id === snapshot.activeConversationId)
   const selectedFolder = attachments.find(item => item.kind === 'folder')
   const generating = Boolean(active?.messages.some(m => m.status === 'streaming'))
-  const busy = generating || pending || stopping || modelsLoading
+  const interacting = pending || stopping || modelsLoading
+  const busy = generating || interacting
 
   /** 合并 IPC 返回的 Snapshot 与已收到的 StreamEvent，避免较早的快照覆盖较新的流式文本。 */
   const installSnapshot = useCallback((next: Snapshot): void => {
@@ -128,7 +129,6 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
     try {
       const result = await window.dcode.action(action)
       if (!result.ok) { void toast.error(result.error); return false }
-      streamEvents.current.clear()
       installSnapshot(result.value)
       if (['conversation:select', 'conversation:delete'].includes(action.type)) {
         setDraft(''); setAttachments([]); follow.current = true; jumping.current = false
@@ -154,16 +154,16 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
   }
 
   useEffect(() => {
-    /** 处理 Cmd/Ctrl+N：生成结束后通过 act 切换到新对话，并聚焦输入框。 */
+    /** 处理 Cmd/Ctrl+N：后台任务继续执行，导航到新对话并聚焦输入框。 */
     const handler = (event: KeyboardEvent): void => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'n') {
         event.preventDefault()
-        if (!busy) void act({ type: 'conversation:select', id: null }).then(() => composer.current?.focus())
+        if (!interacting) void act({ type: 'conversation:select', id: null }).then(() => composer.current?.focus())
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [act, busy])
+  }, [act, interacting])
 
   /**
    * 发送草稿或重新生成最后一条回复，依赖 window.dcode.send 调用主进程 AgentSession。
@@ -175,9 +175,8 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
     setPending(true)
     follow.current = true
     jumping.current = false
-    streamEvents.current.clear()
     try {
-      const result = await window.dcode.send({ content: draft.trim(), retry, ...(retry ? {} : { attachments }) })
+      const result = await window.dcode.send({ content: draft.trim(), retry, conversationId: active?.id ?? null, ...(retry ? {} : { attachments }) })
       if (result.ok) { installSnapshot(result.value); if (!retry) { setDraft(''); setAttachments([]) } }
       else void toast.error(result.error)
     } catch { void toast.error('发送失败，请重试。') }
@@ -186,10 +185,10 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
 
   /** 请求 window.dcode.stop 等待 AgentSession 取消并保存，再用 installSnapshot 显示最终回复状态。 */
   async function stop(): Promise<void> {
-    if (stopping) return
+    if (stopping || !active) return
     setStopping(true)
     try {
-      const result = await window.dcode.stop()
+      const result = await window.dcode.stop(active.id)
       if (result.ok) installSnapshot(result.value)
       else void toast.error(result.error)
     } catch { void toast.error('停止失败，请重试。') }
@@ -198,7 +197,7 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
 
   /** 主动撤销保持登录的令牌并通知 Root 显示登录页，聊天与模型配置留在账号下。 */
   async function logout(): Promise<void> {
-    if (busy || inFlight.current) return
+    if (interacting || inFlight.current) return
     inFlight.current = true; setPending(true)
     try {
       const result = await window.dcode.logout()
@@ -244,26 +243,26 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
     <aside className="sidebar">
       <div className="window-space" />
       <div className="brand"><span className="brand-mark"><BrandMark /></span><span className="brand-name">DCode</span><span className="brand-version">0.1</span></div>
-      <Button className="new-chat" icon={<PlusOutlined />} aria-label="新对话" disabled={busy} onClick={() => void act({ type: 'conversation:select', id: null }).then(() => composer.current?.focus())}>新对话 <kbd className="shortcut">⌘ N</kbd></Button>
+      <Button className="new-chat" icon={<PlusOutlined />} aria-label="新对话" disabled={interacting} onClick={() => void act({ type: 'conversation:select', id: null }).then(() => composer.current?.focus())}>新对话 <kbd className="shortcut">⌘ N</kbd></Button>
       <Input className="search" prefix={<SearchOutlined />} placeholder="搜索对话" aria-label="搜索对话" variant="borderless" allowClear value={search} onChange={e => setSearch(e.target.value)} />
       <div className="section-label"><span>最近对话</span><span>{snapshot.conversations.length ? snapshot.conversations.length : ''}</span></div>
       <nav className="history" aria-label="会话列表">
         {!conversations.length && <div className="history-empty">{search ? '没有找到对话' : '暂无对话'}</div>}
         {conversations.map(c => <div className={`history-item${c.id === active?.id ? ' selected' : ''}`} key={c.id}>
-          <Button type="text" className="history-button" icon={<MessageOutlined />} aria-label={c.title} disabled={busy} title={c.title} onClick={() => void act({ type: 'conversation:select', id: c.id })}><span className="history-title">{c.title}</span></Button>
-          <Dropdown disabled={busy} trigger={['click']} menu={{ items: [
-            { key: 'rename', label: '重命名', icon: <EditOutlined /> }, { key: 'delete', label: '删除', danger: true, icon: <DeleteOutlined /> }
+          <Button type="text" className="history-button" icon={c.messages.some(m => m.status === 'streaming') ? <LoadingOutlined spin /> : <MessageOutlined />} aria-label={c.title} disabled={interacting} title={c.title} onClick={() => void act({ type: 'conversation:select', id: c.id })}><span className="history-title">{c.title}</span></Button>
+          <Dropdown disabled={interacting} trigger={['click']} menu={{ items: [
+            { key: 'rename', label: '重命名', icon: <EditOutlined /> }, { key: 'delete', label: '删除', danger: true, disabled: c.messages.some(m => m.status === 'streaming'), icon: <DeleteOutlined /> }
           ], onClick: ({ key }) => key === 'rename' ? setEdit({ type: 'conversation', id: c.id, value: c.title }) : confirmDelete(c.id, c.title) }}>
-            <Button type="text" size="small" className="history-menu" icon={<MoreOutlined />} disabled={busy} aria-label={`管理对话 ${c.title}`} />
+            <Button type="text" size="small" className="history-menu" icon={<MoreOutlined />} disabled={interacting} aria-label={`管理对话 ${c.title}`} />
           </Dropdown>
         </div>)}
       </nav>
       <div className="sidebar-bottom">
-        <Dropdown disabled={busy} trigger={['click']} menu={{ items: [
+        <Dropdown disabled={interacting} trigger={['click']} menu={{ items: [
           { key: 'rename', label: '编辑名称', icon: <EditOutlined /> },
           { key: 'logout', label: '退出登录', icon: <LogoutOutlined /> }
         ], onClick: ({ key }) => key === 'logout' ? void logout() : setEdit({ type: 'user', id: user.id, value: user.name }) }}>
-          <Button type="text" className="user-button" disabled={busy} aria-label="账号菜单"><span className="avatar">{user.name.slice(0, 1)}</span><span className="user-info"><span className="user-name">{user.name}</span><span className="user-caption">{user.username}</span></span><DownOutlined /></Button>
+          <Button type="text" className="user-button" disabled={interacting} aria-label="账号菜单"><span className="avatar">{user.name.slice(0, 1)}</span><span className="user-info"><span className="user-name">{user.name}</span><span className="user-caption">{user.username}</span></span><DownOutlined /></Button>
         </Dropdown>
         <Button type="text" className="settings-button" icon={<SettingOutlined />} aria-label="设置" disabled={busy} onClick={() => setSettingsOpen(true)}>设置</Button>
       </div>

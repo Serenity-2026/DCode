@@ -7,14 +7,15 @@ import { ElectronDesktop } from '../infrastructure/electron-desktop'
 import { StateRepository } from '../repositories/state-repository'
 import { StateService } from '../services/state-service'
 import { AgentSession } from '../services/agent-session'
+import { AgentSessions } from '../services/agent-sessions'
 import { AgentLoop } from '../services/agent-loop'
 import { Agent } from '../services/agent'
 import { streamModel } from '../infrastructure/model-client'
 import { ToolRuntime } from '../infrastructure/tools/tool-runtime'
-import { readTool } from '../infrastructure/tools/read'
-import { bashTool } from '../infrastructure/tools/bash'
-import { editTool } from '../infrastructure/tools/edit'
-import { writeTool } from '../infrastructure/tools/write'
+import { ReadTool } from '../infrastructure/tools/read'
+import { BashTool } from '../infrastructure/tools/bash'
+import { EditTool } from '../infrastructure/tools/edit'
+import { WriteTool } from '../infrastructure/tools/write'
 import { Auth } from '../services/auth-service'
 import { Models } from '../services/model-service'
 import { DesktopService } from '../services/desktop-service'
@@ -30,7 +31,7 @@ import { registerDesktopController } from '../controllers/desktop-controller'
 export function startApplication(): void {
   const here = dirname(fileURLToPath(import.meta.url))
   const icon = app.isPackaged ? join(process.resourcesPath, 'icon.png') : join(here, '../../build/icon.png')
-  let session: AgentSession | undefined
+  let session: AgentSessions | undefined
   let windows: MainWindow | undefined
   let quitting = false
   if (process.env.DCODE_USER_DATA_DIR) app.setPath('userData', process.env.DCODE_USER_DATA_DIR)
@@ -46,21 +47,26 @@ export function startApplication(): void {
     const auth = new Auth(state, secrets, models)
     await auth.restore()
     const loop = new AgentLoop((config, messages, controller, onDelta, tools) => streamModel(config, messages, controller, onDelta, { tools }))
-    const toolRuntime = new ToolRuntime()
-    const tools = [readTool, bashTool, editTool, writeTool].map(tool => toolRuntime.bind(tool))
-    const agent = new Agent(loop, tools)
-    const generation = new AgentSession(state, event => windows?.publish(event), agent, toolRuntime)
-    app.on('will-quit', () => toolRuntime.dispose())
+    const generation = new AgentSessions(state, () => {
+      const toolRuntime = new ToolRuntime()
+      const tools = [new ReadTool(), new BashTool(), new EditTool(), new WriteTool()].map(tool => toolRuntime.bind(tool))
+      const agent = new Agent(loop, tools)
+      return { session: new AgentSession(state, event => windows?.publish(event), agent, toolRuntime), dispose: () => toolRuntime.dispose() }
+    })
+    app.on('will-quit', () => {
+      try { generation.dispose() }
+      catch (error) { dialog.showErrorBox('临时资源清理失败', error instanceof Error ? error.message : '请检查临时目录权限。') }
+    })
     session = generation
     const mainWindow = new MainWindow(generation, {
       icon, preload: join(here, '../preload/index.cjs'), renderer: join(here, '../renderer/index.html')
     })
     windows = mainWindow
     const desktop = new DesktopService(state, new ElectronDesktop(() => mainWindow.current))
-    const router = new IpcRouter(() => mainWindow.current, () => generation.busy)
-    registerAuthController(router, auth)
+    const router = new IpcRouter(() => mainWindow.current)
+    registerAuthController(router, auth, generation)
     registerModelController(router, models)
-    registerStateController(router, state)
+    registerStateController(router, state, generation)
     registerChatController(router, generation, models, state)
     registerDesktopController(router, desktop)
     mainWindow.create()
@@ -75,7 +81,7 @@ export function startApplication(): void {
     if (session?.busy && !quitting) {
       event.preventDefault()
       quitting = true
-      void session.stop().finally(() => app.quit())
+      void session.stopAll().finally(() => app.quit())
     }
   })
   // macOS 关闭窗口后保留应用，其他平台关闭最后一个窗口即退出。

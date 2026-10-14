@@ -62,7 +62,7 @@ it('isolates imported messages, state snapshots and each subscriber from model c
   snapshot.tools[0].name = 'changed'
   agent.subscribe(event => {
     if (event.type === 'message_end' && event.message.role === 'assistant') event.message.content.length = 0
-    if (event.type === 'tool_execution_end') event.result.content = '篡改结果'
+    if (event.type === 'tool_execution_end') event.result.content = [{ type: 'text', text: '篡改结果' }]
   })
   const observed: AgentEvent[] = []
   const unsubscribe = agent.subscribe(event => observed.push(event))
@@ -71,7 +71,7 @@ it('isolates imported messages, state snapshots and each subscriber from model c
   expect(messages[0].content).toBe('原始提示')
   expect(messages.at(-1).content).toBe('结果:测试')
   expect(messages.at(-2).tool_calls[0].function.name).toBe('echo')
-  expect(observed.find(event => event.type === 'tool_execution_end')).toMatchObject({ result: { content: '结果:测试' } })
+  expect(observed.find(event => event.type === 'tool_execution_end')).toMatchObject({ result: { content: [{ type: 'text', text: '结果:测试' }] } })
   unsubscribe()
   vi.mocked(fetch).mockResolvedValueOnce(openAIResponse('再答'))
   const count = observed.length

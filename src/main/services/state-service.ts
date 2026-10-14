@@ -143,13 +143,13 @@ export class StateService {
 
   /**
    * 为 AgentSession.send 准备一次生成：校验附件快照，必要时新建会话，保存问题并添加 streaming 回复占位。
-   * 重试时只替换最后的 assistant 消息；返回仓库内对象的引用，供 AgentSession 持续追加文本。
+   * 重试时只替换最后的 assistant 消息；返回本次会话与消息；AgentSession 随后保存目标 ID，每次事件定位当前仓库对象。
    */
-  begin(content: unknown, retry: boolean, model: string, inputAttachments?: Attachment[]): { conversation: Conversation; message: Message } {
+  begin(content: unknown, retry: boolean, model: string, inputAttachments?: Attachment[], conversationId: string | null = this.state.activeConversationId): { conversation: Conversation; message: Message } {
     const user = this.requireUser()
     const attachments = retry ? [] : validateAttachments(inputAttachments)
     return this.transaction(() => {
-      let c = this.state.activeConversationId ? this.conversation(this.state.activeConversationId) : undefined
+      let c = conversationId !== null ? this.conversation(conversationId) : undefined
       if (retry) {
         if (!c || c.messages.at(-1)?.role !== 'assistant' || c.messages.at(-2)?.role !== 'user') throw new Error('没有可重新生成的回复。')
         c.messages.pop()

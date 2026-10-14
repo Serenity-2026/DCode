@@ -6,7 +6,7 @@
 
 阅读 [agent-loop.ts](https://github.com/earendil-works/pi/blob/v1.0.4/packages/agent/src/agent-loop.ts)、[消息类型](https://github.com/earendil-works/pi/blob/v1.0.4/packages/ai/src/types.ts)、[OpenAI 适配](https://github.com/earendil-works/pi/blob/v1.0.4/packages/ai/src/api/openai-completions.ts)、[Anthropic 适配](https://github.com/earendil-works/pi/blob/v1.0.4/packages/ai/src/api/anthropic-messages.ts)及 [跨模型转换](https://github.com/earendil-works/pi/blob/v1.0.4/packages/ai/src/api/transform-messages.ts)。借鉴其统一内容块与工具结果消息、在模型边界转换协议、工具结果追加上下文后继续循环的结构，自行实现项目需要的子集，不引入 pi 包或复制完整运行时。
 
-实现文本/推理/工具调用统一消息、OpenAI Chat Completions 与 Anthropic Messages 双向适配、顺序 function call、agent loop。生产工具已由 bootstrap 注入 read、bash、edit、write，具体行为见 `SPEC-file-tools.md`。暂不加生成队列、steering、并行工具、审批、压缩、后台运行、执行记录持久化或断点恢复。
+实现文本/推理/工具调用统一消息、OpenAI Chat Completions 与 Anthropic Messages 双向适配、顺序 function call、agent loop。生产工具已由 bootstrap 注入 read、bash、edit、write，具体行为见 `SPEC-file-tools.md`。暂不加生成队列、steering、并行工具、审批、压缩、关闭窗口后的后台运行、执行记录持久化或断点恢复。多会话并行实例管理见 `SPEC-concurrent-conversations.md`。
 
 ## 分层
 
@@ -20,6 +20,8 @@
 - `services/agent-session.ts`：应用会话层，替代原 Chat；准备成功历史、保存正文、订阅 Agent 事件并推送现有 StreamEvent，停止时调用 Agent.abort/waitForIdle。app 手动装配，不增加工具 IPC；目录附件可保存工作路径，其他消息存储结构不变。
 
 ## Agent 分层与事件
+
+应用层 AgentSessions 按 conversationId 管理独立 AgentSession、Agent 与 ToolRuntime，app 提供实例工厂；无状态 AgentLoop 可以共享。同一 Agent 仍拒绝并发 prompt，不同会话的 Agent 可以并行。活动会话 ID 只用于导航；发送/停止定位具体会话，后台任务不会随切换取消。
 
 对应 pi v1.0.4 的 [AgentSession](https://github.com/earendil-works/pi/blob/v1.0.4/packages/coding-agent/src/core/agent-session.ts) → [Agent](https://github.com/earendil-works/pi/blob/v1.0.4/packages/agent/src/agent.ts) → agent loop：应用会话服务依赖 Agent，Agent 依赖 AgentLoop；Agent/AgentLoop 不依赖存储、IPC、窗口或会话服务。复现职责边界，保留当前项目的最小功能，不照搬 pi 的全部 API。
 
@@ -42,6 +44,8 @@ OpenAI 使用 Bearer、`/chat/completions`、`tool_calls` 和 `role: tool`；Ant
 OpenAI 兼容请求不按 DeepSeek 等服务域名特判参数：所选强度控制 `reasoning_effort`，快速模式控制 `service_tier: "priority"`，不自动追加供应商专有 `thinking`。Base URL 只用于请求地址和同源判断；同一协议与选项在官方地址、代理和自定义网关上生成相同请求体。服务拒绝选项时返回对应提示，不自动降级重发。
 
 ## 循环与消息转换
+
+工具执行统一返回 `AgentToolResult`，参考 pi v1.2.0 的内容块、details 与显式 isError。Loop 同时处理返回失败和抛出异常，取消保持终止语义；最终工具消息含明确的错误标记，details 只保留在运行上下文和事件，不进入供应商请求。具体工具结果契约见 `SPEC-file-tools.md`。
 
 应用会话文本先转换为统一消息。适配器将供应商 SSE 转为统一内容块与结束原因，AgentSession 仅消费正文/推理增量。完整 assistant 消息与工具结果在本次运行内保留，下一次请求再转换到目标供应商格式；Anthropic 同轮多个结果合并为紧随 assistant 的用户消息。
 

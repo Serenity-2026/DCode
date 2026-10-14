@@ -1,4 +1,4 @@
-import type { Conversation, Message, SendInput, Snapshot, StreamEvent } from '../../shared/types'
+import type { SendInput, Snapshot, StreamEvent } from '../../shared/types'
 import { contextMessages, conversationDirectory } from '../../shared/context'
 import type { AgentEvent } from '../domain/agent'
 import { toLlmMessages, type LlmMessage, type ToolWorkspace } from '../domain/llm'
@@ -8,8 +8,8 @@ import { StateService } from './state-service'
 
 /** 应用会话层：准备上下文、保存正文和推送界面；运行控制由独立 Agent 负责。 */
 export class AgentSession {
-  //表示这次生成对应哪一个会话、哪一条 assistant 占位消息，以及上次保存、推送的时间。
-  private target?: { conversation: Conversation; message: Message; lastSave: number; lastEmit: number }
+  // 用 ID 定位当前仓库对象，其他会话的事务回滚不会使流式更新写到旧引用。
+  private target?: { conversationId: string; messageId: string; lastSave: number; lastEmit: number }
 
   /** 订阅 Agent 事件，生命周期与应用实例一致，不持有模型或取消控制器。 */
   constructor(private store: StateService, private emit: (event: StreamEvent) => void, private readonly agent: Agent, private readonly workspace?: ToolWorkspace) {
@@ -26,12 +26,12 @@ export class AgentSession {
     if (this.busy) throw new Error('请先停止当前生成。')
     if (!input || typeof input !== 'object' || (input.retry !== undefined && typeof input.retry !== 'boolean')) throw new Error('无效请求。')
     if (!config.apiKey) throw new Error('请先配置模型 API 密钥。')
-    const { conversation, message } = this.store.begin(input.content, Boolean(input.retry), config.model, input.attachments)
+    const { conversation, message } = this.store.begin(input.content, Boolean(input.retry), config.model, input.attachments, input.conversationId)
     this.workspace?.setDirectory(conversationDirectory(conversation))
     const context = toLlmMessages(contextMessages(conversation))
     const prompt = context.pop() as Extract<LlmMessage, { role: 'user' }>
     this.agent.replaceMessages(context)
-    this.target = { conversation, message, lastSave: Date.now(), lastEmit: 0 }
+    this.target = { conversationId: conversation.id, messageId: message.id, lastSave: Date.now(), lastEmit: 0 }
     // 运行错误由 agent_end 保存；终止订阅者抛错时也避免产生未处理的 Promise。
     void this.agent.prompt(config, prompt).catch(() => {})
     return this.store.snapshot()
@@ -48,7 +48,8 @@ export class AgentSession {
   private onEvent(event: AgentEvent): void {
     const target = this.target
     if (!target) return
-    const { conversation, message } = target
+    const conversation = this.store.state.conversations.find(item => item.id === target.conversationId)!
+    const message = conversation.messages.find(item => item.id === target.messageId)!
     if (event.type === 'message_update') {
       message.content += event.delta.content || ''
       message.reasoning += event.delta.reasoning || ''

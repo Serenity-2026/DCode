@@ -3,25 +3,28 @@ import { createWriteStream } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ToolExecutionError } from '../../domain/llm'
+import { ToolExecutionError, type AgentToolResult } from '../../domain/llm'
 import { maxOutputBytes, truncateOutput, utf8Tail } from './output'
-import type { WorkspaceTool } from './tool-runtime'
+import type { ToolExecutionContext, WorkspaceTool } from './tool-runtime'
+
+/** 命令结束状态与完整日志位置，失败结果也保留这些信息。 */
+export interface BashToolDetails { exitCode: number | null; timedOut: boolean; truncation?: { lines: number; bytes: number }; fullOutputPath?: string }
 
 /** 独立命令工具；声明 bash 参数，临时输出目录交由公共运行层登记和清理。 */
-export const bashTool: WorkspaceTool = {
-  name: 'bash',
-  description: 'Execute a bash command in the working directory. Returns stdout/stderr, keeping the last 2000 lines or 50 KiB. Truncated output is saved to a temporary file. Optional timeout in seconds; no default timeout.',
-  parameters: { type: 'object', additionalProperties: false, required: ['command'], properties: {
+export class BashTool implements WorkspaceTool<BashToolDetails> {
+  readonly name = 'bash'
+  readonly description = 'Execute a bash command in the working directory. Returns stdout/stderr, keeping the last 2000 lines or 50 KiB. Truncated output is saved to a temporary file. Optional timeout in seconds; no default timeout.'
+  readonly parameters = { type: 'object', additionalProperties: false, required: ['command'], properties: {
     command: { type: 'string', minLength: 1 }, timeout: { type: 'number', exclusiveMinimum: 0, maximum: 2_147_483.647 }
-  } },
+  } }
   /** 仅使用本次执行上下文启动进程，不读取其他工具或应用会话状态。 */
-  execute(args, signal, { cwd, temporaryDirectories }) {
+  execute(args: Record<string, unknown>, signal: AbortSignal, { cwd, temporaryDirectories }: ToolExecutionContext): Promise<AgentToolResult<BashToolDetails>> {
     return runBash(args.command as string, cwd, args.timeout as number | undefined, signal, temporaryDirectories)
   }
 }
 
 /** 执行真实 bash，流式写入完整日志，内存只保留有界尾部；日志目录由工具实例管理。 */
-async function runBash(command: string, cwd: string, timeout: number | undefined, signal: AbortSignal, logs: Set<string>): Promise<string> {
+async function runBash(command: string, cwd: string, timeout: number | undefined, signal: AbortSignal, logs: Set<string>): Promise<AgentToolResult<BashToolDetails>> {
   signal.throwIfAborted()
   const directory = await mkdtemp(join(tmpdir(), 'dcode-bash-'))
   logs.add(directory)
@@ -84,10 +87,11 @@ async function runBash(command: string, cwd: string, timeout: number | undefined
     if (failure) throw new ToolExecutionError(`无法执行 bash 或保存命令输出（${(failure as NodeJS.ErrnoException).code || 'I/O'}）。请确认 bash 可用及目录可访问。`)
     const output = truncateOutput(tail.toString('utf8'), true)
     keepLog = output.truncated || totalBytes > tail.length
-    const text = (output.content || '(无输出)') + (keepLog ? `\n\n[输出已截断，完整输出：${path}]` : '')
-    if (timedOut) throw new ToolExecutionError(`${text}\n\n命令超时（${timeout} 秒）。`)
-    if (code !== 0) throw new ToolExecutionError(`${text}\n\n命令退出码：${code ?? '无退出码'}。`)
-    return text
+    const details: BashToolDetails = { exitCode: code, timedOut, ...(keepLog ? { truncation: { lines: output.lines, bytes: Buffer.byteLength(output.content) }, fullOutputPath: path } : {}) }
+    let text = (output.content || '(无输出)') + (keepLog ? `\n\n[输出已截断，完整输出：${path}]` : '')
+    if (timedOut) text += `\n\n命令超时（${timeout} 秒）。`
+    else if (code !== 0) text += `\n\n命令退出码：${code ?? '无退出码'}。`
+    return { content: [{ type: 'text', text }], details, isError: timedOut || code !== 0 }
   } finally {
     if (!keepLog) { await rm(directory, { recursive: true, force: true }); logs.delete(directory) }
   }

@@ -105,7 +105,8 @@ it('keeps the Agent runtime and loop independent of application sessions and sto
   const boundaries: Record<string, string[]> = {
     'main/services/agent-loop.ts': ['main/domain/'],
     'main/services/agent.ts': ['main/domain/', 'main/services/agent-loop.ts', 'main/infrastructure/tool-schema.ts'],
-    'main/services/agent-session.ts': ['shared/', 'main/domain/', 'main/services/agent.ts', 'main/services/state-service.ts']
+    'main/services/agent-session.ts': ['shared/', 'main/domain/', 'main/services/agent.ts', 'main/services/state-service.ts'],
+    'main/services/agent-sessions.ts': ['shared/', 'main/domain/', 'main/services/agent-session.ts', 'main/services/state-service.ts']
   }
   const violations: string[] = []
   for (const [source, allowed] of Object.entries(boundaries)) {

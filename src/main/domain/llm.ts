@@ -17,19 +17,21 @@ export interface AssistantMessage {
 
 /** 工具读取的图片由适配器转换到供应商格式，不向应用磁盘保存 base64。 */
 export interface ToolImage { type: 'image'; data: string; mimeType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp' }
-/** 保留字符串返回兼容，文件读取可同时提供文字与图片。 */
-export interface ToolOutput { content: string; images?: ToolImage[] }
+/** 工具面向模型的内容块，文本与图片统一按顺序返回。 */
+export type ToolContent = Extract<LlmContent, { type: 'text' }> | ToolImage
+/** 参考 pi 的工具结果；details 留给应用，isError 支持不抛异常的失败结果。 */
+export interface AgentToolResult<TDetails = unknown> { content: ToolContent[]; details: TDetails; isError?: boolean }
 
 /** 循环统一上下文，包括工具结果；应用历史在模型边界前转换为此类型。 */
 export type LlmMessage =
   | { role: 'system'; content: string }
   | { role: 'user'; content: string }
   | AssistantMessage
-  | ({ role: 'toolResult'; toolCallId: string; isError: boolean } & ToolOutput)
+  | ({ role: 'toolResult'; toolCallId: string; isError: boolean } & AgentToolResult)
 
 /** 工具定义与主进程 handler，参数 JSON Schema 在启动装配时编译。 */
 export interface ToolDefinition { name: string; description: string; parameters: Record<string, unknown> }
-export interface AgentTool extends ToolDefinition { execute(argumentsValue: Record<string, unknown>, signal: AbortSignal): Promise<string | ToolOutput> }
+export interface AgentTool<TDetails = unknown> extends ToolDefinition { execute(argumentsValue: Record<string, unknown>, signal: AbortSignal): Promise<AgentToolResult<TDetails>> }
 
 /** 可向模型展示的预期工具错误；其他异常仍由循环隐藏细节。 */
 export class ToolExecutionError extends Error {}

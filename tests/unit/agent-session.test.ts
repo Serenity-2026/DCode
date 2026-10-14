@@ -86,7 +86,7 @@ it('finishes session persistence when a tool never cooperates with cancellation'
   let started!: () => void
   const running = new Promise<void>(resolve => { started = resolve })
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(openAIResponse('准备', [testCall('a')])) )
-  const session = new AgentSession(store, () => {}, createAgent([{ ...echoTool, execute: async () => { started(); return new Promise<string>(() => {}) } }]))
+  const session = new AgentSession(store, () => {}, createAgent([{ ...echoTool, execute: async () => { started(); return new Promise<never>(() => {}) } }]))
   session.send({ content: '工具取消' }, config)
   await running
   const snapshot = await session.stop()

@@ -1,6 +1,6 @@
 # DCode 项目交接摘要
 
-用途：给新窗口恢复功能开发上下文。按 2026-10-13 的源码整理，只保留已实现功能、分层契约、已知边界和开发入口，不记录代码问答、语法教学、迭代过程或 GitHub 操作历史。详细规范在 `doc/SPEC*.md`，若早期文档与源码冲突，以当前源码和测试为准。
+用途：给新窗口恢复功能开发上下文。按 2026-10-14 的源码整理，只保留已实现功能、分层契约、已知边界和开发入口，不记录代码问答、语法教学、迭代过程或 GitHub 操作历史。详细规范在 `doc/SPEC*.md`，若早期文档与源码冲突，以当前源码和测试为准。
 
 ## 1. 项目目标与当前范围
 
@@ -8,7 +8,7 @@
 - DCode 是 Electron 桌面 Coding Harness。目前完成本机账号、模型配置、流式对话和桌面交互框架。
 - 技术栈：TypeScript 5.9、Electron 44、React 19、Ant Design 6；electron-vite 构建，electron-builder 打包；Vitest 单元测试、Playwright Electron E2E。
 - 当前能与模型对话、把用户主动选择的文本文件/目录作为上下文，已接入 function call / agent loop、OpenAI/Anthropic 统一消息层及 read、bash、edit、write 生产工具。选择文件夹后，该会话可读取、修改文件和执行命令；未选择目录时工具返回提示。尚未实现云端账号同步。
-- Agent 基本框架和四个本机编码工具已经完成；本轮没有待完成的功能需求。下一步功能由用户在新窗口指定，开发时继续沿用当前分层，逐步增加能力。
+- Agent 基本框架、四个本机编码工具和多会话并行任务已经完成；本轮没有待完成的功能需求。下一步功能由用户在新窗口指定，开发时继续沿用当前分层，逐步增加能力。
 - 用户是 Java 程序员，了解部分 TS 语法；交流用中文。每个类和核心方法前写中文注释，说明职责与依赖。
 
 ## 2. 已有功能与界面约定
@@ -21,7 +21,7 @@
 - `Enter` 发送，`Shift+Enter` 换行，中文输入法组词时不发送；`Cmd/Ctrl+N` 新对话。
 - 界面参考 Codex 的克制桌面风格，支持浅色/深色。应用、登录页与左上品牌使用自定义 D 图标，资源在 `build/icon.svg/png/icns`。
 - 欢迎页使用灰色云朵终端：漂浮、悬浮提亮、点击旋转/光圈，内部短横线持续闪烁。选择文件夹后标题显示带下划线的目录名，点击可更换目录；取消保留草稿，移除恢复默认标题。
-- 输入框左下“+”添加文件/文件夹；右侧依次为模型选择、上下文圆环、快速模式、模型强度与发送/停止。模型菜单向上展开，箭头向上；生成期间输入区域使用旋转圆环光标。
+- 输入框左下“+”添加文件/文件夹；右侧依次为模型选择、上下文圆环、快速模式、模型强度与发送/停止。模型菜单向上展开，箭头向上；当前会话生成期间输入区域使用旋转圆环光标。生成时可以切换/新建会话并启动其他任务；侧栏运行图标表示后台生成，停止按钮只停止当前会话，删除运行中会话需先停止。
 - 快速模式开启为蓝色实心闪电，关闭为描边；OpenAI 兼容协议按快速模式配置发送 `service_tier: "priority"`，不按域名特判，效果取决于服务支持；服务拒绝时提示关闭快速模式。Anthropic 原生协议不发送此参数。
 - 模型强度由服务元数据决定：支持 `low/high/max` 就只展示这三档。白名单为 `minimal/low/medium/high/xhigh/max/ultra`，按顺序过滤；未返回档位显示“强度未知”，明确空列表显示“不支持推理”，均禁用。无猜测档位兜底。默认值优先服务默认档，选择按账号/服务/模型保存。
 - 强度面板使用连续滑块，释放时取最近档位并保存一次；粗圆角轨道、动态粒子、平滑变化、键盘整档操作。OpenAI 兼容请求按所选强度发送 `reasoning_effort`，不按域名自动追加供应商专有 `thinking`。Anthropic 原生协议本轮不发送这些选项。
@@ -56,7 +56,7 @@ src/renderer/src/
   styles.css                    主题、布局与动画
 ```
 
-核心业务类：`Agent` 在 `agent.ts`，`AgentSession` 在 `agent-session.ts`；`Auth` 在 `auth-service.ts`，`Models` 在 `model-service.ts`；`StateService` 管理身份、账号归属、会话、偏好和公开快照；`StateRepository` 只管持久化；`DesktopService` 通过 `DesktopAccess` 契约使用 `ElectronDesktop`。`SecretCodec` 契约由 `Secrets` 实现。
+核心业务类：`Agent` 在 `agent.ts`，`AgentSession` 在 `agent-session.ts`；`AgentSessions` 在 `agent-sessions.ts` 按会话管理独立运行实例；`Auth` 在 `auth-service.ts`，`Models` 在 `model-service.ts`；`StateService` 管理身份、账号归属、会话、偏好和公开快照；`StateRepository` 只管持久化；`DesktopService` 通过 `DesktopAccess` 契约使用 `ElectronDesktop`。`SecretCodec` 契约由 `Secrets` 实现。
 
 Agent 框架参照 pi v1.0.4 的职责划分，自行实现最小子集，没有引入 pi 包或完整运行时。依赖方向为 `AgentSession → Agent → AgentLoop → ModelStream`；参考源码与范围见 `SPEC-agent-loop.md`。
 
@@ -67,9 +67,9 @@ Agent 框架参照 pi v1.0.4 的职责划分，自行实现最小子集，没有
 | `services/agent-session.ts` · `send/stop` | 准备当前应用会话历史，创建回复占位，订阅 Agent，保存并推送聊天消息 | 不直接请求模型、执行工具或创建取消控制器 |
 | `infrastructure/model-client.ts` 与 `llm/` | HTTP、协议选择、SSE 解码，以及 OpenAI/Anthropic 双向消息转换 | 供应商字段不进入循环或应用会话逻辑 |
 
-`domain/agent.ts` 定义状态、上下文和生命周期事件；`domain/llm.ts` 定义统一消息、模型端口与工具契约。`bootstrap.ts` 手动装配各层，显式导入 readTool/bashTool/editTool/writeTool，通过 `toolRuntime.bind(tool)` 转为 AgentTool 后注入 Agent；`infrastructure/tools/tool-runtime.ts` 只管理目录、取消、预期错误和临时资源，不导入具体工具。AgentSession 通过 ToolWorkspace 契约在每次发送前配置目录。每个应用主进程启动时只创建一组 Loop、Agent 和 AgentSession；不同提问与会话复用这些实例，每次发送替换历史上下文，每次 prompt 创建独立取消控制器与运行 Promise。当前全应用只能同时运行一个生成任务。
+`domain/agent.ts` 定义状态、上下文和生命周期事件；`domain/llm.ts` 定义统一消息、模型端口与工具契约。`bootstrap.ts` 手动装配各层，显式导入 ReadTool/BashTool/EditTool/WriteTool 类，在会话工厂中创建工具实例，通过 `toolRuntime.bind(tool)` 转为 AgentTool 后注入 Agent；`infrastructure/tools/tool-runtime.ts` 只管理目录、取消、预期错误和临时资源，不导入具体工具。AgentSession 通过 ToolWorkspace 契约在每次发送前配置目录。应用主进程创建一个 AgentSessions 和无状态 AgentLoop；每个会话第一次发送时，通过 app 注入的工厂创建独立 AgentSession、Agent 和 ToolRuntime，之后复用该会话实例。每次发送替换对应 Agent 的历史，每次 prompt 创建独立取消控制器与运行 Promise。不同会话可以同时生成，同一会话仍拒绝重复运行；当前页面选择不会改变后台任务的模型、目录或取消状态。
 
-事件方向为 `Loop.emit → Agent.publish → 订阅者 → AgentSession.onEvent → StreamEvent → 窗口`。AgentSession 构造时登记同步订阅；AgentEvent 不含应用会话 ID，Session 用当前 target 将事件对应到聊天消息。对外状态快照、事件副本和推送消息均复制，工具 handler 与 API Key 不进入公开状态。
+事件方向为 `Loop.emit → Agent.publish → 订阅者 → AgentSession.onEvent → StreamEvent → 窗口`。AgentSession 构造时登记同步订阅；AgentEvent 不含应用会话 ID，Session 用目标会话/消息 ID 从当前仓库定位回复；其他操作事务回滚后也不会写入旧对象引用。对外状态快照、事件副本和推送消息均复制，工具 handler 与 API Key 不进入公开状态。
 
 依赖约束：app 装配各层；Controller 连接 Router/Service；Service 可用 Repository/infrastructure/domain，但不得导入 Electron、Controller、IPC 或窗口；Repository 不依赖业务层；infrastructure 不依赖 Service；domain/shared 不导入 Node/Electron/UI。renderer 不导入 main/preload/Node/Electron，通用 components 不反向依赖 features。架构测试检查边界与循环依赖，并单独约束 AgentSession/Agent/AgentLoop 的依赖方向。未引入 DI 框架或数据库。
 
@@ -81,12 +81,12 @@ Agent 框架参照 pi v1.0.4 的职责划分，自行实现最小子集，没有
 
 对话生命周期：
 
-1. ChatController 获取 `Models.selected()`，解密当前服务密钥并组装单次配置；互斥入口拒绝生成期间的新修改，停止入口不受此锁阻止。
-2. `AgentSession.send()` 校验并调用 `StateService.begin()`，保存用户消息和 streaming 回复占位；用成功历史替换 Agent 上下文，prompt 当前问题，立即返回初始 Snapshot。
+1. ChatController 获取 `Models.selected()`，解密当前服务密钥并组装单次配置；请求准备保持短暂互斥，生成期间允许会话导航、其他会话发送、附件和模型配置；生成任务自身不持有 IPC 锁。
+2. `AgentSessions.send()` 按目标 conversationId 分派独立实例，`AgentSession.send()` 校验并调用 `StateService.begin()`，保存用户消息和 streaming 回复占位；用成功历史替换 Agent 上下文，prompt 当前问题，立即返回初始 Snapshot。
 3. Agent.prompt 同步占用运行状态并创建取消控制器，微任务中启动 `AgentLoop → streamModel → fetch → 对应供应商 SSE 适配器`；解析正文、推理和完整工具调用。模型回复有工具调用时，校验 JSON Schema 后顺序执行，追加统一工具结果再请求；没有调用、结束原因为 stop 且包含非空正文时结束。循环最多 8 次模型请求，第 8 次仍要求工具时在执行前报上限；断流/截断/错误参数不执行半截调用，取消后不继续下一轮。
 4. Agent 先用循环事件更新运行状态，再同步通知订阅者。AgentSession 消费 message_update 累加文本，约每 500ms 保存、每 30ms 推送完整消息副本；agent_end 中更新 complete/stopped/error、保存并推送最终消息，Agent 随后释放运行占用。
 5. 流事件经 `MainWindow.publish → webContents.send → preload.onStream → Workspace` 按消息 ID 合并。Workspace 缓存事件，避免初始 Snapshot 覆盖更新的流内容；不能依靠微任务调度保证跨进程响应先后。
-6. `AgentSession.stop()` 调用 Agent.abort，再 await Agent.waitForIdle 等循环及终止订阅者保存完成，然后返回快照；await 不阻塞事件循环。生成默认 60 秒空闲超时，每批非空字节（包括心跳）重置，不是整个回答的总时长；退出 finally 清掉计时器。模型列表是 15 秒总超时。
+6. 停止接口携带 conversationId，只取消对应 AgentSession；窗口关闭、应用退出或退出账号使用 AgentSessions.stopAll，等待全部会话保存。`AgentSession.stop()` 调用 Agent.abort，再 await Agent.waitForIdle 等循环及终止订阅者保存完成，然后返回快照；await 不阻塞事件循环。生成默认 60 秒空闲超时，每批非空字节（包括心跳）重置，不是整个回答的总时长；退出 finally 清掉计时器。模型列表是 15 秒总超时。
 
 ## 5. 上下文、模型元数据与附件
 
@@ -123,13 +123,13 @@ npm start               # 预览 out/ 构建
 npm run pack            # 当前系统应用目录到 release/
 ```
 
-最近验证（2026-10-13）：独立工具模块重构后，类型检查、13 个文件共 121 个单元测试、生产构建通过，本地 Electron E2E 7 项通过，真实服务 smoke 默认跳过。未使用真实服务密钥进行模型请求。
+最近验证（2026-10-14）：统一 AgentToolResult 契约后，类型检查、14 个文件共 134 个单元测试、生产构建通过，本地 Electron E2E 8 项通过，真实服务 smoke 跳过。覆盖显式返回失败、异常归一化、内容块/附加信息保留及双协议转换；未使用真实服务密钥进行模型请求。
 
 上述验证记录不是新窗口当前状态的保证，后续修改需按范围重新验证。`DCODE_LIVE_TEST=1 npm run test:e2e` 才开启真实模型请求；不要在常规验证中自行开启。
 
 测试入口：`tests/unit/architecture.test.ts` 检查依赖边界/循环；`ipc.test.ts` 检查来源、结果、互斥和停止；其余覆盖认证、存储、配置、模型/SSE、附件；`tests/e2e/chat.spec.ts` 覆盖完整桌面交互。打包应用不会随着源码修改自动更新，需重新 pack。
 
-`llm.test.ts` 验证两种协议转换、UTF-8/工具 JSON 分块、签名与工具结果分组、原生模型分页与畸形流；`agent.test.ts` 验证两种供应商的多轮工具循环、参数校验、失败回传、取消和轮次上限；`agent-runtime.test.ts` 验证独立 Agent 的事件/状态、上下文保留、订阅隔离、并发和错误收尾；`agent-session.test.ts` 验证会话切换、停止与最终保存。Electron E2E 增加协议选择、原生工具错误回传与重启场景；测试替身只在隔离测试中注入；生产四工具也通过本地 Electron 的真实文件读写、命令执行和重启恢复验证。`coding-tools.test.ts` 覆盖工具参数、分页/截断、UTF-8/图片、批量替换与失败不写入、BOM/CRLF/容错、写入互斥、进程超时/取消、双协议工具与图片回传、会话目录隔离和 token 估算，以及独立自定义工具注入、执行目录捕获和上下文隔离。架构测试另检查具体工具之间、公共工具基础设施与具体工具之间无反向依赖。
+`llm.test.ts` 验证两种协议转换、UTF-8/工具 JSON 分块、签名与工具结果分组、原生模型分页与畸形流；`agent.test.ts` 验证两种供应商的多轮工具循环、参数校验、失败回传、取消和轮次上限；`agent-runtime.test.ts` 验证独立 Agent 的事件/状态、上下文保留、订阅隔离、并发和错误收尾；`agent-session.test.ts` 验证会话切换、停止与最终保存；`agent-sessions.test.ts` 验证并行任务的目录/模型/消息/取消隔离、重复发送与删除保护、账号归属、统一停止、仓库回滚后流更新。Electron E2E 增加协议选择、原生工具错误回传与重启场景；测试替身只在隔离测试中注入；生产四工具也通过本地 Electron 的真实文件读写、命令执行和重启恢复验证。`coding-tools.test.ts` 覆盖工具参数、分页/截断、UTF-8/图片、批量替换与失败不写入、BOM/CRLF/容错、写入互斥、进程超时/取消、双协议工具与图片回传、会话目录隔离和 token 估算，以及独立自定义工具注入、执行目录捕获和上下文隔离。架构测试另检查具体工具之间、公共工具基础设施与具体工具之间无反向依赖。
 
 ## 8. 后续开发约定与阅读入口
 
@@ -138,7 +138,7 @@ npm run pack            # 当前系统应用目录到 release/
 - 新 IPC 功能按 shared DTO/通道 → preload 白名单 → Controller → Service 添加；网络/系统适配进 infrastructure，磁盘格式进 domain/Repository，新 UI 进对应 feature。不要把业务重新堆回 main/index.ts。
 - 功能先写必要 SPEC 再开发，修改应精准，避免猜测性功能/抽象；类和核心方法注释职责及依赖。界面只保留完成操作必需的文字，说明口径放 doc。
 - Git 提交使用中文，正文包含本次用户原始提示词；提交前核对作者与邮箱，并只记录本次相关文件。当前未跟踪的 `.idea/` 属于用户已有内容，不纳入功能提交或清理；本地数据、`.env.local` 同样保留。
-- 详细规格：`SPEC-architecture.md`（分层）、`SPEC-agent-loop.md`（pi v1.0.4 参考、简洁循环与统一消息层）、`SPEC-file-tools.md`（read/bash/edit/write、目录恢复和系统访问边界）、`SPEC-account-models.md`（账号）、`SPEC-model-discovery.md`（服务/模型）、`SPEC-composer-tools.md` / `SPEC-composer-motion.md`（工具/动画）、`SPEC-sidebar.md`、`SPEC-message-navigation.md`、`SPEC-welcome-workspace.md`、`SPEC-app-icon.md`。
+- 详细规格：`SPEC-architecture.md`（分层）、`SPEC-agent-loop.md`（pi v1.0.4 参考、简洁循环与统一消息层）、`SPEC-file-tools.md`（read/bash/edit/write、目录恢复和系统访问边界）、`SPEC-concurrent-conversations.md`（会话级任务、独立运行实例和导航/停止行为）、`SPEC-account-models.md`（账号）、`SPEC-model-discovery.md`（服务/模型）、`SPEC-composer-tools.md` / `SPEC-composer-motion.md`（工具/动画）、`SPEC-sidebar.md`、`SPEC-message-navigation.md`、`SPEC-welcome-workspace.md`、`SPEC-app-icon.md`。
 - 早期 README/SPEC 中的“所有附件都限额”“强度自动/默认三档”“按 DeepSeek 域名追加 thinking 或跳过快速模式”等已被当前实现替代，接手时优先看本摘要及相应源码。
 
 ## 9. Agent 扩展入口与当前边界
@@ -146,13 +146,13 @@ npm run pack            # 当前系统应用目录到 release/
 - 四工具行为：read 支持从 1 开始的 offset/limit 和 PNG/JPEG/GIF/WebP；文本最多 2000 行或 50 KiB。bash 返回最后 2000 行或 50 KiB，截断日志保存在系统临时目录供模型继续读取，应用退出清理；timeout 单位秒，不传没有默认工具超时。edit 使用新版 `edits: [{ oldText, newText }]`，针对原文统一校验，拒绝缺失/歧义/重叠/无变化，保留 BOM 与 LF/CRLF；write 创建父目录后新建或完整覆盖。
 - 路径支持相对路径、绝对路径、`~/`。工作目录不是沙箱，bash 按系统账号权限执行；未新增审批或工程权限管理。Windows 需要可用的 bash；本轮实际验证平台为 macOS。工具结果、图片和日志路径只保留在本次运行，不写入聊天历史。
 
-- 统一消息：`LlmMessage` 包含 system/user/assistant/toolResult；assistant 内容块包含 text/thinking/toolCall，结束原因为 stop 或 toolCall。工具结果以 toolCallId 对应原调用。`ModelStream` 通过回调提供正文/思考增量，通过 Promise 提供完整 assistant 回复；完整工具参数由适配器拼接和解析后才交付循环。
-- 本机工具扩展：`read.ts`、`bash.ts`、`edit.ts`、`write.ts` 各自包含声明和执行逻辑，导出 WorkspaceTool；共享路径/UTF-8/写入互斥位于 `file-operations.ts`，输出截断位于 `output.ts`。新增本机工具只需新增独立模块，在 bootstrap 的工具数组中注册，通过 ToolRuntime.bind 绑定本次 cwd 与临时目录资源；无需修改其他工具、公共运行层或 Agent/Loop。不需要工作目录的工具直接实现 AgentTool 注入。
-- 工具接入：实现 `AgentTool` 的 name、description、parameters 和 `execute(args, signal): Promise<string | ToolOutput>`，从 bootstrap 注入 Agent。名称必须唯一、Schema 根类型为 object，Ajv 严格校验，不修正或转换模型参数。模型只接收声明，执行函数保留在主进程。未知工具、非法参数和执行失败形成错误 toolResult 供下一轮模型处理；ToolOutput 可附带 PNG/JPEG/GIF/WebP 图片；OpenAI 在配对这一批工具结果后追加 user 图片消息，Anthropic 嵌入 tool_result。ToolExecutionError 仅用于可向模型公开的预期错误，其他异常仍隐藏细节。
+- 统一消息：`LlmMessage` 包含 system/user/assistant/toolResult；assistant 内容块包含 text/thinking/toolCall，结束原因为 stop 或 toolCall。工具结果以 toolCallId 对应原调用。`ModelStream` 通过回调提供正文/思考增量，通过 Promise 提供完整 assistant 回复；完整工具参数由适配器拼接和解析后才交付循环。工具结果契约参考 pi v1.2.0：read 的 details 包含分页/截断信息，bash 包含退出码/超时/完整日志路径，edit 包含有界 diff，write 为 undefined。
+- 本机工具扩展：`read.ts`、`bash.ts`、`edit.ts`、`write.ts` 分别导出 ReadTool、BashTool、EditTool、WriteTool 类，实现 WorkspaceTool；工具声明为只读字段，execute 显式标注参数与返回类型。共享路径/UTF-8/写入互斥位于 `file-operations.ts`，输出截断位于 `output.ts`。新增本机工具只需新增实现 WorkspaceTool 的独立类，在 bootstrap 的工具数组中创建实例注册，通过 ToolRuntime.bind 绑定本次 cwd 与临时目录资源；无需修改其他工具、公共运行层或 Agent/Loop。不需要工作目录的工具直接实现 AgentTool 注入。
+- 工具接入：实现 `AgentTool` 的 name、description、parameters 和 `execute(args, signal): Promise<AgentToolResult>`，从 bootstrap 注入 Agent。名称必须唯一、Schema 根类型为 object，Ajv 严格校验，不修正或转换模型参数。模型只接收声明，执行函数保留在主进程。未知工具、非法参数和执行失败形成错误 toolResult 供下一轮模型处理；AgentToolResult 统一包含文本/图片 content 块数组、details 及可选 isError，取消字符串兼容；工具可以返回 isError: true 或抛出异常，Loop 生成明确的最终错误状态。details 保留在运行状态与事件，不发送给模型；OpenAI 在配对这一批工具结果后追加 user 图片消息，Anthropic 嵌入 tool_result。ToolExecutionError 仅用于可向模型公开的预期错误，其他异常仍隐藏细节。
 - 上下文归属：Loop 对输入历史深拷贝后维护局部请求消息；Agent 通过 message_end 保存完整正式消息，message_update 只更新草稿。应用会话每次 send 重载成功问答文本，完整工具记录不跨用户轮次重放，也不写入磁盘；多轮模型正文仍显示为同一条应用 assistant 回复。
 - 运行收尾：订阅者为同步回调，agent_end 通知完成后才释放 busy，waitForIdle 包含 Session 的最终同步保存。普通运行错误通过 outcome/error 记录；订阅者错误也可能使运行 Promise 拒绝，但最终清理仍执行。停止/失败后独立 Agent 不自动修复未配对工具消息，调用方需 replaceMessages 提供有效历史。
 - 工具取消：waitForTool 使取消时可以停止等待不配合的异步工具，不撤销副作用。生产 bash 会终止进程组（Windows 使用 taskkill）；read 使用可取消读取；write/edit 在操作间检查取消，同路径队列在底层写入完成前不释放。正在进行的磁盘写入不能撤销；同步计算仍占用事件循环。
-- 目前未实现：并行工具、生成队列、多 Agent 并发、steering/follow-up、上下文压缩、审批、通用单工具超时、后台任务、完整执行记录持久化与断点恢复。这里列出能力边界，不代表下一步自动实施的需求。
+- 目前未实现：并行工具、生成队列、同一会话多 Agent 并发、steering/follow-up、上下文压缩、审批、通用单工具超时、窗口关闭后的后台任务、完整执行记录持久化与断点恢复。支持的并行范围为不同会话各运行一个 Agent。这里列出能力边界，不代表下一步自动实施的需求。
 
 | 新功能涉及的职责 | 修改入口 |
 | --- | --- |
