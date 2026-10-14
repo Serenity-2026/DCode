@@ -4,11 +4,76 @@ import { AgentLoop } from '../../src/main/services/agent-loop'
 import { AgentSession } from '../../src/main/services/agent-session'
 import { StateRepository } from '../../src/main/repositories/state-repository'
 import { ToolExecutionError, type AgentTool, type AgentToolResult, type Usage } from '../../src/main/domain/llm'
+import { ToolRuntime, type WorkspaceTool } from '../../src/main/infrastructure/tools/tool-runtime'
 import type { StreamEvent, ModelApi } from '../../src/shared/types'
 import { create, cleanup, createAgent, config, unexpectedTaskError } from './helpers'
 import { anthropicResponse, echoTool, openAIResponse, testCall } from './llm-fixtures'
 
 afterEach(() => { vi.unstubAllGlobals(); cleanup() })
+
+it.each<ModelApi>(['openai-completions', 'anthropic-messages'])('preserves bound execution modes and sends parallel results in source order through %s', async api => {
+  const response = api === 'anthropic-messages' ? anthropicResponse : openAIResponse
+  const fetchMock = vi.fn().mockResolvedValueOnce(response('', [testCall('slow', 'slow'), testCall('fast', 'fast')])).mockResolvedValueOnce(response('完成'))
+  vi.stubGlobal('fetch', fetchMock)
+  let bothStarted!: () => void
+  const started = new Promise<void>(resolve => { bothStarted = resolve })
+  let releaseSlow!: () => void
+  const slow = new Promise<void>(resolve => { releaseSlow = resolve })
+  let fastEnded!: () => void
+  const finished = new Promise<void>(resolve => { fastEnded = resolve })
+  const starts: unknown[] = []
+  const tool: WorkspaceTool = {
+    ...echoTool, executionMode: 'parallel',
+    execute: async (args, _signal, { cwd }) => {
+      starts.push(args.text)
+      if (starts.length === 2) bothStarted()
+      if (args.text === 'slow') await slow
+      return { content: [{ type: 'text', text: `${args.text}:${cwd}` }], details: undefined }
+    }
+  }
+  const runtime = new ToolRuntime()
+  runtime.setDirectory('/workspace')
+  const agent = createAgent([runtime.bind(tool)])
+  const ended: string[] = []
+  agent.subscribe(event => {
+    if (event.type === 'tool_execution_end') {
+      ended.push(event.toolCallId)
+      if (event.toolCallId === 'fast') fastEnded()
+    }
+  })
+  const pending = agent.prompt({ ...config, api }, { role: 'user', content: '并行检查' })
+  await Promise.all([started, finished])
+  expect(starts).toEqual(['slow', 'fast'])
+  expect(agent.state.pendingToolCalls).toEqual(['slow'])
+  expect(fetchMock).toHaveBeenCalledOnce()
+  releaseSlow(); await pending
+  expect(ended).toEqual(['fast', 'slow'])
+  expect(agent.state.messages.filter(message => message.role === 'toolResult').map(message => message.toolCallId)).toEqual(['slow', 'fast'])
+  expect(agent.state.tools[0]).not.toHaveProperty('executionMode')
+  const first = JSON.parse(fetchMock.mock.calls[0][1].body)
+  const second = JSON.parse(fetchMock.mock.calls[1][1].body)
+  expect(JSON.stringify(first.tools)).not.toContain('executionMode')
+  expect(JSON.stringify(first.tools)).not.toContain('execute')
+  if (api === 'anthropic-messages') expect(second.messages.at(-1).content.map((block: { tool_use_id: string }) => block.tool_use_id)).toEqual(['slow', 'fast'])
+  else expect(second.messages.filter((message: { role: string }) => message.role === 'tool').map((message: { tool_call_id: string }) => message.tool_call_id)).toEqual(['slow', 'fast'])
+  expect(agent.state.outcome).toBe('complete')
+  runtime.dispose()
+})
+
+it('does not terminate between groups when early parallel results request termination', async () => {
+  const fetchMock = vi.fn().mockResolvedValueOnce(openAIResponse('', [testCall('a', 'a'), testCall('b', 'b'), { ...testCall('c'), name: 'barrier' }, testCall('d', 'd')]))
+    .mockResolvedValueOnce(openAIResponse('完成'))
+  vi.stubGlobal('fetch', fetchMock)
+  const calls: string[] = []
+  const agent = createAgent([
+    { ...echoTool, executionMode: 'parallel', execute: async args => { calls.push(args.text as string); return { content: [], details: undefined, terminate: args.text !== 'd' } } },
+    { ...echoTool, name: 'barrier', executionMode: 'sequential', execute: async () => { calls.push('barrier'); return { content: [], details: undefined, terminate: true } } }
+  ])
+  await agent.prompt(config, { role: 'user', content: '执行整批' })
+  expect(calls).toEqual(['a', 'b', 'barrier', 'd'])
+  expect(fetchMock).toHaveBeenCalledTimes(2)
+  expect(agent.state.outcome).toBe('complete')
+})
 
 it.each<ModelApi>(['openai-completions', 'anthropic-messages'])('preserves result blocks and details and explicit failure through %s', async api => {
   const response = api === 'anthropic-messages' ? anthropicResponse : openAIResponse

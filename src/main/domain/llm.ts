@@ -51,7 +51,12 @@ export type LlmMessage =
 
 /** 工具定义与主进程 handler，参数 JSON Schema 在启动装配时编译。 */
 export interface ToolDefinition { name: string; description: string; parameters: Record<string, unknown> }
-export interface AgentTool<TDetails = unknown> extends ToolDefinition { execute(argumentsValue: Record<string, unknown>, signal: AbortSignal): Promise<AgentToolResult<TDetails>> }
+/** 本地调度属性；连续并行调用合组，未声明时按串行处理。 */
+export type ToolExecutionMode = 'parallel' | 'sequential'
+export interface AgentTool<TDetails = unknown> extends ToolDefinition {
+  executionMode?: ToolExecutionMode
+  execute(argumentsValue: Record<string, unknown>, signal: AbortSignal): Promise<AgentToolResult<TDetails>>
+}
 
 /** 可向模型展示的预期工具错误；其他异常仍由循环隐藏细节。 */
 export class ToolExecutionError extends Error {}

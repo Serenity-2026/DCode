@@ -6,7 +6,7 @@
 
 阅读 [agent-loop.ts](https://github.com/earendil-works/pi/blob/v1.0.4/packages/agent/src/agent-loop.ts)、[消息类型](https://github.com/earendil-works/pi/blob/v1.0.4/packages/ai/src/types.ts)、[OpenAI 适配](https://github.com/earendil-works/pi/blob/v1.0.4/packages/ai/src/api/openai-completions.ts)、[Anthropic 适配](https://github.com/earendil-works/pi/blob/v1.0.4/packages/ai/src/api/anthropic-messages.ts)及 [跨模型转换](https://github.com/earendil-works/pi/blob/v1.0.4/packages/ai/src/api/transform-messages.ts)。借鉴其统一内容块与工具结果消息、在模型边界转换协议、工具结果追加上下文后继续循环的结构，自行实现项目需要的子集，不引入 pi 包或复制完整运行时。
 
-实现文本/推理/工具调用统一消息、OpenAI Chat Completions 与 Anthropic Messages 双向适配、顺序 function call、agent loop。生产工具已由 bootstrap 注入 read、bash、edit、write，具体行为见 `SPEC-file-tools.md`。暂不加生成队列、steering、并行工具、审批、压缩、关闭窗口后的后台运行、执行记录持久化或断点恢复。多会话并行实例管理见 `SPEC-concurrent-conversations.md`。
+实现文本/推理/工具调用统一消息、OpenAI Chat Completions 与 Anthropic Messages 双向适配、按组执行 function call、agent loop。生产工具已由 bootstrap 注入 read、bash、edit、write，具体行为见 `SPEC-file-tools.md`。ToolExecutor 按连续并行组和单项串行组执行，见 `SPEC-tool-executor.md`。暂不加生成队列、steering、审批、压缩、关闭窗口后的后台运行、执行记录持久化或断点恢复。多会话并行实例管理见 `SPEC-concurrent-conversations.md`。
 
 ## 分层
 
@@ -16,6 +16,7 @@
 - `infrastructure/tool-schema.ts`：编译工具 JSON Schema；不修正或隐式转换参数。
 - `domain/agent.ts`：循环上下文、编译后的工具、AgentState 与生命周期事件契约。
 - `services/agent-loop.ts`：只执行一次运行的模型/工具循环，通过事件上报消息、轮次与工具结果；没有持久会话状态或取消控制器。默认最多 8 次模型请求。
+- `services/tool-executor.ts`：无状态的单 turn 执行层；查找/校验工具，依据 executionMode 合并连续并行调用、保持串行屏障，转换结果与错误并上报工具事件，不依赖具体工具。AgentLoop 默认持有一个可共享的执行器。
 - `services/agent.ts`：独立 Agent 运行时，拥有统一消息、工具、公开模型配置、运行状态、取消控制器与事件订阅；用循环事件更新状态。
 - `services/agent-session.ts`：应用会话层，替代原 Chat；准备成功历史、保存正文、订阅 Agent 事件并推送现有 StreamEvent，停止时调用 Agent.abort/waitForIdle。app 手动装配，不增加工具 IPC；目录附件可保存工作路径，其他消息存储结构不变。
 
@@ -47,7 +48,7 @@ OpenAI 兼容请求不按 DeepSeek 等服务域名特判参数：所选强度控
 
 ## 循环与消息转换
 
-工具执行统一返回 `AgentToolResult`，与 pi v1.2.0 一致包含 content、details、structuredContent、usage、isError、terminate。Loop 同时处理返回失败和抛出异常，取消保持终止语义；本轮整批结果都要求 terminate 才结束，仍完成每项执行和终止事件。最终工具消息含明确的错误标记，details、structuredContent、usage、terminate 只保留在运行上下文和事件，不进入供应商请求，工具用量不计入主对话上下文估算。具体工具结果契约见 `SPEC-file-tools.md`。
+工具执行统一返回 `AgentToolResult`，与 pi v1.2.0 一致包含 content、details、structuredContent、usage、isError、terminate。ToolExecutor 同时处理返回失败和抛出异常，取消保持终止语义；本轮整批结果都要求 terminate 才结束，仍完成每项执行和终止事件。连续并行调用同组启动并全部结算后进入下一组；完成事件按完成顺序，正式工具消息按调用顺序。最终工具消息含明确的错误标记，executionMode、handler、details、structuredContent、usage、terminate 不进入供应商工具声明，结果附加字段留在运行上下文和事件；工具用量不计入主对话上下文估算。具体工具结果契约见 `SPEC-file-tools.md`。
 
 应用会话文本先转换为统一消息。适配器将供应商 SSE 转为统一内容块与结束原因，AgentSession 仅消费正文/推理增量。完整 assistant 消息与工具结果在本次运行内保留，下一次请求再转换到目标供应商格式；Anthropic 同轮多个结果合并为紧随 assistant 的用户消息。
 

@@ -1,13 +1,14 @@
-import { ToolExecutionError, waitForTool, type AgentToolResult, type ModelStream } from '../domain/llm'
+import type { ModelStream } from '../domain/llm'
 import type { AgentContext, AgentLoopEvent, ToolResultMessage } from '../domain/agent'
 import type { ModelConfig } from '../domain/model-config'
+import { ToolExecutor } from './tool-executor'
 
 /** 底层模型/工具循环；仅使用单次上下文与事件出口，不拥有会话或运行状态。 */
 export class AgentLoop {
   /** 模型端口由 app 注入，循环不选择供应商或读取秘密。 */
-  constructor(private readonly stream: ModelStream) {}
+  constructor(private readonly stream: ModelStream, private readonly executor = new ToolExecutor()) {}
 
-  /** 模型回复 → 顺序执行工具 → 追加结果 → 再请求；无工具调用时结束，取消立即退出。
+  /** 模型回复 → 执行工具分组 → 追加结果 → 再请求；无工具调用时结束，取消立即退出。
    * 给定消息上下文和工具，持续请求模型；模型要求调用工具就执行，再把结果交回模型；模型给出最终回答就结束。
    * 返回值是 Promise<void>。最终文本不会作为 run() 的返回值交出来，而是通过事件交给上层。
    * 正常结束时 Promise 完成；模型请求异常、取消、循环超限等情况则抛出异常，由 Agent 处理。
@@ -15,18 +16,8 @@ export class AgentLoop {
   async run(config: ModelConfig, context: AgentContext, controller: AbortController, emit: (event: AgentLoopEvent) => void): Promise<void> {
     //初始消息的深拷贝
     const messages = structuredClone(context.messages)
-    // 写法等同于：
-    // const definitions = context.tools.map(item => {
-    //   const tool = item.tool
-    //
-    //   const {
-    //     execute: _handler,
-    //     ...definition
-    //   } = tool
-    //
-    //   return definition
-    // })
-    const definitions = context.tools.map(({ tool: { execute: _handler, ...definition } }) => definition)
+    // 只发送模型声明；handler 与 executionMode 留在本地执行层。
+    const definitions = context.tools.map(({ tool: { name, description, parameters } }) => ({ name, description, parameters }))
     const ids = new Set<string>()
     for (let turn = 0; turn < 8; turn++) {
       controller.signal.throwIfAborted()
@@ -49,32 +40,11 @@ export class AgentLoop {
       if (reply.stopReason !== 'toolCall') throw new Error('模型工具调用结束原因无效。')
       if (turn === 7) throw new Error('Agent 已达到循环上限。')
       for (const call of calls) {
-        controller.signal.throwIfAborted()
         if (ids.has(call.id)) throw new Error('模型工具调用 ID 重复。')
         ids.add(call.id)
-        emit({ type: 'tool_execution_start', toolCallId: call.id, name: call.name })
-        const registered = context.tools.find(item => item.tool.name === call.name)
-        let output: AgentToolResult = { content: [{ type: 'text', text: '工具未注册。' }], details: undefined, isError: true }
-        if (registered) {
-          if (!registered.validate(call.arguments)) output.content = [{ type: 'text', text: '工具参数不符合 JSON Schema。' }]
-          else try {
-            //waitForTool:工具正常完成，就返回工具结果；用户提前取消，就让等待工具的代码立即收到异常。
-            const returned = await waitForTool(() => registered.tool.execute(call.arguments, controller.signal), controller.signal)
-            if (!Array.isArray(returned.content) || returned.content.some(block => !block || (block.type === 'text'
-              ? typeof block.text !== 'string'
-              : block.type !== 'image' || typeof block.data !== 'string' || !['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(block.mimeType)))) throw new Error('工具结果无效。')
-            output = structuredClone(returned)
-          } catch (error) {
-            controller.signal.throwIfAborted()
-            output = { content: [{ type: 'text', text: error instanceof ToolExecutionError ? error.message : '工具执行失败。' }], details: undefined, isError: true }
-          }
-        }
-        const result: ToolResultMessage = { ...output, role: 'toolResult', toolCallId: call.id, isError: output.isError === true }
-        messages.push(result)
-        toolResults.push(result)
-        emit({ type: 'tool_execution_end', toolCallId: call.id, name: call.name, result })
-        emit({ type: 'message_end', message: result })
       }
+      toolResults.push(...await this.executor.execute(calls, context.tools, controller.signal, emit))
+      messages.push(...toolResults)
       emit({ type: 'turn_end', message: reply, toolResults })
       controller.signal.throwIfAborted()
       // pi 的终止提示在整批结果齐备后判断，任一工具未请求终止就继续模型循环。

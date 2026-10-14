@@ -107,6 +107,7 @@ doc/SPEC.md     首版规格
 doc/SPEC-account-models.md 账号与模型设置规格
 doc/SPEC-model-discovery.md 服务目录与快速模式规格
 doc/SPEC-composer-tools.md 输入框工具与文本附件规格
+doc/SPEC-tool-executor.md 连续并行工具分组、串行屏障与执行契约
 ```
 
 UI API 查询使用项目自带 CLI，例如 `npx --no-install antd info Button`。Electron 安全机制参考：[官方安全文档](https://www.electronjs.org/docs/latest/tutorial/security)。

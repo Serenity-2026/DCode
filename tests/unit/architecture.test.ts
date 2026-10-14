@@ -103,7 +103,8 @@ it('has no circular source dependencies, including type-only imports', () => {
 
 it('keeps the Agent runtime and loop independent of application sessions and storage', () => {
   const boundaries: Record<string, string[]> = {
-    'main/services/agent-loop.ts': ['main/domain/'],
+    'main/services/agent-loop.ts': ['main/domain/', 'main/services/tool-executor.ts'],
+    'main/services/tool-executor.ts': ['main/domain/'],
     'main/services/agent.ts': ['main/domain/', 'main/services/agent-loop.ts', 'main/infrastructure/tool-schema.ts'],
     'main/services/agent-session.ts': ['shared/', 'main/domain/', 'main/services/agent.ts', 'main/services/state-service.ts'],
     'main/services/agent-sessions.ts': ['shared/', 'main/domain/', 'main/services/agent-session.ts', 'main/services/state-service.ts']

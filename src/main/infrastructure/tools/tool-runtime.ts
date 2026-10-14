@@ -1,12 +1,13 @@
 import { rmSync } from 'node:fs'
 import { isAbsolute } from 'node:path'
-import { ToolExecutionError, type AgentTool, type AgentToolResult, type ToolDefinition, type ToolWorkspace } from '../../domain/llm'
+import { ToolExecutionError, type AgentTool, type AgentToolResult, type ToolDefinition, type ToolExecutionMode, type ToolWorkspace } from '../../domain/llm'
 
 /** 本次执行固定的目录与应用退出时清理的临时资源，不包含具体工具逻辑。 */
 export interface ToolExecutionContext { readonly cwd: string; readonly temporaryDirectories: Set<string> }
 
 /** 独立本机工具声明；运行层提供上下文后转换为 Agent 已有的工具契约。 */
 export interface WorkspaceTool<TDetails = unknown> extends ToolDefinition {
+  executionMode?: ToolExecutionMode
   execute(args: Record<string, unknown>, signal: AbortSignal, context: ToolExecutionContext): Promise<AgentToolResult<TDetails>>
 }
 
@@ -20,7 +21,7 @@ export class ToolRuntime implements ToolWorkspace {
 
   /** 绑定任意本机工具，执行时捕获 cwd，并统一检查取消和转换系统错误。 */
   bind(tool: WorkspaceTool): AgentTool {
-    return { name: tool.name, description: tool.description, parameters: structuredClone(tool.parameters), execute: async (args, signal) => {
+    return { name: tool.name, description: tool.description, parameters: structuredClone(tool.parameters), executionMode: tool.executionMode, execute: async (args, signal) => {
       signal.throwIfAborted()
       const cwd = this.directory
       if (!cwd || !isAbsolute(cwd)) throw new ToolExecutionError('请先选择工作文件夹。旧附件没有目录路径时需要重新选择。')

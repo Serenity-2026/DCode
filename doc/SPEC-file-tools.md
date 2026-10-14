@@ -19,6 +19,8 @@
 
 新增本机工具时，在独立文件导出实现 WorkspaceTool 的类，并在 bootstrap 的数组中创建实例注册。无需修改其他工具、ToolRuntime、Agent 或 AgentLoop。不需要工作目录的工具可以直接实现 AgentTool 注入 Agent。暂不引入基类继承、动态扫描、插件加载器或依赖注入框架。
 
+工具可声明只用于本地执行的 executionMode。ReadTool 为 parallel，BashTool、EditTool、WriteTool 为 sequential；未声明时默认串行。ToolRuntime.bind 与 Agent 注册保留该属性，模型只接收 name、description、parameters。ToolExecutor 将连续并行调用合组、串行调用各自成组，组间按源顺序等待；详见 `SPEC-tool-executor.md`。文件读取版本校验尚未实现，同路径修改仍使用既有队列。
+
 ## 行为
 
 - `read({ path, offset?, limit? })`：offset 为从 1 开始的整数，limit 为正整数。文本只读取有效 UTF-8，输出最多 2000 行或 50 KiB，优先保留完整行，返回可继续读取的 offset；单行超限时提示改用 bash。支持 PNG/JPEG/GIF/WebP 图片，以独立图片块传给模型；不增加图片缩放、BMP 转换或模型视觉能力猜测。
@@ -33,7 +35,7 @@
 2026-10-14 核对 pi 最新发布为 [v1.2.0](https://github.com/earendil-works/pi/releases/tag/v1.2.0)，参考其 [AgentToolResult](https://github.com/earendil-works/pi/blob/v1.2.0/packages/agent/src/types.ts) 与 [执行循环](https://github.com/earendil-works/pi/blob/v1.2.0/packages/agent/src/agent-loop.ts)，自行实现当前需要的子集，不引入 pi 依赖。
 
 - AgentTool 和 WorkspaceTool 的 execute 统一返回 `Promise<AgentToolResult<TDetails>>`，取消字符串兼容。完整结果契约包含 `content` 文本/图片内容块数组、`details`（没有附加信息时为 undefined）及可选 `structuredContent`、`usage`、`isError`、`terminate`，与 pi v1.2.0 的字段保持一致；不增加进度回调。
-- Loop 以 `isError === true` 确定返回结果的失败状态；工具抛出异常时生成错误结果，取消仍终止任务。最终 toolResult 含必填 isError，工具结束事件携带同一结果。内容块与 details 被复制，工具返回对象、订阅事件与 Agent 状态互不污染。
+- ToolExecutor 以 `isError === true` 确定返回结果的失败状态；工具抛出异常时生成错误结果，取消仍终止任务。最终 toolResult 含必填 isError，工具结束事件携带同一结果。内容块与 details 被复制，工具返回对象、订阅事件与 Agent 状态互不污染。
 - read 在 details 返回文本总行数、下一页 offset 和截断行数/字节数，图片直接作为 content 中的 image 块；write 返回文本块且 details 为 undefined；edit 返回文本块并在 details 保存有界 diff；bash 返回退出码、超时状态以及可选截断信息和完整日志路径。bash 的非零退出与工具超时返回 isError: true，仍保留输出和 details；进程/日志系统故障继续抛出预期异常。
 - structuredContent 为 JsonValue，支持 JSON 对象、数组、基本值和 null；usage 沿用 pi 的 token、缓存、推理及成本字段，描述工具自身的调用用量，不加入主对话上下文估算。两个字段都随工具结果保留在 Agent 状态和事件，成功与失败均不丢失。
 - terminate 是整批工具结束后的终止提示：本轮所有工具结果都为 terminate: true 才结束，不再请求模型；混合结果、未知工具、非法参数和抛出的异常不触发该规则。仍先完成整批执行和结果事件，取消始终优先于正常终止。
