@@ -50,8 +50,10 @@ StateRepository 保持一份 schema 3 的 JSON 数据和一个事务边界，避
 
 ## 错误处理边界
 
-- app 创建唯一的 ApplicationErrors，通过 domain 的 ErrorBoundary 契约注入窗口与会话。启动、激活、页面加载、关闭、退出、资源清理和脱离 IPC 的后台任务均在此入口捕获同步异常与 Promise 拒绝；日志、原生错误提示及提示失败的诊断只在此实现。
-- 关闭/退出失败时，调用方只恢复关闭状态以允许重试；错误入口负责报告。应用退出成功后先允许窗口关闭，避免窗口再次等待同一轮保存。
+- 参考 pi v1.2.0 的 [Agent 生命周期](https://github.com/earendil-works/pi/blob/v1.2.0/packages/agent/src/agent.ts#L523)、[工具循环](https://github.com/earendil-works/pi/blob/v1.2.0/packages/agent/src/agent-loop.ts#L821) 和 [交互入口](https://github.com/earendil-works/pi/blob/v1.2.0/packages/coding-agent/src/modes/interactive/interactive-mode.ts#L1251)，在有处理职责的边界显式捕获异常，不引入通用任务执行包装器。
+- app 的 reportError 函数统一记录日志、显示原生错误提示，并诊断提示失败。启动、激活、页面加载、关闭、退出及清理入口直接使用 try/catch，异步操作使用 await；窗口和会话通过普通回调使用应用报告能力，不依赖执行包装器或额外领域接口。
+- 后台生成在启动后立即返回 Snapshot，其 Promise 先捕获异常以恢复会话；恢复仍失败时继续抛出，再由最终 catch 调用 app 注入的报告回调。同步请求沿调用链抛到 IPC；不得丢弃未接住拒绝的后台 Promise。
+- 关闭/退出失败时，调用方恢复关闭状态以允许重试，并调用 reportError。应用退出成功后先允许窗口关闭，避免窗口再次等待同一轮保存。
 - IPC 保留 IpcRouter 的统一 Result 包装，由页面呈现请求错误，不再额外弹原生错误框；同步 send 失败仍沿此路径返回。
 - 底层只捕获需要恢复或转换的错误：事务回滚、Agent 释放运行占用并记录失败、工具错误转 toolResult、尝试全部临时目录以及会话失败后的保存/推送。会话恢复成功通过聊天消息呈现；恢复仍失败则抛出汇总错误，交给应用错误入口报告。底层不定义日志或原生提示策略。
 - 不用进程全局 uncaughtException 替代上述边界：它无法恢复特定会话、释放对应资源或保证异步任务已经保存。

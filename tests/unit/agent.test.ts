@@ -5,7 +5,7 @@ import { AgentSession } from '../../src/main/services/agent-session'
 import { StateRepository } from '../../src/main/repositories/state-repository'
 import { ToolExecutionError, type AgentTool, type AgentToolResult, type Usage } from '../../src/main/domain/llm'
 import type { StreamEvent, ModelApi } from '../../src/shared/types'
-import { create, cleanup, createAgent, config, taskBoundary } from './helpers'
+import { create, cleanup, createAgent, config, unexpectedTaskError } from './helpers'
 import { anthropicResponse, echoTool, openAIResponse, testCall } from './llm-fixtures'
 
 afterEach(() => { vi.unstubAllGlobals(); cleanup() })
@@ -209,7 +209,7 @@ it('keeps the existing session lifecycle and text persistence when tools are use
   vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(openAIResponse('', [testCall('a')])).mockResolvedValueOnce(openAIResponse('最终正文')))
   let finish!: (event: StreamEvent) => void
   const done = new Promise<StreamEvent>(resolve => { finish = resolve })
-  const session = new AgentSession(store, event => { if (event.message.status !== 'streaming') finish(event) }, createAgent([echoTool]), taskBoundary())
+  const session = new AgentSession(store, event => { if (event.message.status !== 'streaming') finish(event) }, createAgent([echoTool]), unexpectedTaskError)
   session.send({ content: '请调用工具' }, config)
   expect((await done).message).toMatchObject({ status: 'complete', content: '最终正文' })
   expect(session.busy).toBe(false)

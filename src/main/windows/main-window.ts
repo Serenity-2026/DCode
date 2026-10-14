@@ -2,15 +2,14 @@ import { BrowserWindow } from 'electron'
 import { channels } from '../../shared/channels'
 import type { StreamEvent } from '../../shared/types'
 import { AgentSessions } from '../services/agent-sessions'
-import type { ErrorBoundary } from '../domain/ports'
 
 /** 主窗口生命周期，依赖 AgentSessions 安全停止全部任务，资源路径由启动装配提供；不注册业务 IPC。 */
 export class MainWindow {
   private window: BrowserWindow | null = null
   private closing: 'open' | 'stopping' | 'ready' = 'open'
 
-  /** 注入生成服务、构建产物路径与应用错误边界，创建窗口前不加载页面。 */
-  constructor(private session: AgentSessions, private paths: { icon: string; preload: string; renderer: string }, private errors: ErrorBoundary) {}
+  /** 注入生成服务、构建产物路径与应用报告回调，创建窗口前不加载页面。 */
+  constructor(private session: AgentSessions, private paths: { icon: string; preload: string; renderer: string }, private reportError: (title: string, error: unknown) => void) {}
 
   /** 返回当前窗口引用，供 IPC 来源校验和原生对话框使用。 */
   get current(): BrowserWindow | null { return this.window }
@@ -41,21 +40,30 @@ export class MainWindow {
     this.window.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
     this.window.once('ready-to-show', () => this.window?.show())
     // 关闭前停止并保存全部任务；空闲会话也重试此前失败的保存。
-    this.window.on('close', event => {
+    this.window.on('close', async event => {
       if (this.closing !== 'ready') {
         event.preventDefault()
         if (this.closing === 'stopping') return
         this.closing = 'stopping'
-        this.errors.run('任务停止失败', async () => {
+        try {
           await this.session.stopAll()
           this.closing = 'ready'
           this.window?.close()
-        }, () => { this.closing = 'open' })
+        } catch (error) {
+          this.closing = 'open'
+          this.reportError('任务停止失败', error)
+        }
       }
     })
     this.window.on('closed', () => { this.window = null })
-    this.errors.run('窗口加载失败', () => process.env.ELECTRON_RENDERER_URL
-      ? this.window!.loadURL(process.env.ELECTRON_RENDERER_URL)
-      : this.window!.loadFile(this.paths.renderer))
+    void this.loadPage()
+  }
+
+  /** 等待页面加载并捕获拒绝，创建窗口的同步调用方无需等待页面完成。 */
+  private async loadPage(): Promise<void> {
+    try {
+      if (process.env.ELECTRON_RENDERER_URL) await this.window!.loadURL(process.env.ELECTRON_RENDERER_URL)
+      else await this.window!.loadFile(this.paths.renderer)
+    } catch (error) { this.reportError('窗口加载失败', error) }
   }
 }

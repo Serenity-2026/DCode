@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { Auth } from '../../src/main/services/auth-service'
 import { Models } from '../../src/main/services/model-service'
 import { StateService } from '../../src/main/services/state-service'
-import type { ErrorBoundary, SecretCodec } from '../../src/main/domain/ports'
+import type { SecretCodec } from '../../src/main/domain/ports'
 import type { ModelConfig } from '../../src/main/domain/model-config'
 import type { AgentTool } from '../../src/main/domain/llm'
 import { AgentLoop } from '../../src/main/services/agent-loop'
@@ -18,10 +18,8 @@ export function createAgent(tools: AgentTool[] = []): Agent {
   return new Agent(loop, tools)
 }
 
-/** 会话测试只观察交给顶层的拒绝；未预期错误继续抛出，由测试运行器判定失败。 */
-export function taskBoundary(report: (error: unknown) => void = error => { throw error }): ErrorBoundary {
-  return { run: (_title, operation) => { void Promise.resolve().then(operation).catch(report) } }
-}
+/** 会话测试中未预期的报告继续抛出，由测试运行器判定失败。 */
+export function unexpectedTaskError(error: unknown): void { throw error }
 
 /** 仅用于单元测试的替身；Electron E2E 会验证真实 safeStorage，不在生产降级加密。 */
 export const secrets: SecretCodec = {

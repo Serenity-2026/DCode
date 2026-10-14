@@ -3,7 +3,6 @@ import { contextMessages, conversationDirectory } from '../../shared/context'
 import type { AgentEvent } from '../domain/agent'
 import { toLlmMessages, type LlmMessage, type ToolWorkspace } from '../domain/llm'
 import type { ModelConfig } from '../domain/model-config'
-import type { ErrorBoundary } from '../domain/ports'
 import { Agent } from './agent'
 import { StateService } from './state-service'
 
@@ -12,8 +11,8 @@ export class AgentSession {
   // 用 ID 定位当前仓库对象，其他会话的事务回滚不会使流式更新写到旧引用。
   private target?: { conversationId: string; messageId: string; lastSave: number; lastEmit: number }
 
-  /** 订阅 Agent 事件，后台任务交给应用错误边界；本层只恢复会话状态，不持有取消控制器。 */
-  constructor(private store: StateService, private emit: (event: StreamEvent) => void, private readonly agent: Agent, private readonly errors: ErrorBoundary, private readonly workspace?: ToolWorkspace) {
+  /** 订阅 Agent 事件并注入应用报告回调；本层只恢复会话状态，不持有取消控制器。 */
+  constructor(private store: StateService, private emit: (event: StreamEvent) => void, private readonly agent: Agent, private readonly reportError: (error: unknown) => void, private readonly workspace?: ToolWorkspace) {
     //Agent 有事件时，调用该函数；这个函数再把事件交给 onEvent() 处理。
     this.agent.subscribe(event => this.onEvent(event))
   }
@@ -35,8 +34,9 @@ export class AgentSession {
       const prompt = context.pop() as Extract<LlmMessage, { role: 'user' }>
       this.agent.replaceMessages(context)
       // 常规运行错误由 agent_end 保存；启动或收尾异常也必须投影到固定回复。
-      const pending = this.agent.prompt(config, prompt).catch(error => this.finishFailure(target, error))
-      this.errors.run('任务收尾失败', () => pending)
+      void this.agent.prompt(config, prompt)
+        .catch(error => this.finishFailure(target, error))
+        .catch(error => this.reportError(error))
     } catch (error) {
       this.finishFailure(target, error)
       throw error

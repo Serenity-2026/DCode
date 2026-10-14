@@ -21,7 +21,7 @@ import { Models } from '../services/model-service'
 import { DesktopService } from '../services/desktop-service'
 import { IpcRouter } from '../ipc/ipc-router'
 import { MainWindow } from '../windows/main-window'
-import { ApplicationErrors } from './application-errors'
+import { reportError } from './report-error'
 import { registerAuthController } from '../controllers/auth-controller'
 import { registerModelController } from '../controllers/model-controller'
 import { registerChatController } from '../controllers/chat-controller'
@@ -29,14 +29,33 @@ import { registerStateController } from '../controllers/state-controller'
 import { registerDesktopController } from '../controllers/desktop-controller'
 
 /** 应用装配入口，依次连接 Repository、Service、Controller 和窗口，集中管理 ready、激活和退出。 */
-export function startApplication(): void {
-  const errors = new ApplicationErrors()
+export async function startApplication(): Promise<void> {
   const here = dirname(fileURLToPath(import.meta.url))
   const icon = app.isPackaged ? join(process.resourcesPath, 'icon.png') : join(here, '../../build/icon.png')
   let session: AgentSessions | undefined
   let windows: MainWindow | undefined
   let quitting: 'idle' | 'stopping' | 'ready' = 'idle'
-  errors.run('DCode 无法启动', async () => {
+  // 退出前停止并保存任务；重复退出事件仍等待正在进行的收尾。
+  app.on('before-quit', async event => {
+    if (session && quitting !== 'ready') {
+      event.preventDefault()
+      if (quitting === 'stopping') return
+      quitting = 'stopping'
+      try {
+        await session.stopAll()
+        quitting = 'ready'
+        windows?.allowClose()
+        app.quit()
+      } catch (error) {
+        quitting = 'idle'
+        reportError('任务停止失败', error)
+      }
+    }
+  })
+  // macOS 关闭窗口后保留应用，其他平台关闭最后一个窗口即退出。
+  app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
+
+  try {
     if (process.env.DCODE_USER_DATA_DIR) app.setPath('userData', process.env.DCODE_USER_DATA_DIR)
     app.setName('DCode')
     await app.whenReady()
@@ -53,13 +72,16 @@ export function startApplication(): void {
       const toolRuntime = new ToolRuntime()
       const tools = [new ReadTool(), new BashTool(), new EditTool(), new WriteTool()].map(tool => toolRuntime.bind(tool))
       const agent = new Agent(loop, tools)
-      return { session: new AgentSession(state, event => windows?.publish(event), agent, errors, toolRuntime), dispose: () => toolRuntime.dispose() }
+      return { session: new AgentSession(state, event => windows?.publish(event), agent, error => reportError('任务收尾失败', error), toolRuntime), dispose: () => toolRuntime.dispose() }
     })
-    app.on('will-quit', () => errors.run('临时资源清理失败', () => generation.dispose()))
+    app.on('will-quit', () => {
+      try { generation.dispose() }
+      catch (error) { reportError('临时资源清理失败', error) }
+    })
     session = generation
     const mainWindow = new MainWindow(generation, {
       icon, preload: join(here, '../preload/index.cjs'), renderer: join(here, '../renderer/index.html')
-    }, errors)
+    }, reportError)
     windows = mainWindow
     const desktop = new DesktopService(state, new ElectronDesktop(() => mainWindow.current))
     const router = new IpcRouter(() => mainWindow.current)
@@ -69,23 +91,12 @@ export function startApplication(): void {
     registerChatController(router, generation, models, state)
     registerDesktopController(router, desktop)
     mainWindow.create()
-    app.on('activate', () => errors.run('窗口创建失败', () => { if (!mainWindow.current) mainWindow.create() }))
-  }, () => app.quit())
-
-  // 退出前停止并保存任务；重复退出事件仍等待正在进行的收尾。
-  app.on('before-quit', event => {
-    if (session && quitting !== 'ready') {
-      event.preventDefault()
-      if (quitting === 'stopping') return
-      quitting = 'stopping'
-      errors.run('任务停止失败', async () => {
-        await session!.stopAll()
-        quitting = 'ready'
-        windows?.allowClose()
-        app.quit()
-      }, () => { quitting = 'idle' })
-    }
-  })
-  // macOS 关闭窗口后保留应用，其他平台关闭最后一个窗口即退出。
-  app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
+    app.on('activate', () => {
+      try { if (!mainWindow.current) mainWindow.create() }
+      catch (error) { reportError('窗口创建失败', error) }
+    })
+  } catch (error) {
+    reportError('DCode 无法启动', error)
+    app.quit()
+  }
 }

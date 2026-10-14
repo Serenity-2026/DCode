@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { MainWindow } from '../../src/main/windows/main-window'
-import { ApplicationErrors } from '../../src/main/app/application-errors'
+import { reportError } from '../../src/main/app/report-error'
 import type { AgentSessions } from '../../src/main/services/agent-sessions'
 
 const electron = vi.hoisted(() => ({ create: vi.fn(), showError: vi.fn() }))
@@ -24,7 +24,7 @@ function fixture(loadError?: Error) {
   electron.create.mockImplementation(function () { return window })
   if (loadError) window.loadFile.mockRejectedValue(loadError)
   const stopAll = vi.fn()
-  const main = new MainWindow({ stopAll } as unknown as AgentSessions, { icon: '', preload: '', renderer: '' }, new ApplicationErrors())
+  const main = new MainWindow({ stopAll } as unknown as AgentSessions, { icon: '', preload: '', renderer: '' }, reportError)
   main.create()
   return { main, window, stopAll, diagnostic }
 }
