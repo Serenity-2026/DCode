@@ -7,7 +7,7 @@ import { AgentSessions } from '../../src/main/services/agent-sessions'
 import { registerStateController } from '../../src/main/controllers/state-controller'
 import { registerAuthController } from '../../src/main/controllers/auth-controller'
 import { channels } from '../../src/shared/channels'
-import { cleanup, create, createAgent } from './helpers'
+import { cleanup, create, createAgent, taskBoundary } from './helpers'
 
 const handlers = vi.hoisted(() => new Map<string, (event: IpcMainInvokeEvent, input?: unknown) => Promise<unknown>>())
 vi.mock('electron', () => ({ ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, input?: unknown) => Promise<unknown>) => handlers.set(channel, handler) } }))
@@ -58,7 +58,7 @@ it('rejects overlapping operations and releases its guard after success or failu
 
 it('routes conversation navigation and stopping with explicit conversation identity', async () => {
   const { store, models } = await create()
-  const sessions = new AgentSessions(store, () => ({ session: new AgentSession(store, () => {}, createAgent()), dispose: () => {} }))
+  const sessions = new AgentSessions(store, () => ({ session: new AgentSession(store, () => {}, createAgent(), taskBoundary()), dispose: () => {} }))
   const { conversation } = store.begin('原会话', false, 'test')
   const stop = vi.spyOn(sessions, 'stop').mockResolvedValue(store.snapshot())
   const { window, event } = source()
@@ -72,7 +72,7 @@ it('routes conversation navigation and stopping with explicit conversation ident
 
 it('waits for all tasks before revoking authentication', async () => {
   const { store, auth } = await create()
-  const sessions = new AgentSessions(store, () => ({ session: new AgentSession(store, () => {}, createAgent()), dispose: () => {} }))
+  const sessions = new AgentSessions(store, () => ({ session: new AgentSession(store, () => {}, createAgent(), taskBoundary()), dispose: () => {} }))
   let release!: () => void
   const pending = new Promise<ReturnType<typeof store.snapshot>>(resolve => { release = () => resolve(store.snapshot()) })
   const stopAll = vi.spyOn(sessions, 'stopAll').mockReturnValue(pending)

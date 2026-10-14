@@ -10,7 +10,7 @@ import { ReadTool } from '../../src/main/infrastructure/tools/read'
 import { readAttachments } from '../../src/main/infrastructure/attachments'
 import type { AssistantMessage, LlmDelta, LlmMessage, ModelStream } from '../../src/main/domain/llm'
 import type { StreamEvent } from '../../src/shared/types'
-import { create, cleanup, config } from './helpers'
+import { create, cleanup, config, taskBoundary } from './helpers'
 
 const managers: AgentSessions[] = []
 afterEach(async () => {
@@ -46,7 +46,7 @@ async function fixture() {
     const runtime = new ToolRuntime()
     const agent = new Agent(loop, [runtime.bind(new ReadTool())])
     agents.push(agent)
-    return { session: new AgentSession(base.store, event => events.push(event), agent, runtime), dispose: () => runtime.dispose() }
+    return { session: new AgentSession(base.store, event => events.push(event), agent, taskBoundary(), runtime), dispose: () => runtime.dispose() }
   })
   managers.push(sessions)
   for (const name of ['A', 'B']) {
@@ -168,7 +168,7 @@ it('attempts cleanup of every conversation and reports resource cleanup failures
   const second = vi.fn()
   const disposers = [first, second]
   const sessions = new AgentSessions(store, () => ({
-    session: new AgentSession(store, () => {}, new Agent(new AgentLoop(async () => ({ role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text: 'done' }] })), [])),
+    session: new AgentSession(store, () => {}, new Agent(new AgentLoop(async () => ({ role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text: 'done' }] })), []), taskBoundary()),
     dispose: disposers.shift()!
   }))
   managers.push(sessions)

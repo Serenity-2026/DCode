@@ -1,15 +1,16 @@
-import { BrowserWindow, dialog } from 'electron'
+import { BrowserWindow } from 'electron'
 import { channels } from '../../shared/channels'
 import type { StreamEvent } from '../../shared/types'
 import { AgentSessions } from '../services/agent-sessions'
+import type { ErrorBoundary } from '../domain/ports'
 
 /** 主窗口生命周期，依赖 AgentSessions 安全停止全部任务，资源路径由启动装配提供；不注册业务 IPC。 */
 export class MainWindow {
   private window: BrowserWindow | null = null
   private closing: 'open' | 'stopping' | 'ready' = 'open'
 
-  /** 注入生成服务与构建产物路径，创建窗口前不加载页面。 */
-  constructor(private session: AgentSessions, private paths: { icon: string; preload: string; renderer: string }) {}
+  /** 注入生成服务、构建产物路径与应用错误边界，创建窗口前不加载页面。 */
+  constructor(private session: AgentSessions, private paths: { icon: string; preload: string; renderer: string }, private errors: ErrorBoundary) {}
 
   /** 返回当前窗口引用，供 IPC 来源校验和原生对话框使用。 */
   get current(): BrowserWindow | null { return this.window }
@@ -45,14 +46,16 @@ export class MainWindow {
         event.preventDefault()
         if (this.closing === 'stopping') return
         this.closing = 'stopping'
-        void this.session.stopAll().then(() => { this.closing = 'ready'; this.window?.close() }, error => {
-          this.closing = 'open'
-          dialog.showErrorBox('任务停止失败', error instanceof Error ? error.message : '无法保存任务，请重试。')
-        })
+        this.errors.run('任务停止失败', async () => {
+          await this.session.stopAll()
+          this.closing = 'ready'
+          this.window?.close()
+        }, () => { this.closing = 'open' })
       }
     })
     this.window.on('closed', () => { this.window = null })
-    if (process.env.ELECTRON_RENDERER_URL) void this.window.loadURL(process.env.ELECTRON_RENDERER_URL)
-    else void this.window.loadFile(this.paths.renderer)
+    this.errors.run('窗口加载失败', () => process.env.ELECTRON_RENDERER_URL
+      ? this.window!.loadURL(process.env.ELECTRON_RENDERER_URL)
+      : this.window!.loadFile(this.paths.renderer))
   }
 }
