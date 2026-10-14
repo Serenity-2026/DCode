@@ -7,6 +7,7 @@ import type { ToolExecutionContext, WorkspaceTool } from './tool-runtime'
 /** 独立文件写入工具；创建父目录并完整写入，共用同路径修改队列。 */
 export class WriteTool implements WorkspaceTool<undefined> {
   readonly name = 'write'
+  readonly executionMode = 'sequential'
   readonly description = 'Create or completely overwrite a UTF-8 file. Automatically creates parent directories. Use edit for targeted changes.'
   readonly parameters = { type: 'object', additionalProperties: false, required: ['path', 'content'], properties: {
     path: pathSchema, content: { type: 'string' }

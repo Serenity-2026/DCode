@@ -13,6 +13,7 @@ export interface BashToolDetails { exitCode: number | null; timedOut: boolean; t
 /** 独立命令工具；声明 bash 参数，临时输出目录交由公共运行层登记和清理。 */
 export class BashTool implements WorkspaceTool<BashToolDetails> {
   readonly name = 'bash'
+  readonly executionMode = 'sequential'
   readonly description = 'Execute a bash command in the working directory. Returns stdout/stderr, keeping the last 2000 lines or 50 KiB. Truncated output is saved to a temporary file. Optional timeout in seconds; no default timeout.'
   readonly parameters = { type: 'object', additionalProperties: false, required: ['command'], properties: {
     command: { type: 'string', minLength: 1 }, timeout: { type: 'number', exclusiveMinimum: 0, maximum: 2_147_483.647 }

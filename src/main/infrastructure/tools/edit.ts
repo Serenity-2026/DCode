@@ -13,6 +13,7 @@ export interface EditToolDetails { diff: string }
 /** 独立批量编辑工具；原文统一校验后写入，文本计算与磁盘操作保持在本模块。 */
 export class EditTool implements WorkspaceTool<EditToolDetails> {
   readonly name = 'edit'
+  readonly executionMode = 'sequential'
   readonly description = 'Edit one UTF-8 file using edits: [{oldText, newText}]. Each oldText must identify a unique, non-overlapping region of the original file. All replacements are validated before writing. Returns a unified diff.'
   readonly parameters = { type: 'object', additionalProperties: false, required: ['path', 'edits'], properties: {
     path: pathSchema, edits: { type: 'array', minItems: 1, items: { type: 'object', additionalProperties: false, required: ['oldText', 'newText'], properties: { oldText: { type: 'string', minLength: 1 }, newText: { type: 'string' } } } }

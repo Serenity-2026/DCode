@@ -19,6 +19,7 @@ function imageType(data: Buffer): ToolImage['mimeType'] | undefined {
 /** 独立文件读取工具；声明参数并使用 Node 读取，运行目录由公共执行上下文提供。 */
 export class ReadTool implements WorkspaceTool<ReadToolDetails | undefined> {
   readonly name = 'read'
+  readonly executionMode = 'parallel'
   readonly description = 'Read UTF-8 text or PNG/JPEG/GIF/WebP images. Text returns at most 2000 lines or 50 KiB. Use 1-based offset and limit to continue reading.'
   readonly parameters = { type: 'object', additionalProperties: false, required: ['path'], properties: {
     path: pathSchema, offset: { type: 'integer', minimum: 1 }, limit: { type: 'integer', minimum: 1 }
