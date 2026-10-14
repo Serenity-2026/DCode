@@ -14,7 +14,7 @@ export class AgentSessions {
   /** 注入实例工厂，只有会话第一次发送时才创建运行对象。 */
   constructor(private readonly store: StateService, private readonly create: () => SessionRuntime) {}
 
-  /** 窗口关闭与应用退出需要知道是否还有任何任务未完成保存。 */
+  /** 汇总运行状态，供调用方判断是否仍有任务未结束。 */
   get busy(): boolean { return [...this.sessions.values()].some(runtime => runtime.session.busy) }
   /** 会话级互斥和删除保护不受当前导航位置影响。 */
   isBusy(id: string): boolean { return this.sessions.get(id)?.session.busy || false }
@@ -49,12 +49,14 @@ export class AgentSessions {
   stopAll(): Promise<Snapshot> {
     if (this.stopping) return this.stopping
     const pending = Promise.allSettled([...this.sessions.values()].map(runtime => runtime.session.stop())).then(results => {
-      const failed = results.find(result => result.status === 'rejected')
-      if (failed?.status === 'rejected') throw failed.reason
+      const errors = results.flatMap(result => result.status === 'rejected' ? [result.reason instanceof Error ? result.reason.message : '任务停止失败。'] : [])
+      if (errors.length) throw new Error(errors.join('\n'))
       return this.store.snapshot()
     })
     this.stopping = pending
-    void pending.finally(() => { if (this.stopping === pending) this.stopping = undefined }).catch(() => {})
+    const release = (): void => { if (this.stopping === pending) this.stopping = undefined }
+    // 只释放共享停止标记；原 pending 的错误仍由停止、关闭或退出调用方接收。
+    void pending.then(release, release)
     return pending
   }
 

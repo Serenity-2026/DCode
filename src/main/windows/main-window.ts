@@ -1,4 +1,4 @@
-import { BrowserWindow } from 'electron'
+import { BrowserWindow, dialog } from 'electron'
 import { channels } from '../../shared/channels'
 import type { StreamEvent } from '../../shared/types'
 import { AgentSessions } from '../services/agent-sessions'
@@ -6,12 +6,16 @@ import { AgentSessions } from '../services/agent-sessions'
 /** 主窗口生命周期，依赖 AgentSessions 安全停止全部任务，资源路径由启动装配提供；不注册业务 IPC。 */
 export class MainWindow {
   private window: BrowserWindow | null = null
+  private closing: 'open' | 'stopping' | 'ready' = 'open'
 
   /** 注入生成服务与构建产物路径，创建窗口前不加载页面。 */
   constructor(private session: AgentSessions, private paths: { icon: string; preload: string; renderer: string }) {}
 
   /** 返回当前窗口引用，供 IPC 来源校验和原生对话框使用。 */
   get current(): BrowserWindow | null { return this.window }
+
+  /** 应用已统一停止并保存任务后，允许退出直接关闭窗口，避免再次拦截退出。 */
+  allowClose(): void { this.closing = 'ready' }
 
   /** 将业务流事件送给有效页面；关闭后不发送，重新创建后自动使用新窗口。 */
   publish(event: StreamEvent): void {
@@ -23,6 +27,7 @@ export class MainWindow {
    * 依赖已初始化的 AgentSessions：关闭窗口前停止所有任务并保存结果；同时限制导航、新窗口与权限请求。
    */
   create(): void {
+    this.closing = 'open'
     this.window = new BrowserWindow({
       width: 1280, height: 860, minWidth: 820, minHeight: 620,
       title: 'DCode', backgroundColor: '#fcfcfa', show: false, icon: this.paths.icon,
@@ -34,11 +39,16 @@ export class MainWindow {
     this.window.webContents.on('will-navigate', event => event.preventDefault())
     this.window.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
     this.window.once('ready-to-show', () => this.window?.show())
-    // 生成尚未结束时先等待 AgentSessions.stopAll 收尾，再真正关闭窗口，避免丢失部分回复。
+    // 关闭前停止并保存全部任务；空闲会话也重试此前失败的保存。
     this.window.on('close', event => {
-      if (this.session.busy) {
+      if (this.closing !== 'ready') {
         event.preventDefault()
-        void this.session.stopAll().finally(() => this.window?.close())
+        if (this.closing === 'stopping') return
+        this.closing = 'stopping'
+        void this.session.stopAll().then(() => { this.closing = 'ready'; this.window?.close() }, error => {
+          this.closing = 'open'
+          dialog.showErrorBox('任务停止失败', error instanceof Error ? error.message : '无法保存任务，请重试。')
+        })
       }
     })
     this.window.on('closed', () => { this.window = null })

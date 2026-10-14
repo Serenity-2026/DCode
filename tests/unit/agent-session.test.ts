@@ -6,7 +6,7 @@ import type { StreamEvent } from '../../src/shared/types'
 import { create, cleanup, config, createAgent } from './helpers'
 import { echoTool, openAIResponse, testCall } from './llm-fixtures'
 
-afterEach(() => { vi.unstubAllGlobals(); cleanup() })
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); cleanup() })
 
 it('blocks concurrent sends and saves partial content on cancellation', async () => {
   const { store, path } = await create()
@@ -94,4 +94,62 @@ it('finishes session persistence when a tool never cooperates with cancellation'
   expect(new StateRepository(path).state.conversations[0].messages[1].status).toBe('stopped')
   expect(session.busy).toBe(false)
   expect(fetch).toHaveBeenCalledOnce()
+})
+
+it('persists setup failures instead of leaving a streaming placeholder', async () => {
+  const { store, path } = await create()
+  const agent = createAgent()
+  const emit = vi.fn()
+  const session = new AgentSession(store, emit, agent, { setDirectory: () => { throw new Error('目录设置失败') } })
+  expect(() => session.send({ content: '开始' }, config)).toThrow('目录设置失败')
+  expect(emit.mock.calls.at(-1)?.[0].message).toMatchObject({ status: 'error', error: '目录设置失败' })
+  expect(new StateRepository(path).state.conversations[0].messages[1]).toMatchObject({ status: 'error', error: '目录设置失败' })
+  expect(session.busy).toBe(false)
+})
+
+it('reports failed final persistence and retries saving on an idle stop', async () => {
+  const { store, path } = await create()
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(openAIResponse('部分正文')))
+  const agent = createAgent()
+  const emit = vi.fn()
+  const report = vi.fn()
+  const session = new AgentSession(store, emit, agent, undefined, report)
+  session.send({ content: '开始' }, config)
+  const save = vi.spyOn(store, 'save').mockImplementation(() => { throw new Error('磁盘已满') })
+  await expect(agent.waitForIdle()).rejects.toThrow('磁盘已满')
+  expect(agent.state.outcome).toBe('error')
+  expect(emit.mock.calls.at(-1)?.[0].message).toMatchObject({ status: 'error', content: '部分正文', error: expect.stringContaining('保存失败：磁盘已满') })
+  expect(report).toHaveBeenCalledOnce()
+  expect(report.mock.calls[0][0].message).toContain('磁盘已满')
+  expect(session.busy).toBe(false)
+  save.mockRestore()
+  await session.stop()
+  expect(new StateRepository(path).state.conversations[0].messages[1]).toMatchObject({ status: 'error', content: '部分正文' })
+})
+
+it('reports failed terminal delivery and persists the error without an unhandled task rejection', async () => {
+  const { store, path } = await create()
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(openAIResponse('已完成正文')))
+  const agent = createAgent()
+  const report = vi.fn()
+  const session = new AgentSession(store, event => { if (event.message.status !== 'streaming') throw new Error('界面发送失败') }, agent, undefined, report)
+  session.send({ content: '开始' }, config)
+  await expect(agent.waitForIdle()).rejects.toThrow('界面发送失败')
+  expect(report).toHaveBeenCalledOnce()
+  expect(report.mock.calls[0][0].message).toContain('界面通知失败：界面发送失败')
+  expect(new StateRepository(path).state.conversations[0].messages[1]).toMatchObject({ status: 'error', error: '界面发送失败' })
+  await session.stop()
+  expect(new StateRepository(path).state.conversations[0].messages[1].error).toContain('界面通知失败')
+})
+
+it('keeps a diagnostic fallback when the application error reporter itself fails', async () => {
+  const { store } = await create()
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(openAIResponse('正文')))
+  const agent = createAgent()
+  const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {})
+  const session = new AgentSession(store, () => { throw new Error('推送失败') }, agent, undefined, () => { throw new Error('报告失败') })
+  session.send({ content: '开始' }, config)
+  await expect(agent.waitForIdle()).rejects.toThrow('推送失败')
+  expect(diagnostic).toHaveBeenCalledWith('无法报告 Agent 错误', expect.objectContaining({ message: '报告失败' }))
+  expect(session.busy).toBe(false)
 })

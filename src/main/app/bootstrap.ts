@@ -33,7 +33,7 @@ export function startApplication(): void {
   const icon = app.isPackaged ? join(process.resourcesPath, 'icon.png') : join(here, '../../build/icon.png')
   let session: AgentSessions | undefined
   let windows: MainWindow | undefined
-  let quitting = false
+  let quitting: 'idle' | 'stopping' | 'ready' = 'idle'
   if (process.env.DCODE_USER_DATA_DIR) app.setPath('userData', process.env.DCODE_USER_DATA_DIR)
   app.setName('DCode')
 
@@ -51,7 +51,7 @@ export function startApplication(): void {
       const toolRuntime = new ToolRuntime()
       const tools = [new ReadTool(), new BashTool(), new EditTool(), new WriteTool()].map(tool => toolRuntime.bind(tool))
       const agent = new Agent(loop, tools)
-      return { session: new AgentSession(state, event => windows?.publish(event), agent, toolRuntime), dispose: () => toolRuntime.dispose() }
+      return { session: new AgentSession(state, event => windows?.publish(event), agent, toolRuntime, error => dialog.showErrorBox('任务收尾失败', error.message)), dispose: () => toolRuntime.dispose() }
     })
     app.on('will-quit', () => {
       try { generation.dispose() }
@@ -76,12 +76,16 @@ export function startApplication(): void {
     app.quit()
   })
 
-  // 退出前等待生成服务保存；再次触发退出时不重复等待。
+  // 退出前停止并保存任务；重复退出事件仍等待正在进行的收尾。
   app.on('before-quit', event => {
-    if (session?.busy && !quitting) {
+    if (session && quitting !== 'ready') {
       event.preventDefault()
-      quitting = true
-      void session.stopAll().finally(() => app.quit())
+      if (quitting === 'stopping') return
+      quitting = 'stopping'
+      void session.stopAll().then(() => { quitting = 'ready'; windows?.allowClose(); app.quit() }, error => {
+        quitting = 'idle'
+        dialog.showErrorBox('任务停止失败', error instanceof Error ? error.message : '无法保存任务，请重试。')
+      })
     }
   })
   // macOS 关闭窗口后保留应用，其他平台关闭最后一个窗口即退出。

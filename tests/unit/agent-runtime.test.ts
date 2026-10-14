@@ -125,3 +125,35 @@ it('notifies terminal observers and clears busy even when a subscriber fails', a
   expect(agent.state.isStreaming).toBe(false)
   await agent.waitForIdle()
 })
+
+it('marks terminal-only observer failures as error and retains an earlier model error', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(openAIResponse('回答')).mockRejectedValueOnce(new Error('模型请求失败')))
+  const agent = createAgent()
+  agent.subscribe(event => { if (event.type === 'agent_end') throw new Error('终止通知失败') })
+  await expect(agent.prompt(config, { role: 'user', content: '问题' })).rejects.toThrow('终止通知失败')
+  expect(agent.state).toMatchObject({ outcome: 'error', errorMessage: '终止通知失败', isStreaming: false })
+  expect(agent.busy).toBe(false)
+  await expect(agent.prompt(config, { role: 'user', content: '再问' })).rejects.toThrow('模型请求失败\n任务收尾失败：终止通知失败')
+  expect(agent.busy).toBe(false)
+})
+
+it.each([undefined, null])('handles non-Error observer failures without ignoring them (%s)', async cause => {
+  vi.stubGlobal('fetch', vi.fn())
+  const agent = createAgent()
+  agent.subscribe(event => { if (event.type === 'agent_start') throw cause })
+  await agent.prompt(config, { role: 'user', content: '问题' })
+  expect(agent.state).toMatchObject({ outcome: 'error', errorMessage: '生成失败，请重试。' })
+  expect(agent.busy).toBe(false)
+  expect(fetch).not.toHaveBeenCalled()
+})
+
+it('notifies every observer and reports multiple observer errors together', async () => {
+  const agent = createAgent()
+  agent.subscribe(event => { if (event.type === 'agent_start') throw new Error('第一个订阅失败') })
+  agent.subscribe(event => { if (event.type === 'agent_start') throw new Error('第二个订阅失败') })
+  const events: AgentEvent[] = []
+  agent.subscribe(event => events.push(event))
+  await agent.prompt(config, { role: 'user', content: '问题' })
+  expect(events.at(-1)).toMatchObject({ type: 'agent_end', outcome: 'error', error: '第一个订阅失败\n第二个订阅失败' })
+  expect(agent.busy).toBe(false)
+})

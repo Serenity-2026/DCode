@@ -34,9 +34,18 @@ export class ToolRuntime implements ToolWorkspace {
     } }
   }
 
-  /** 应用退出时仅清理已登记的工具临时目录，不触及用户工作目录。 */
+  /** 逐个清理登记的目录；汇总失败并保留登记供重试，不触及用户工作目录。 */
   dispose(): void {
-    for (const directory of this.temporaryDirectories) rmSync(directory, { recursive: true, force: true })
-    this.temporaryDirectories.clear()
+    const errors: string[] = []
+    for (const directory of this.temporaryDirectories) {
+      try {
+        rmSync(directory, { recursive: true, force: true })
+        this.temporaryDirectories.delete(directory)
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException)?.code
+        errors.push(`${directory}：${code ? `${code}，` : ''}${error instanceof Error ? error.message : '目录删除失败。'}`)
+      }
+    }
+    if (errors.length) throw new Error(`临时目录清理失败：\n${errors.join('\n')}`)
   }
 }

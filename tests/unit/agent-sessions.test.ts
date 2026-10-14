@@ -179,3 +179,15 @@ it('attempts cleanup of every conversation and reports resource cleanup failures
   expect(first).toHaveBeenCalledOnce()
   expect(second).toHaveBeenCalledOnce()
 })
+
+it('waits for every stop and reports all failures instead of only the first', async () => {
+  const { sessions, send, agents } = await fixture()
+  await send('A')
+  await send('B')
+  const failures = agents.map((_, index) => new Error(`保存失败 ${index + 1}`))
+  // 模拟不同会话收尾失败；真实 Agent 仍由 afterEach 停止并清理。
+  const first = vi.spyOn(AgentSession.prototype, 'stop').mockRejectedValueOnce(failures[0]).mockRejectedValueOnce(failures[1])
+  try { await expect(sessions.stopAll()).rejects.toThrow('保存失败 1\n保存失败 2') }
+  finally { first.mockRestore() }
+  await sessions.stopAll()
+})

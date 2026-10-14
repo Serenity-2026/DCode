@@ -11,8 +11,8 @@ export class AgentSession {
   // 用 ID 定位当前仓库对象，其他会话的事务回滚不会使流式更新写到旧引用。
   private target?: { conversationId: string; messageId: string; lastSave: number; lastEmit: number }
 
-  /** 订阅 Agent 事件，生命周期与应用实例一致，不持有模型或取消控制器。 */
-  constructor(private store: StateService, private emit: (event: StreamEvent) => void, private readonly agent: Agent, private readonly workspace?: ToolWorkspace) {
+  /** 订阅 Agent 事件并注入错误报告出口；默认诊断日志，应用提供原生提示，不持有取消控制器。 */
+  constructor(private store: StateService, private emit: (event: StreamEvent) => void, private readonly agent: Agent, private readonly workspace?: ToolWorkspace, private readonly reportError: (error: Error) => void = error => console.error('Agent 收尾失败', error)) {
     //Agent 有事件时，调用该函数；这个函数再把事件交给 onEvent() 处理。
     this.agent.subscribe(event => this.onEvent(event))
   }
@@ -27,13 +27,18 @@ export class AgentSession {
     if (!input || typeof input !== 'object' || (input.retry !== undefined && typeof input.retry !== 'boolean')) throw new Error('无效请求。')
     if (!config.apiKey) throw new Error('请先配置模型 API 密钥。')
     const { conversation, message } = this.store.begin(input.content, Boolean(input.retry), config.model, input.attachments, input.conversationId)
-    this.workspace?.setDirectory(conversationDirectory(conversation))
-    const context = toLlmMessages(contextMessages(conversation))
-    const prompt = context.pop() as Extract<LlmMessage, { role: 'user' }>
-    this.agent.replaceMessages(context)
-    this.target = { conversationId: conversation.id, messageId: message.id, lastSave: Date.now(), lastEmit: 0 }
-    // 运行错误由 agent_end 保存；终止订阅者抛错时也避免产生未处理的 Promise。
-    void this.agent.prompt(config, prompt).catch(() => {})
+    const target = this.target = { conversationId: conversation.id, messageId: message.id, lastSave: Date.now(), lastEmit: 0 }
+    try {
+      this.workspace?.setDirectory(conversationDirectory(conversation))
+      const context = toLlmMessages(contextMessages(conversation))
+      const prompt = context.pop() as Extract<LlmMessage, { role: 'user' }>
+      this.agent.replaceMessages(context)
+      // 常规运行错误由 agent_end 保存；启动或收尾异常也必须投影到固定回复。
+      void this.agent.prompt(config, prompt).catch(error => this.finishFailure(target, error))
+    } catch (error) {
+      this.finishFailure(target, error)
+      throw error
+    }
     return this.store.snapshot()
   }
 
@@ -41,7 +46,36 @@ export class AgentSession {
   async stop(): Promise<Snapshot> {
     this.agent.abort()
     await this.agent.waitForIdle()
+    this.store.save()
     return this.store.snapshot()
+  }
+
+  /** 收尾异常不能静默丢失；保存并推送 error，失败时交给应用报告，避免二次未处理拒绝。 */
+  private finishFailure(target: { conversationId: string; messageId: string }, cause: unknown): void {
+    const errors = [cause instanceof Error ? cause.message : '任务收尾失败。']
+    const conversation = this.store.state.conversations.find(item => item.id === target.conversationId)
+    const message = conversation?.messages.find(item => item.id === target.messageId)
+    let report = false
+    if (conversation && message) {
+      message.status = 'error'
+      message.error = errors[0]
+      conversation.updatedAt = new Date().toISOString()
+      try { this.store.save() } catch (error) {
+        errors.push(`保存失败：${error instanceof Error ? error.message : '无法保存回复。'}`)
+        message.error = errors.join('\n')
+        report = true
+      }
+      try { this.emit({ conversationId: conversation.id, message: structuredClone(message) }) } catch (error) {
+        errors.push(`界面通知失败：${error instanceof Error ? error.message : '无法推送回复。'}`)
+        message.error = errors.join('\n')
+        report = true
+      }
+    } else { errors.push('无法定位任务回复。'); report = true }
+    if (this.target?.messageId === target.messageId) this.target = undefined
+    if (report) {
+      try { this.reportError(new Error(errors.join('\n'))) }
+      catch (error) { console.error('无法报告 Agent 错误', error) }
+    }
   }
 
   /** 将运行时事件投影为现有会话格式；完整工具上下文由 Agent 保留。 */
@@ -62,10 +96,7 @@ export class AgentSession {
       message.status = event.outcome
       if (event.error) message.error = event.error
       conversation.updatedAt = new Date().toISOString()
-      try { this.store.save() } catch (error) {
-        message.status = 'error'
-        message.error = error instanceof Error ? error.message : '保存失败。'
-      }
+      this.store.save()
       this.target = undefined
       this.emit({ conversationId: conversation.id, message: structuredClone(message) })
     }

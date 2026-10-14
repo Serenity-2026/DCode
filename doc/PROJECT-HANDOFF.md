@@ -123,13 +123,13 @@ npm start               # 预览 out/ 构建
 npm run pack            # 当前系统应用目录到 release/
 ```
 
-最近验证（2026-10-14）：补齐 AgentToolResult 全部字段后，类型检查、14 个文件共 142 个单元测试、生产构建通过，相关 Electron E2E 2 项通过（生产四工具/目录恢复、原生协议/错误回传），真实服务 smoke 关闭。覆盖成功与失败结果的结构化信息/用量保留、元数据隔离、整批终止和取消优先级；未使用真实服务密钥进行模型请求。
+最近验证（2026-10-14）：临时目录清理与 Agent 错误收尾修复后，类型检查、16 个文件共 155 个单元测试、生产构建通过，Electron E2E 8 项通过，真实服务 smoke 跳过。覆盖清理失败汇总/重试、启动/终止订阅异常、保存/推送失败报告、关闭等待与重试，以及正常退出和重启；未使用真实服务密钥进行模型请求。
 
 上述验证记录不是新窗口当前状态的保证，后续修改需按范围重新验证。`DCODE_LIVE_TEST=1 npm run test:e2e` 才开启真实模型请求；不要在常规验证中自行开启。
 
 测试入口：`tests/unit/architecture.test.ts` 检查依赖边界/循环；`ipc.test.ts` 检查来源、结果、互斥和停止；其余覆盖认证、存储、配置、模型/SSE、附件；`tests/e2e/chat.spec.ts` 覆盖完整桌面交互。打包应用不会随着源码修改自动更新，需重新 pack。
 
-`llm.test.ts` 验证两种协议转换、UTF-8/工具 JSON 分块、签名与工具结果分组、原生模型分页与畸形流；`agent.test.ts` 验证两种供应商的多轮工具循环、参数校验、失败回传、取消和轮次上限；`agent-runtime.test.ts` 验证独立 Agent 的事件/状态、上下文保留、订阅隔离、并发和错误收尾；`agent-session.test.ts` 验证会话切换、停止与最终保存；`agent-sessions.test.ts` 验证并行任务的目录/模型/消息/取消隔离、重复发送与删除保护、账号归属、统一停止、仓库回滚后流更新。Electron E2E 增加协议选择、原生工具错误回传与重启场景；测试替身只在隔离测试中注入；生产四工具也通过本地 Electron 的真实文件读写、命令执行和重启恢复验证。`coding-tools.test.ts` 覆盖工具参数、分页/截断、UTF-8/图片、批量替换与失败不写入、BOM/CRLF/容错、写入互斥、进程超时/取消、双协议工具与图片回传、会话目录隔离和 token 估算，以及独立自定义工具注入、执行目录捕获和上下文隔离。架构测试另检查具体工具之间、公共工具基础设施与具体工具之间无反向依赖。
+`llm.test.ts` 验证两种协议转换、UTF-8/工具 JSON 分块、签名与工具结果分组、原生模型分页与畸形流；`agent.test.ts` 验证两种供应商的多轮工具循环、参数校验、失败回传、取消和轮次上限；`agent-runtime.test.ts` 验证独立 Agent 的事件/状态、上下文保留、订阅隔离、并发和错误收尾；`agent-session.test.ts` 验证会话切换、停止与最终保存；`agent-sessions.test.ts` 验证并行任务的目录/模型/消息/取消隔离、重复发送与删除保护、账号归属、统一停止、仓库回滚后流更新。Electron E2E 增加协议选择、原生工具错误回传与重启场景；测试替身只在隔离测试中注入；生产四工具也通过本地 Electron 的真实文件读写、命令执行和重启恢复验证。`coding-tools.test.ts` 覆盖工具参数、分页/截断、UTF-8/图片、批量替换与失败不写入、BOM/CRLF/容错、写入互斥、进程超时/取消、双协议工具与图片回传、会话目录隔离和 token 估算，以及独立自定义工具注入、执行目录捕获和上下文隔离。`tool-runtime.test.ts` 验证逐目录清理失败汇总与重试，`main-window.test.ts` 验证关闭保存失败提示/重试、重复关闭等待，以及应用保存完成后直接退出。架构测试另检查具体工具之间、公共工具基础设施与具体工具之间无反向依赖。
 
 ## 8. 后续开发约定与阅读入口
 
@@ -150,7 +150,8 @@ npm run pack            # 当前系统应用目录到 release/
 - 本机工具扩展：`read.ts`、`bash.ts`、`edit.ts`、`write.ts` 分别导出 ReadTool、BashTool、EditTool、WriteTool 类，实现 WorkspaceTool；工具声明为只读字段，execute 显式标注参数与返回类型。共享路径/UTF-8/写入互斥位于 `file-operations.ts`，输出截断位于 `output.ts`。新增本机工具只需新增实现 WorkspaceTool 的独立类，在 bootstrap 的工具数组中创建实例注册，通过 ToolRuntime.bind 绑定本次 cwd 与临时目录资源；无需修改其他工具、公共运行层或 Agent/Loop。不需要工作目录的工具直接实现 AgentTool 注入。
 - 工具接入：实现 `AgentTool` 的 name、description、parameters 和 `execute(args, signal): Promise<AgentToolResult>`，从 bootstrap 注入 Agent。名称必须唯一、Schema 根类型为 object，Ajv 严格校验，不修正或转换模型参数。模型只接收声明，执行函数保留在主进程。未知工具、非法参数和执行失败形成错误 toolResult 供下一轮模型处理；AgentToolResult 包含完整六字段：content 块数组、details、structuredContent、usage、isError、terminate，取消字符串兼容；工具可以返回 isError: true 或抛出异常，Loop 生成明确的最终错误状态。details、structuredContent、usage、terminate 保留在运行状态与事件，不发送给模型；usage 不计入主对话上下文估算，整批结果都要求 terminate 才结束循环；OpenAI 在配对这一批工具结果后追加 user 图片消息，Anthropic 嵌入 tool_result。ToolExecutionError 仅用于可向模型公开的预期错误，其他异常仍隐藏细节。
 - 上下文归属：Loop 对输入历史深拷贝后维护局部请求消息；Agent 通过 message_end 保存完整正式消息，message_update 只更新草稿。应用会话每次 send 重载成功问答文本，完整工具记录不跨用户轮次重放，也不写入磁盘；多轮模型正文仍显示为同一条应用 assistant 回复。
-- 运行收尾：订阅者为同步回调，agent_end 通知完成后才释放 busy，waitForIdle 包含 Session 的最终同步保存。普通运行错误通过 outcome/error 记录；订阅者错误也可能使运行 Promise 拒绝，但最终清理仍执行。停止/失败后独立 Agent 不自动修复未配对工具消息，调用方需 replaceMessages 提供有效历史。
+- 运行收尾：订阅者为同步回调，agent_end 通知完成后才释放 busy，waitForIdle 包含 Session 的最终同步保存。普通运行错误通过 outcome/error 记录；终止订阅失败也更新 Agent 的 error 状态并释放 busy，原运行错误与收尾错误一起保留。AgentSession 捕获启动/异步收尾异常，固定目标回复标记 error 并重试保存/推送；继续失败时由 app 注入的原生错误框报告，默认 console.error 仅用于长期故障诊断。关闭/退出停止失败时显示原因并保留窗口/应用，重复关闭仍等待保存，允许重试。停止/失败后独立 Agent 不自动修复未配对工具消息，调用方需 replaceMessages 提供有效历史。
+- 临时资源清理：ToolRuntime.dispose 尝试全部目录，成功后移除登记，失败目录保留供重试并汇总路径/原因。应用退出通过原生错误框提示，删除失败通过 IPC 回传；不清理用户工作目录。
 - 工具取消：waitForTool 使取消时可以停止等待不配合的异步工具，不撤销副作用。生产 bash 会终止进程组（Windows 使用 taskkill）；read 使用可取消读取；write/edit 在操作间检查取消，同路径队列在底层写入完成前不释放。正在进行的磁盘写入不能撤销；同步计算仍占用事件循环。
 - 目前未实现：并行工具、生成队列、同一会话多 Agent 并发、steering/follow-up、上下文压缩、审批、通用单工具超时、窗口关闭后的后台任务、完整执行记录持久化与断点恢复。支持的并行范围为不同会话各运行一个 Agent。这里列出能力边界，不代表下一步自动实施的需求。
 

@@ -65,6 +65,12 @@ export class Agent {
         if (outcome === 'stopped') error = undefined
       } finally {
         try { this.publish({ type: 'agent_end', outcome, error }) }
+        catch (cause) {
+          const endingError = cause instanceof Error ? cause.message : '任务收尾失败。'
+          this.current.outcome = 'error'
+          this.current.errorMessage = error && error !== endingError ? `${error}\n任务收尾失败：${endingError}` : endingError
+          throw new Error(this.current.errorMessage, { cause })
+        }
         finally {
           this.current.isStreaming = false
           this.current.streamingMessage = undefined
@@ -104,10 +110,11 @@ export class Agent {
     } else if (event.type === 'tool_execution_start') this.current.pendingToolCalls.push(event.toolCallId)
     else if (event.type === 'tool_execution_end') this.current.pendingToolCalls = this.current.pendingToolCalls.filter(id => id !== event.toolCallId)
     else if (event.type === 'agent_end') { this.current.outcome = event.outcome; this.current.errorMessage = event.error }
-    let failure: unknown
+    const failures: unknown[] = []
     for (const listener of [...this.listeners]) {
-      try { listener(structuredClone(event)) } catch (error) { failure ??= error }
+      try { listener(structuredClone(event)) } catch (error) { failures.push(error) }
     }
-    if (failure !== undefined) throw failure
+    if (failures.length > 1) throw new AggregateError(failures, failures.map(error => error instanceof Error ? error.message : '事件订阅失败。').join('\n'))
+    if (failures.length) throw failures[0]
   }
 }

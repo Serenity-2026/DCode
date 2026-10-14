@@ -29,6 +29,8 @@ Agent 提供 replaceMessages、prompt、subscribe、abort、waitForIdle 和只�
 
 事件包括 agent_start/end、turn_start/end、message_start/update/end 与 tool_execution_start/end。订阅回调为同步接口；本轮没有异步插件回调或事件队列。message_update 带正文/推理增量，message_end 带完整统一消息；Agent 保存完整工具记录，AgentSession 沿用一条回复的展示与磁盘格式。公开模型配置不包含 API Key，handler 不进入公开状态；状态与订阅事件均复制，避免外部修改运行上下文。
 
+任务启动或终止订阅失败时，AgentSession 将固定目标回复标记为 error 并保存/推送；持久化或推送继续失败时由 app 的报告回调提示。Agent 在终止订阅失败后更新 error 状态，保留原运行错误并释放 busy，多订阅者失败汇总报告。单次停止与全部停止都包含最终保存，失败会通过 IPC 或关闭/退出提示返回，关闭/退出等待失败时不继续销毁窗口。
+
 每次应用发送前，AgentSession 用成功问答历史替换 Agent 内存消息，随后 prompt 当前问题，防止会话或账号切换时混入前一轮上下文。独立使用 Agent 时，成功后可以连续 prompt 保留完整工具上下文；停止或失败后重试由调用方 replaceMessages 提供有效历史，当前不自动修复未完成的工具调用。应用会话层每次发送都重新提供有效历史。停止调用 abort 并等待 idle；工具仍需要配合 AbortSignal。
 
 验证：独立 Agent 无 Electron/存储依赖；完整事件顺序与状态、工具上下文保留、快照/订阅隔离、并发拒绝、取消前后不继续请求、失败后可再次运行；会话停止等待最终保存，旧 IPC/重试/双协议与桌面场景继续通过。
