@@ -69,13 +69,16 @@ export class AgentLoop {
             output = { content: [{ type: 'text', text: error instanceof ToolExecutionError ? error.message : '工具执行失败。' }], details: undefined, isError: true }
           }
         }
-        const result: ToolResultMessage = { role: 'toolResult', toolCallId: call.id, content: output.content, details: output.details, isError: output.isError === true }
+        const result: ToolResultMessage = { ...output, role: 'toolResult', toolCallId: call.id, isError: output.isError === true }
         messages.push(result)
         toolResults.push(result)
         emit({ type: 'tool_execution_end', toolCallId: call.id, name: call.name, result })
         emit({ type: 'message_end', message: result })
       }
       emit({ type: 'turn_end', message: reply, toolResults })
+      controller.signal.throwIfAborted()
+      // pi 的终止提示在整批结果齐备后判断，任一工具未请求终止就继续模型循环。
+      if (toolResults.every(result => result.terminate === true)) return
     }
   }
 }

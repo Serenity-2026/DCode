@@ -19,8 +19,28 @@ export interface AssistantMessage {
 export interface ToolImage { type: 'image'; data: string; mimeType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp' }
 /** 工具面向模型的内容块，文本与图片统一按顺序返回。 */
 export type ToolContent = Extract<LlmContent, { type: 'text' }> | ToolImage
-/** 参考 pi 的工具结果；details 留给应用，isError 支持不抛异常的失败结果。 */
-export interface AgentToolResult<TDetails = unknown> { content: ToolContent[]; details: TDetails; isError?: boolean }
+/** 可供程序调用者消费的 JSON 值，不包含函数或 undefined。 */
+export type JsonValue = null | boolean | number | string | readonly JsonValue[] | { [key: string]: JsonValue }
+/** 参考 pi 的工具调用用量；仅由工具报告，不混入主对话上下文估算。 */
+export interface Usage {
+  input: number
+  output: number
+  cacheRead: number
+  cacheWrite: number
+  cacheWrite1h?: number
+  reasoning?: number
+  totalTokens: number
+  cost: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number }
+}
+/** 参考 pi 的完整工具结果；附加信息留给应用，失败与整批终止由循环处理。 */
+export interface AgentToolResult<TDetails = unknown> {
+  content: ToolContent[]
+  details: TDetails
+  structuredContent?: JsonValue
+  usage?: Usage
+  isError?: boolean
+  terminate?: boolean
+}
 
 /** 循环统一上下文，包括工具结果；应用历史在模型边界前转换为此类型。 */
 export type LlmMessage =

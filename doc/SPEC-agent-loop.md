@@ -45,7 +45,7 @@ OpenAI 兼容请求不按 DeepSeek 等服务域名特判参数：所选强度控
 
 ## 循环与消息转换
 
-工具执行统一返回 `AgentToolResult`，参考 pi v1.2.0 的内容块、details 与显式 isError。Loop 同时处理返回失败和抛出异常，取消保持终止语义；最终工具消息含明确的错误标记，details 只保留在运行上下文和事件，不进入供应商请求。具体工具结果契约见 `SPEC-file-tools.md`。
+工具执行统一返回 `AgentToolResult`，与 pi v1.2.0 一致包含 content、details、structuredContent、usage、isError、terminate。Loop 同时处理返回失败和抛出异常，取消保持终止语义；本轮整批结果都要求 terminate 才结束，仍完成每项执行和终止事件。最终工具消息含明确的错误标记，details、structuredContent、usage、terminate 只保留在运行上下文和事件，不进入供应商请求，工具用量不计入主对话上下文估算。具体工具结果契约见 `SPEC-file-tools.md`。
 
 应用会话文本先转换为统一消息。适配器将供应商 SSE 转为统一内容块与结束原因，AgentSession 仅消费正文/推理增量。完整 assistant 消息与工具结果在本次运行内保留，下一次请求再转换到目标供应商格式；Anthropic 同轮多个结果合并为紧随 assistant 的用户消息。
 

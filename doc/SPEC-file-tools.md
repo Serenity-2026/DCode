@@ -32,10 +32,12 @@
 
 2026-10-14 核对 pi 最新发布为 [v1.2.0](https://github.com/earendil-works/pi/releases/tag/v1.2.0)，参考其 [AgentToolResult](https://github.com/earendil-works/pi/blob/v1.2.0/packages/agent/src/types.ts) 与 [执行循环](https://github.com/earendil-works/pi/blob/v1.2.0/packages/agent/src/agent-loop.ts)，自行实现当前需要的子集，不引入 pi 依赖。
 
-- AgentTool 和 WorkspaceTool 的 execute 统一返回 `Promise<AgentToolResult<TDetails>>`，取消字符串兼容。结果包含 `content` 文本/图片内容块数组、`details`（没有附加信息时为 undefined）及可选 `isError`。不增加当前未使用的 usage、structuredContent、terminate 或进度回调。
+- AgentTool 和 WorkspaceTool 的 execute 统一返回 `Promise<AgentToolResult<TDetails>>`，取消字符串兼容。完整结果契约包含 `content` 文本/图片内容块数组、`details`（没有附加信息时为 undefined）及可选 `structuredContent`、`usage`、`isError`、`terminate`，与 pi v1.2.0 的字段保持一致；不增加进度回调。
 - Loop 以 `isError === true` 确定返回结果的失败状态；工具抛出异常时生成错误结果，取消仍终止任务。最终 toolResult 含必填 isError，工具结束事件携带同一结果。内容块与 details 被复制，工具返回对象、订阅事件与 Agent 状态互不污染。
 - read 在 details 返回文本总行数、下一页 offset 和截断行数/字节数，图片直接作为 content 中的 image 块；write 返回文本块且 details 为 undefined；edit 返回文本块并在 details 保存有界 diff；bash 返回退出码、超时状态以及可选截断信息和完整日志路径。bash 的非零退出与工具超时返回 isError: true，仍保留输出和 details；进程/日志系统故障继续抛出预期异常。
-- 模型适配层仅转换 content 与错误状态，不发送 details；OpenAI 合并文字块，并在整批工具结果配对后追加图片消息，Anthropic 保留混合内容块的顺序。details 仅留在本次运行状态与事件，不写入应用对话历史。
+- structuredContent 为 JsonValue，支持 JSON 对象、数组、基本值和 null；usage 沿用 pi 的 token、缓存、推理及成本字段，描述工具自身的调用用量，不加入主对话上下文估算。两个字段都随工具结果保留在 Agent 状态和事件，成功与失败均不丢失。
+- terminate 是整批工具结束后的终止提示：本轮所有工具结果都为 terminate: true 才结束，不再请求模型；混合结果、未知工具、非法参数和抛出的异常不触发该规则。仍先完成整批执行和结果事件，取消始终优先于正常终止。
+- 模型适配层仅转换 content 与错误状态，不发送 details、structuredContent、usage 或 terminate；OpenAI 合并文字块，并在整批工具结果配对后追加图片消息，Anthropic 保留混合内容块的顺序。这些附加字段仅留在本次运行状态与事件，不写入应用对话历史。
 
 ## 验证
 

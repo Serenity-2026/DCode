@@ -3,7 +3,7 @@ import { Agent } from '../../src/main/services/agent'
 import { AgentLoop } from '../../src/main/services/agent-loop'
 import { AgentSession } from '../../src/main/services/agent-session'
 import { StateRepository } from '../../src/main/repositories/state-repository'
-import { ToolExecutionError, type AgentTool, type AgentToolResult } from '../../src/main/domain/llm'
+import { ToolExecutionError, type AgentTool, type AgentToolResult, type Usage } from '../../src/main/domain/llm'
 import type { StreamEvent, ModelApi } from '../../src/shared/types'
 import { create, cleanup, createAgent, config } from './helpers'
 import { anthropicResponse, echoTool, openAIResponse, testCall } from './llm-fixtures'
@@ -12,28 +12,36 @@ afterEach(() => { vi.unstubAllGlobals(); cleanup() })
 
 it.each<ModelApi>(['openai-completions', 'anthropic-messages'])('preserves result blocks and details and explicit failure through %s', async api => {
   const response = api === 'anthropic-messages' ? anthropicResponse : openAIResponse
+  const usage: Usage = { input: 10, output: 20, cacheRead: 2, cacheWrite: 3, cacheWrite1h: 1, reasoning: 5, totalTokens: 35, cost: { input: 0.1, output: 0.2, cacheRead: 0.02, cacheWrite: 0.03, total: 0.35 } }
   const failed: AgentToolResult = {
     content: [{ type: 'text', text: '失败输出' }, { type: 'image', data: 'cGlj', mimeType: 'image/png' }, { type: 'text', text: '补充说明' }],
-    details: { exitCode: 7, localOnly: 'metadata-secret' }, isError: true
+    details: { exitCode: 7, localOnly: 'metadata-secret' }, structuredContent: { exitCode: 7, localOnly: 'program-secret' }, usage, isError: true, terminate: false
   }
   const execute = vi.fn<AgentTool['execute']>()
-    .mockResolvedValueOnce({ content: [{ type: 'text', text: '成功' }], details: { localOnly: 'metadata-secret' } })
+    .mockResolvedValueOnce({ content: [{ type: 'text', text: '成功' }], details: { localOnly: 'metadata-secret' }, structuredContent: ['program-secret', 1, true, { empty: null }], usage })
     .mockResolvedValueOnce(failed)
     .mockRejectedValueOnce(new ToolExecutionError('可公开错误'))
-    .mockResolvedValueOnce({ content: [], details: undefined, isError: false })
+    .mockResolvedValueOnce({ content: [], details: undefined, structuredContent: null, isError: false })
   const fetchMock = vi.fn().mockResolvedValueOnce(response('', ['a', 'b', 'c', 'd'].map(id => testCall(id)))).mockResolvedValueOnce(response('完成'))
   vi.stubGlobal('fetch', fetchMock)
   const agent = createAgent([{ ...echoTool, execute }])
   const ended: boolean[] = []
-  agent.subscribe(event => { if (event.type === 'tool_execution_end') ended.push(event.result.isError) })
+  const outputs: AgentToolResult[] = []
+  agent.subscribe(event => { if (event.type === 'tool_execution_end') { ended.push(event.result.isError); outputs.push(event.result) } })
   await agent.prompt({ ...config, api }, { role: 'user', content: '执行' })
   const results = agent.state.messages.filter(message => message.role === 'toolResult')
   expect(results.map(result => result.isError)).toEqual([false, true, true, false])
   expect(ended).toEqual([false, true, true, false])
+  expect(results[0]).toMatchObject({ structuredContent: ['program-secret', 1, true, { empty: null }], usage })
   expect(results[1]).toMatchObject(failed)
+  expect(outputs[1]).toMatchObject(failed)
   expect(results[2]).toMatchObject({ content: [{ type: 'text', text: '可公开错误' }], details: undefined })
+  expect(results[3].structuredContent).toBeNull()
   const request = JSON.parse(fetchMock.mock.calls[1][1].body)
   expect(JSON.stringify(request)).not.toContain('metadata-secret')
+  expect(JSON.stringify(request)).not.toContain('program-secret')
+  expect(JSON.stringify(request)).not.toContain('totalTokens')
+  expect(JSON.stringify(request)).not.toContain('terminate')
   if (api === 'anthropic-messages') {
     const blocks = request.messages.at(-1).content
     expect(blocks.map((block: { is_error: boolean }) => block.is_error)).toEqual([false, true, true, false])
@@ -43,6 +51,60 @@ it.each<ModelApi>(['openai-completions', 'anthropic-messages'])('preserves resul
     expect(request.messages.at(-1)).toEqual({ role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,cGlj' } }] })
   }
   expect(agent.state.outcome).toBe('complete')
+})
+
+it.each([
+  { flags: [true, true], requests: 1 },
+  { flags: [true, false], requests: 2 },
+  { flags: [true, undefined], requests: 2 },
+  { flags: [undefined, undefined], requests: 2 }
+])('ends only when every result in the finished batch requests termination ($flags)', async ({ flags, requests }) => {
+  const fetchMock = vi.fn().mockResolvedValueOnce(openAIResponse('准备', [testCall('a'), testCall('b')])).mockResolvedValueOnce(openAIResponse('完成'))
+  vi.stubGlobal('fetch', fetchMock)
+  const execute = vi.fn<AgentTool['execute']>()
+    .mockResolvedValueOnce({ content: [{ type: 'text', text: '第一项' }], details: undefined, terminate: flags[0] })
+    .mockResolvedValueOnce({ content: [{ type: 'text', text: '第二项' }], details: undefined, terminate: flags[1], isError: true })
+  const agent = createAgent([{ ...echoTool, execute }])
+  const events: string[] = []
+  agent.subscribe(event => events.push(event.type))
+  await agent.prompt(config, { role: 'user', content: '执行' })
+  expect(execute).toHaveBeenCalledTimes(2)
+  expect(fetchMock).toHaveBeenCalledTimes(requests)
+  expect(agent.state.messages.filter(message => message.role === 'toolResult').map(result => result.terminate)).toEqual(flags)
+  expect(events.filter(type => ['tool_execution_end', 'turn_end', 'agent_end'].includes(type))).toEqual(requests === 1 ? ['tool_execution_end', 'tool_execution_end', 'turn_end', 'agent_end'] : ['tool_execution_end', 'tool_execution_end', 'turn_end', 'turn_end', 'agent_end'])
+  expect(agent.state.outcome).toBe('complete')
+  expect(agent.busy).toBe(false)
+})
+
+it.each(['unknown', 'invalid', 'throw'])('continues after a terminal result when another call fails preparation or execution (%s)', async failure => {
+  const failedCall = failure === 'unknown' ? { ...testCall('b'), name: 'missing' } : failure === 'invalid' ? { ...testCall('b'), arguments: '{"text":1}' } : testCall('b')
+  const fetchMock = vi.fn().mockResolvedValueOnce(openAIResponse('', [testCall('a'), failedCall])).mockResolvedValueOnce(openAIResponse('已处理'))
+  vi.stubGlobal('fetch', fetchMock)
+  const execute = vi.fn<AgentTool['execute']>().mockResolvedValueOnce({ content: [], details: undefined, terminate: true }).mockRejectedValueOnce(new ToolExecutionError('执行失败'))
+  const agent = createAgent([{ ...echoTool, execute }])
+  await agent.prompt(config, { role: 'user', content: '执行' })
+  expect(fetchMock).toHaveBeenCalledTimes(2)
+  expect(agent.state.messages.filter(message => message.role === 'toolResult').map(result => result.isError)).toEqual([false, true])
+})
+
+it('keeps result metadata isolated and cancellation takes precedence over termination', async () => {
+  const returned: AgentToolResult = { content: [], details: undefined, structuredContent: { value: 'original' }, usage: { input: 1, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 1, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, terminate: true }
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(openAIResponse('', [testCall('a')])))
+  const agent = createAgent([{ ...echoTool, execute: async () => returned }])
+  agent.subscribe(event => {
+    if (event.type === 'tool_execution_end') {
+      returned.structuredContent = 'changed by tool'
+      returned.usage!.input = 99
+      event.result.structuredContent = 'changed by observer'
+      event.result.usage!.input = 88
+      event.result.terminate = false
+    }
+    if (event.type === 'turn_end') agent.abort()
+  })
+  await agent.prompt(config, { role: 'user', content: '执行' })
+  expect(agent.state.messages.find(message => message.role === 'toolResult')).toMatchObject({ structuredContent: { value: 'original' }, usage: { input: 1 }, terminate: true })
+  expect(agent.state.outcome).toBe('stopped')
+  expect(fetch).toHaveBeenCalledOnce()
 })
 
 it.each(['legacy string', { content: [{ type: 'text', text: 1 }], details: undefined }])('turns malformed tool results into errors without accepting string compatibility (%j)', async returned => {

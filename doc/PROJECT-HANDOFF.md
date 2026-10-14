@@ -123,7 +123,7 @@ npm start               # 预览 out/ 构建
 npm run pack            # 当前系统应用目录到 release/
 ```
 
-最近验证（2026-10-14）：统一 AgentToolResult 契约后，类型检查、14 个文件共 134 个单元测试、生产构建通过，本地 Electron E2E 8 项通过，真实服务 smoke 跳过。覆盖显式返回失败、异常归一化、内容块/附加信息保留及双协议转换；未使用真实服务密钥进行模型请求。
+最近验证（2026-10-14）：补齐 AgentToolResult 全部字段后，类型检查、14 个文件共 142 个单元测试、生产构建通过，相关 Electron E2E 2 项通过（生产四工具/目录恢复、原生协议/错误回传），真实服务 smoke 关闭。覆盖成功与失败结果的结构化信息/用量保留、元数据隔离、整批终止和取消优先级；未使用真实服务密钥进行模型请求。
 
 上述验证记录不是新窗口当前状态的保证，后续修改需按范围重新验证。`DCODE_LIVE_TEST=1 npm run test:e2e` 才开启真实模型请求；不要在常规验证中自行开启。
 
@@ -148,7 +148,7 @@ npm run pack            # 当前系统应用目录到 release/
 
 - 统一消息：`LlmMessage` 包含 system/user/assistant/toolResult；assistant 内容块包含 text/thinking/toolCall，结束原因为 stop 或 toolCall。工具结果以 toolCallId 对应原调用。`ModelStream` 通过回调提供正文/思考增量，通过 Promise 提供完整 assistant 回复；完整工具参数由适配器拼接和解析后才交付循环。工具结果契约参考 pi v1.2.0：read 的 details 包含分页/截断信息，bash 包含退出码/超时/完整日志路径，edit 包含有界 diff，write 为 undefined。
 - 本机工具扩展：`read.ts`、`bash.ts`、`edit.ts`、`write.ts` 分别导出 ReadTool、BashTool、EditTool、WriteTool 类，实现 WorkspaceTool；工具声明为只读字段，execute 显式标注参数与返回类型。共享路径/UTF-8/写入互斥位于 `file-operations.ts`，输出截断位于 `output.ts`。新增本机工具只需新增实现 WorkspaceTool 的独立类，在 bootstrap 的工具数组中创建实例注册，通过 ToolRuntime.bind 绑定本次 cwd 与临时目录资源；无需修改其他工具、公共运行层或 Agent/Loop。不需要工作目录的工具直接实现 AgentTool 注入。
-- 工具接入：实现 `AgentTool` 的 name、description、parameters 和 `execute(args, signal): Promise<AgentToolResult>`，从 bootstrap 注入 Agent。名称必须唯一、Schema 根类型为 object，Ajv 严格校验，不修正或转换模型参数。模型只接收声明，执行函数保留在主进程。未知工具、非法参数和执行失败形成错误 toolResult 供下一轮模型处理；AgentToolResult 统一包含文本/图片 content 块数组、details 及可选 isError，取消字符串兼容；工具可以返回 isError: true 或抛出异常，Loop 生成明确的最终错误状态。details 保留在运行状态与事件，不发送给模型；OpenAI 在配对这一批工具结果后追加 user 图片消息，Anthropic 嵌入 tool_result。ToolExecutionError 仅用于可向模型公开的预期错误，其他异常仍隐藏细节。
+- 工具接入：实现 `AgentTool` 的 name、description、parameters 和 `execute(args, signal): Promise<AgentToolResult>`，从 bootstrap 注入 Agent。名称必须唯一、Schema 根类型为 object，Ajv 严格校验，不修正或转换模型参数。模型只接收声明，执行函数保留在主进程。未知工具、非法参数和执行失败形成错误 toolResult 供下一轮模型处理；AgentToolResult 包含完整六字段：content 块数组、details、structuredContent、usage、isError、terminate，取消字符串兼容；工具可以返回 isError: true 或抛出异常，Loop 生成明确的最终错误状态。details、structuredContent、usage、terminate 保留在运行状态与事件，不发送给模型；usage 不计入主对话上下文估算，整批结果都要求 terminate 才结束循环；OpenAI 在配对这一批工具结果后追加 user 图片消息，Anthropic 嵌入 tool_result。ToolExecutionError 仅用于可向模型公开的预期错误，其他异常仍隐藏细节。
 - 上下文归属：Loop 对输入历史深拷贝后维护局部请求消息；Agent 通过 message_end 保存完整正式消息，message_update 只更新草稿。应用会话每次 send 重载成功问答文本，完整工具记录不跨用户轮次重放，也不写入磁盘；多轮模型正文仍显示为同一条应用 assistant 回复。
 - 运行收尾：订阅者为同步回调，agent_end 通知完成后才释放 busy，waitForIdle 包含 Session 的最终同步保存。普通运行错误通过 outcome/error 记录；订阅者错误也可能使运行 Promise 拒绝，但最终清理仍执行。停止/失败后独立 Agent 不自动修复未配对工具消息，调用方需 replaceMessages 提供有效历史。
 - 工具取消：waitForTool 使取消时可以停止等待不配合的异步工具，不撤销副作用。生产 bash 会终止进程组（Windows 使用 taskkill）；read 使用可取消读取；write/edit 在操作间检查取消，同路径队列在底层写入完成前不释放。正在进行的磁盘写入不能撤销；同步计算仍占用事件循环。
