@@ -1,13 +1,15 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { MainWindow } from '../../src/main/windows/main-window'
+import { reportError } from '../../src/main/app/report-error'
 import type { AgentSessions } from '../../src/main/services/agent-sessions'
 
 const electron = vi.hoisted(() => ({ create: vi.fn(), showError: vi.fn() }))
 vi.mock('electron', () => ({ BrowserWindow: electron.create, dialog: { showErrorBox: electron.showError } }))
-afterEach(() => { electron.create.mockReset(); electron.showError.mockReset() })
+afterEach(() => { vi.restoreAllMocks(); electron.create.mockReset(); electron.showError.mockReset() })
 
 /** 模拟 Electron 可取消的 close 事件，检查失败不会继续关闭且可以再次尝试。 */
-function fixture() {
+function fixture(loadError?: Error) {
+  const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {})
   const listeners = new Map<string, (event: { preventDefault(): void }) => void>()
   const window = {
     webContents: { setWindowOpenHandler: vi.fn(), on: vi.fn(), session: { setPermissionRequestHandler: vi.fn() } },
@@ -20,10 +22,11 @@ function fixture() {
     })
   }
   electron.create.mockImplementation(function () { return window })
+  if (loadError) window.loadFile.mockRejectedValue(loadError)
   const stopAll = vi.fn()
-  const main = new MainWindow({ stopAll } as unknown as AgentSessions, { icon: '', preload: '', renderer: '' })
+  const main = new MainWindow({ stopAll } as unknown as AgentSessions, { icon: '', preload: '', renderer: '' }, reportError)
   main.create()
-  return { main, window, stopAll }
+  return { main, window, stopAll, diagnostic }
 }
 
 it('reports shutdown failures, keeps the window open and allows a successful retry', async () => {
@@ -58,4 +61,20 @@ it('does not intercept the application quit after global persistence has complet
   window.close()
   expect(main.current).toBeNull()
   expect(stopAll).not.toHaveBeenCalled()
+})
+
+it('routes page loading rejection through the application boundary', async () => {
+  const error = new Error('页面文件不存在')
+  const { diagnostic } = fixture(error)
+  await vi.waitFor(() => expect(electron.showError).toHaveBeenCalledWith('窗口加载失败', error.message))
+  expect(diagnostic).toHaveBeenCalledWith('窗口加载失败', error)
+})
+
+it('restores the close state when stopping throws synchronously', async () => {
+  const { main, window, stopAll } = fixture()
+  stopAll.mockImplementationOnce(() => { throw new Error('无法停止') }).mockResolvedValueOnce({})
+  window.close()
+  await vi.waitFor(() => expect(electron.showError).toHaveBeenCalledWith('任务停止失败', '无法停止'))
+  window.close()
+  await vi.waitFor(() => expect(main.current).toBeNull())
 })

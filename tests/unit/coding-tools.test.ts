@@ -12,7 +12,7 @@ import { ToolExecutionError } from '../../src/main/domain/llm'
 import { AgentSession } from '../../src/main/services/agent-session'
 import { readAttachments } from '../../src/main/infrastructure/attachments'
 import { anthropicResponse, openAIResponse } from './llm-fixtures'
-import { create, createAgent, config, cleanup } from './helpers'
+import { create, createAgent, config, cleanup, unexpectedTaskError } from './helpers'
 import type { ModelApi } from '../../src/shared/types'
 import { contextMessages, estimateContext } from '../../src/shared/context'
 
@@ -314,7 +314,7 @@ it('recovers selected directories for followups/retries and clears them on conve
   const { store, auth, path } = await create()
   const agent = createAgent(tools)
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(openAIResponse('已回复')))
-  const session = new AgentSession(store, () => {}, agent, runtime)
+  const session = new AgentSession(store, () => {}, agent, unexpectedTaskError, runtime)
   const attachment = (await readAttachments([directory], 'folder')).attachments[0]
   session.send({ content: '第一问', attachments: [attachment] }, config)
   const id = store.state.activeConversationId!
@@ -358,7 +358,7 @@ it('stops real bash through AgentSession and never starts later tool calls', asy
     { id: 'later', name: 'write', arguments: '{"path":"later","content":"bad"}' }
   ]))
   vi.stubGlobal('fetch', fetchMock)
-  const session = new AgentSession(store, () => {}, agent, runtime)
+  const session = new AgentSession(store, () => {}, agent, unexpectedTaskError, runtime)
   session.send({ content: '停止工具', attachments: (await readAttachments([directory], 'folder')).attachments }, config)
   await waitFile(join(directory, 'ready'))
   expect((await session.stop()).conversations[0].messages[1].status).toBe('stopped')

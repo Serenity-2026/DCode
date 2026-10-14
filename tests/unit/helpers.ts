@@ -18,6 +18,9 @@ export function createAgent(tools: AgentTool[] = []): Agent {
   return new Agent(loop, tools)
 }
 
+/** 会话测试中未预期的报告继续抛出，由测试运行器判定失败。 */
+export function unexpectedTaskError(error: unknown): void { throw error }
+
 /** 仅用于单元测试的替身；Electron E2E 会验证真实 safeStorage，不在生产降级加密。 */
 export const secrets: SecretCodec = {
   encrypt: async value => Buffer.from(value).toString('base64'),

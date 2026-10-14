@@ -11,8 +11,8 @@ export class AgentSession {
   // 用 ID 定位当前仓库对象，其他会话的事务回滚不会使流式更新写到旧引用。
   private target?: { conversationId: string; messageId: string; lastSave: number; lastEmit: number }
 
-  /** 订阅 Agent 事件并注入错误报告出口；默认诊断日志，应用提供原生提示，不持有取消控制器。 */
-  constructor(private store: StateService, private emit: (event: StreamEvent) => void, private readonly agent: Agent, private readonly workspace?: ToolWorkspace, private readonly reportError: (error: Error) => void = error => console.error('Agent 收尾失败', error)) {
+  /** 订阅 Agent 事件并注入应用报告回调；本层只恢复会话状态，不持有取消控制器。 */
+  constructor(private store: StateService, private emit: (event: StreamEvent) => void, private readonly agent: Agent, private readonly reportError: (error: unknown) => void, private readonly workspace?: ToolWorkspace) {
     //Agent 有事件时，调用该函数；这个函数再把事件交给 onEvent() 处理。
     this.agent.subscribe(event => this.onEvent(event))
   }
@@ -34,7 +34,9 @@ export class AgentSession {
       const prompt = context.pop() as Extract<LlmMessage, { role: 'user' }>
       this.agent.replaceMessages(context)
       // 常规运行错误由 agent_end 保存；启动或收尾异常也必须投影到固定回复。
-      void this.agent.prompt(config, prompt).catch(error => this.finishFailure(target, error))
+      void this.agent.prompt(config, prompt)
+        .catch(error => this.finishFailure(target, error))
+        .catch(error => this.reportError(error))
     } catch (error) {
       this.finishFailure(target, error)
       throw error
@@ -50,7 +52,7 @@ export class AgentSession {
     return this.store.snapshot()
   }
 
-  /** 收尾异常不能静默丢失；保存并推送 error，失败时交给应用报告，避免二次未处理拒绝。 */
+  /** 将失败投影为固定回复并尝试保存/推送；恢复仍失败时抛出汇总错误，由调用边界报告。 */
   private finishFailure(target: { conversationId: string; messageId: string }, cause: unknown): void {
     const errors = [cause instanceof Error ? cause.message : '任务收尾失败。']
     const conversation = this.store.state.conversations.find(item => item.id === target.conversationId)
@@ -72,10 +74,7 @@ export class AgentSession {
       }
     } else { errors.push('无法定位任务回复。'); report = true }
     if (this.target?.messageId === target.messageId) this.target = undefined
-    if (report) {
-      try { this.reportError(new Error(errors.join('\n'))) }
-      catch (error) { console.error('无法报告 Agent 错误', error) }
-    }
+    if (report) throw new Error(errors.join('\n'), { cause })
   }
 
   /** 将运行时事件投影为现有会话格式；完整工具上下文由 Agent 保留。 */

@@ -37,6 +37,7 @@
 src/main/
   index.ts                       只调用启动入口
   app/bootstrap.ts               生命周期与手动依赖装配
+  app/report-error.ts            统一诊断日志与原生错误提示，不包装任务执行
   windows/main-window.ts          窗口、安全策略、流事件转发、安全关闭
   ipc/ipc-router.ts              来源校验、Result 包装、操作互斥
   controllers/                  auth/model/state/chat/desktop 的 IPC 接口
@@ -78,6 +79,8 @@ Agent 框架参照 pi v1.0.4 的职责划分，自行实现最小子集，没有
 启动：`main/index.ts → startApplication → app.whenReady → 配置/StateRepository/StateService/Secrets/Models/Auth → auth.restore → AgentLoop/Agent/AgentSession/MainWindow/DesktopService/IpcRouter → 注册 Controller → 创建窗口`。macOS 关闭窗口保留应用；关闭窗口或退出时有生成任务就先停止并保存。
 
 请求链路：`React → window.dcode → preload ipcRenderer.invoke → IpcRouter → Controller → Service → Repository 或 infrastructure`。IPC 请求返回 `Result<T>`（成功 value / 失败 error），Snapshot 是裁剪后的公开状态，不含密码、令牌或密钥。
+
+错误边界参考 pi v1.2.0 的职责划分：工具失败转换为错误 toolResult，Agent 记录运行失败并在 finally 释放状态，应用入口显式使用 try/catch，异步操作 await；后台生成仍立即返回 Snapshot，以 Promise.catch 连接失败恢复和最终报告。app/report-error.ts 的 reportError 仅统一日志及原生提示，通过普通回调注入窗口和会话，不包装任务执行。IPC 请求错误仍统一返回 Result 由页面呈现。底层只负责状态恢复、资源释放或工具错误转换；不自行定义提示与日志。启动失败先提示再退出，关闭失败恢复为可重试。
 
 对话生命周期：
 
@@ -123,7 +126,7 @@ npm start               # 预览 out/ 构建
 npm run pack            # 当前系统应用目录到 release/
 ```
 
-最近验证（2026-10-14）：临时目录清理与 Agent 错误收尾修复后，类型检查、16 个文件共 155 个单元测试、生产构建通过，Electron E2E 8 项通过，真实服务 smoke 跳过。覆盖清理失败汇总/重试、启动/终止订阅异常、保存/推送失败报告、关闭等待与重试，以及正常退出和重启；未使用真实服务密钥进行模型请求。
+最近验证（2026-10-14）：按 pi 的处理职责改为显式异常捕获后，类型检查、18 个文件共 162 个单元测试、生产构建通过，Electron E2E 8 项通过，真实服务 smoke 跳过。覆盖启动同步/异步异常、提示失败诊断、报告先于退出、会话恢复成功不重复提示、页面加载失败、关闭等待与重试，以及多会话、四工具、正常退出和重启；未使用真实服务密钥进行模型请求。
 
 上述验证记录不是新窗口当前状态的保证，后续修改需按范围重新验证。`DCODE_LIVE_TEST=1 npm run test:e2e` 才开启真实模型请求；不要在常规验证中自行开启。
 
@@ -150,7 +153,7 @@ npm run pack            # 当前系统应用目录到 release/
 - 本机工具扩展：`read.ts`、`bash.ts`、`edit.ts`、`write.ts` 分别导出 ReadTool、BashTool、EditTool、WriteTool 类，实现 WorkspaceTool；工具声明为只读字段，execute 显式标注参数与返回类型。共享路径/UTF-8/写入互斥位于 `file-operations.ts`，输出截断位于 `output.ts`。新增本机工具只需新增实现 WorkspaceTool 的独立类，在 bootstrap 的工具数组中创建实例注册，通过 ToolRuntime.bind 绑定本次 cwd 与临时目录资源；无需修改其他工具、公共运行层或 Agent/Loop。不需要工作目录的工具直接实现 AgentTool 注入。
 - 工具接入：实现 `AgentTool` 的 name、description、parameters 和 `execute(args, signal): Promise<AgentToolResult>`，从 bootstrap 注入 Agent。名称必须唯一、Schema 根类型为 object，Ajv 严格校验，不修正或转换模型参数。模型只接收声明，执行函数保留在主进程。未知工具、非法参数和执行失败形成错误 toolResult 供下一轮模型处理；AgentToolResult 包含完整六字段：content 块数组、details、structuredContent、usage、isError、terminate，取消字符串兼容；工具可以返回 isError: true 或抛出异常，Loop 生成明确的最终错误状态。details、structuredContent、usage、terminate 保留在运行状态与事件，不发送给模型；usage 不计入主对话上下文估算，整批结果都要求 terminate 才结束循环；OpenAI 在配对这一批工具结果后追加 user 图片消息，Anthropic 嵌入 tool_result。ToolExecutionError 仅用于可向模型公开的预期错误，其他异常仍隐藏细节。
 - 上下文归属：Loop 对输入历史深拷贝后维护局部请求消息；Agent 通过 message_end 保存完整正式消息，message_update 只更新草稿。应用会话每次 send 重载成功问答文本，完整工具记录不跨用户轮次重放，也不写入磁盘；多轮模型正文仍显示为同一条应用 assistant 回复。
-- 运行收尾：订阅者为同步回调，agent_end 通知完成后才释放 busy，waitForIdle 包含 Session 的最终同步保存。普通运行错误通过 outcome/error 记录；终止订阅失败也更新 Agent 的 error 状态并释放 busy，原运行错误与收尾错误一起保留。AgentSession 捕获启动/异步收尾异常，固定目标回复标记 error 并重试保存/推送；继续失败时由 app 注入的原生错误框报告，默认 console.error 仅用于长期故障诊断。关闭/退出停止失败时显示原因并保留窗口/应用，重复关闭仍等待保存，允许重试。停止/失败后独立 Agent 不自动修复未配对工具消息，调用方需 replaceMessages 提供有效历史。
+- 运行收尾：订阅者为同步回调，agent_end 通知完成后才释放 busy，waitForIdle 包含 Session 的最终同步保存。普通运行错误通过 outcome/error 记录；终止订阅失败也更新 Agent 的 error 状态并释放 busy，原运行错误与收尾错误一起保留。AgentSession 捕获启动/异步收尾异常，固定目标回复标记 error 并重试保存/推送；继续失败时抛出汇总异常，后台任务最终 catch 调用 app 注入的 reportError 回调，同步请求交给 IPC，不在业务层定义兜底日志。关闭/退出停止失败时显示原因并保留窗口/应用，重复关闭仍等待保存，允许重试。停止/失败后独立 Agent 不自动修复未配对工具消息，调用方需 replaceMessages 提供有效历史。
 - 临时资源清理：ToolRuntime.dispose 尝试全部目录，成功后移除登记，失败目录保留供重试并汇总路径/原因。应用退出通过原生错误框提示，删除失败通过 IPC 回传；不清理用户工作目录。
 - 工具取消：waitForTool 使取消时可以停止等待不配合的异步工具，不撤销副作用。生产 bash 会终止进程组（Windows 使用 taskkill）；read 使用可取消读取；write/edit 在操作间检查取消，同路径队列在底层写入完成前不释放。正在进行的磁盘写入不能撤销；同步计算仍占用事件循环。
 - 目前未实现：并行工具、生成队列、同一会话多 Agent 并发、steering/follow-up、上下文压缩、审批、通用单工具超时、窗口关闭后的后台任务、完整执行记录持久化与断点恢复。支持的并行范围为不同会话各运行一个 Agent。这里列出能力边界，不代表下一步自动实施的需求。
