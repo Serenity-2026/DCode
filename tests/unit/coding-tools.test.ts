@@ -8,7 +8,7 @@ import { BashTool } from '../../src/main/infrastructure/tools/bash'
 import { EditTool } from '../../src/main/infrastructure/tools/edit'
 import { WriteTool } from '../../src/main/infrastructure/tools/write'
 import { toolValidator } from '../../src/main/infrastructure/tool-schema'
-import { ToolExecutionError, type ToolOutput } from '../../src/main/domain/llm'
+import { ToolExecutionError } from '../../src/main/domain/llm'
 import { AgentSession } from '../../src/main/services/agent-session'
 import { readAttachments } from '../../src/main/infrastructure/attachments'
 import { anthropicResponse, openAIResponse } from './llm-fixtures'
@@ -31,7 +31,8 @@ function fixture() {
     expect(toolValidator(tool)(args)).toBe(true)
     return tool.execute(args, signal)
   }
-  return { directory, runtime, tools, run }
+  const runText = async (name: string, args: Record<string, unknown>) => (await run(name, args)).content.filter(block => block.type === 'text').map(block => block.text).join('\n')
+  return { directory, runtime, tools, run, runText }
 }
 
 /** 等待真实子进程创建标记文件，避免依靠固定延迟触发取消。 */
@@ -73,7 +74,7 @@ it('injects an independent workspace tool through Agent without changing the run
       signal.throwIfAborted()
       temporary = mkdtempSync(join(tmpdir(), 'dcode-custom-tool-'))
       temporaryDirectories.add(temporary)
-      return `${args.label}:${cwd}`
+      return { content: [{ type: 'text', text: `${args.label}:${cwd}` }], details: undefined }
     }
   }
   const fetchMock = vi.fn().mockResolvedValueOnce(openAIResponse('', [{ id: 'custom', name: 'inspect_workspace', arguments: '{"label":"自定义"}' }])).mockResolvedValueOnce(openAIResponse('已检查'))
@@ -82,7 +83,7 @@ it('injects an independent workspace tool through Agent without changing the run
   await agent.prompt(config, { role: 'user', content: '检查工作目录' })
   expect(agent.state.outcome).toBe('complete')
   expect(agent.state.tools.map(tool => tool.name)).toEqual(['inspect_workspace'])
-  expect(agent.state.messages.find(message => message.role === 'toolResult')).toMatchObject({ content: `自定义:${directory}`, isError: false })
+  expect(agent.state.messages.find(message => message.role === 'toolResult')).toMatchObject({ content: [{ type: 'text', text: `自定义:${directory}` }], isError: false })
   const request = JSON.parse(fetchMock.mock.calls[0][1].body)
   expect(request.tools[0].function).toMatchObject({ name: custom.name, parameters: custom.parameters })
   expect(request.tools[0].function.execute).toBeUndefined()
@@ -98,19 +99,19 @@ it('captures cwd at execution time and keeps separately bound runtime contexts i
   const pending = new Promise<void>(resolve => { finish = resolve })
   const custom: WorkspaceTool = {
     name: 'capture', description: 'Capture directory.', parameters: { type: 'object', properties: {} },
-    execute: async (_args, _signal, { cwd }) => { await pending; return cwd }
+    execute: async (_args, _signal, { cwd }) => { await pending; return { content: [{ type: 'text', text: cwd }], details: undefined } }
   }
   const bound = first.runtime.bind(custom)
   const signal = new AbortController().signal
   const running = bound.execute({}, signal)
   first.runtime.setDirectory(second.directory)
   finish()
-  expect(await running).toBe(first.directory)
-  expect(await bound.execute({}, signal)).toBe(second.directory)
-  expect(await second.runtime.bind(custom).execute({}, signal)).toBe(second.directory)
+  expect(await running).toMatchObject({ content: [{ type: 'text', text: first.directory }] })
+  expect(await bound.execute({}, signal)).toMatchObject({ content: [{ type: 'text', text: second.directory }] })
+  expect(await second.runtime.bind(custom).execute({}, signal)).toMatchObject({ content: [{ type: 'text', text: second.directory }] })
   first.runtime.setDirectory()
   await expect(bound.execute({}, signal)).rejects.toThrow('选择工作文件夹')
-  expect(await second.runtime.bind(custom).execute({}, signal)).toBe(second.directory)
+  expect(await second.runtime.bind(custom).execute({}, signal)).toMatchObject({ content: [{ type: 'text', text: second.directory }] })
 })
 
 it('requires an explicit working directory and never inherits the application cwd', async () => {
@@ -122,41 +123,43 @@ it('requires an explicit working directory and never inherits the application cw
 })
 
 it('reads current UTF-8 text, supports offset/limit and reports EOF and missing paths', async () => {
-  const { directory, run } = fixture()
+  const { directory, run, runText } = fixture()
   writeFileSync(join(directory, 'text'), '\ufeff第一行\n第二行\n第三行')
-  expect(await run('read', { path: 'text', offset: 2, limit: 1 })).toContain('第二行\n\n[显示第 2–2 行，共 3 行；使用 offset=3')
-  expect(await run('read', { path: join(directory, 'text'), offset: 3 })).toBe('第三行')
+  const page = await run('read', { path: 'text', offset: 2, limit: 1 })
+  expect(page).toMatchObject({ content: [{ type: 'text', text: expect.stringContaining('第二行\n\n[显示第 2–2 行，共 3 行；使用 offset=3') }], details: { totalLines: 3, nextOffset: 3 } })
+  expect(await runText('read', { path: join(directory, 'text'), offset: 3 })).toBe('第三行')
   await expect(run('read', { path: 'text', offset: 4 })).rejects.toThrow('共 3 行')
   await expect(run('read', { path: 'missing' })).rejects.toThrow('ENOENT')
   await expect(run('read', { path: '.' })).rejects.toThrow('EISDIR')
   writeFileSync(join(directory, 'empty'), '')
-  expect(await run('read', { path: 'empty' })).toBe('')
+  expect(await runText('read', { path: 'empty' })).toBe('')
   const homeRelative = `~/${relative(homedir(), join(directory, 'text'))}`
-  expect(await run('read', { path: homeRelative, offset: 3 })).toBe('第三行')
+  expect(await runText('read', { path: homeRelative, offset: 3 })).toBe('第三行')
 })
 
 it('truncates read at 2000 lines and 50 KiB without cutting UTF-8 or hiding the continuation', async () => {
-  const { directory, run } = fixture()
+  const { directory, run, runText } = fixture()
   writeFileSync(join(directory, 'lines'), Array.from({ length: 2100 }, (_, index) => `line-${index + 1}`).join('\n'))
-  const lines = await run('read', { path: 'lines' }) as string
+  expect((await run('read', { path: 'lines' })).details).toEqual({ totalLines: 2100, nextOffset: 2001, truncation: { lines: 2000, bytes: expect.any(Number) } })
+  const lines = await runText('read', { path: 'lines' })
   expect(lines).toContain('line-2000\n\n[')
   expect(lines).not.toContain('line-2001\n')
   expect(lines).toContain('offset=2001')
-  expect(await run('read', { path: 'lines', offset: 2001 })).toContain('line-2100')
+  expect(await runText('read', { path: 'lines', offset: 2001 })).toContain('line-2100')
   writeFileSync(join(directory, 'bytes'), Array(1000).fill('中文😀'.repeat(20)).join('\n'))
-  const bytes = await run('read', { path: 'bytes' }) as string
+  const bytes = await runText('read', { path: 'bytes' })
   expect(Buffer.byteLength(bytes.split('\n\n[')[0])).toBeLessThanOrEqual(50 * 1024)
   expect(bytes).not.toContain('\ufffd')
   expect(bytes).toMatch(/offset=\d+/)
   writeFileSync(join(directory, 'huge-line'), '中'.repeat(20_000))
-  expect(await run('read', { path: 'huge-line' })).toContain('第 1 行超过 50 KiB')
+  expect(await runText('read', { path: 'huge-line' })).toContain('第 1 行超过 50 KiB')
 })
 
 it('returns image blocks by file signature and rejects invalid UTF-8 and binary edits', async () => {
   const { directory, run } = fixture()
   writeFileSync(join(directory, 'image-without-extension'), png)
-  const output = await run('read', { path: 'image-without-extension' }) as ToolOutput
-  expect(output.images).toEqual([{ type: 'image', mimeType: 'image/png', data: png.toString('base64') }])
+  const output = await run('read', { path: 'image-without-extension' })
+  expect(output.content.filter(block => block.type === 'image')).toEqual([{ type: 'image', mimeType: 'image/png', data: png.toString('base64') }])
   writeFileSync(join(directory, 'bad'), Buffer.from([0xff, 0xfe]))
   await expect(run('read', { path: 'bad' })).rejects.toThrow('UTF-8')
   writeFileSync(join(directory, 'binary'), Buffer.from([0, 1, 2]))
@@ -167,7 +170,7 @@ it('returns image blocks by file signature and rejects invalid UTF-8 and binary 
 it('creates parent directories, completely overwrites and supports empty content', async () => {
   const { directory, run } = fixture()
   const path = join(directory, 'nested', '中文.txt')
-  await run('write', { path: 'nested/中文.txt', content: '旧内容' })
+  expect(await run('write', { path: 'nested/中文.txt', content: '旧内容' })).toEqual({ content: [{ type: 'text', text: '已写入：nested/中文.txt' }], details: undefined })
   await run('write', { path, content: '新' })
   expect(readFileSync(path, 'utf8')).toBe('新')
   await run('write', { path, content: '' })
@@ -177,7 +180,9 @@ it('creates parent directories, completely overwrites and supports empty content
 it('edits disjoint regions against the original, in any order, and preserves BOM/CRLF', async () => {
   const { directory, run } = fixture()
   writeFileSync(join(directory, 'edit'), '\ufeff第一处\r\n不变\r\n第二处\r\n')
-  const result = await run('edit', { path: 'edit', edits: [{ oldText: '第二处\n', newText: '第二处更新\n' }, { oldText: '第一处', newText: '第一处更新' }] })
+  const output = await run('edit', { path: 'edit', edits: [{ oldText: '第二处\n', newText: '第二处更新\n' }, { oldText: '第一处', newText: '第一处更新' }] })
+  const result = output.content.filter(block => block.type === 'text').map(block => block.text).join('\n')
+  expect(output.details).toEqual({ diff: expect.stringContaining('-第一处\n+第一处更新') })
   expect(readFileSync(join(directory, 'edit'), 'utf8')).toBe('\ufeff第一处更新\r\n不变\r\n第二处更新\r\n')
   expect(result).toContain('已替换 2 处')
   expect(result).toContain('-第一处\n+第一处更新')
@@ -227,30 +232,39 @@ it('does not create files or start commands for an already aborted signal', asyn
 })
 
 it('executes bash in the selected cwd, captures both streams and preserves failure output', async () => {
-  const { directory, run } = fixture()
-  expect(await run('bash', { command: 'pwd; printf "中文😀"; printf "错误输出" >&2' })).toContain(directory)
-  await expect(run('bash', { command: 'printf "失败详情" >&2; exit 7' })).rejects.toThrow('失败详情\n\n命令退出码：7')
-  expect(await run('bash', { command: 'true' })).toBe('(无输出)')
+  const { directory, run, runText } = fixture()
+  expect(await runText('bash', { command: 'pwd; printf "中文😀"; printf "错误输出" >&2' })).toContain(directory)
+  expect(await run('bash', { command: 'printf "失败详情" >&2; exit 7' })).toMatchObject({ content: [{ type: 'text', text: '失败详情\n\n命令退出码：7。' }], details: { exitCode: 7, timedOut: false }, isError: true })
+  expect(await runText('bash', { command: 'true' })).toBe('(无输出)')
 })
 
 it('retains bounded command tails and readable full logs, then removes its own logs', async () => {
-  const { runtime, run } = fixture()
-  const result = await run('bash', { command: 'for ((i=1;i<=2500;i++)); do printf "line-%s\n" "$i"; done' }) as string
+  const { runtime, runText } = fixture()
+  const result = await runText('bash', { command: 'for ((i=1;i<=2500;i++)); do printf "line-%s\n" "$i"; done' })
   expect(result).toContain('line-2500')
   expect(result).not.toContain('line-1\n')
   const path = result.match(/完整输出：([^\]]+)/)![1]
   expect(readFileSync(path, 'utf8')).toContain('line-1\n')
-  expect(await run('read', { path, offset: 2500, limit: 1 })).toContain('line-2500')
-  const bytes = await run('bash', { command: 'for ((i=0;i<20000;i++)); do printf "中文😀"; done' }) as string
+  expect(await runText('read', { path, offset: 2500, limit: 1 })).toContain('line-2500')
+  const bytes = await runText('bash', { command: 'for ((i=0;i<20000;i++)); do printf "中文😀"; done' })
   expect(Buffer.byteLength(bytes.split('\n\n[')[0])).toBeLessThanOrEqual(50 * 1024)
   expect(bytes).not.toContain('\ufffd')
   runtime.dispose()
   expect(existsSync(path)).toBe(false)
 })
 
+it('keeps structured log details when a truncated bash command fails', async () => {
+  const { run } = fixture()
+  const output = await run('bash', { command: 'for ((i=1;i<=2500;i++)); do printf "line-%s\n" "$i"; done; exit 7' })
+  expect(output).toMatchObject({ details: { exitCode: 7, timedOut: false, truncation: { lines: 2000, bytes: expect.any(Number) }, fullOutputPath: expect.any(String) }, isError: true })
+  const path = (output.details as { fullOutputPath: string }).fullOutputPath
+  expect(readFileSync(path, 'utf8')).toContain('line-1\n')
+  expect(output.content).toEqual([{ type: 'text', text: expect.stringContaining(`完整输出：${path}`) }])
+})
+
 it('times out bash and kills descendants on cancellation without allowing later side effects', async () => {
   const { directory, run } = fixture()
-  await expect(run('bash', { command: 'printf "before"; sleep 30', timeout: 0.05 })).rejects.toThrow('命令超时')
+  expect(await run('bash', { command: 'printf "before"; sleep 30', timeout: 0.05 })).toMatchObject({ content: [{ type: 'text', text: expect.stringContaining('命令超时') }], details: { timedOut: true }, isError: true })
   const controller = new AbortController()
   const pending = run('bash', { command: '(sleep 1; touch late) & printf "%s" "$!" > child.pid; wait' }, controller.signal)
   const rejected = expect(pending).rejects.toThrow()
@@ -282,9 +296,9 @@ it.each<ModelApi>(['openai-completions', 'anthropic-messages'])('runs real file 
   expect(readFileSync(join(directory, 'actual.txt'), 'utf8')).toBe('changed')
   const results = agent.state.messages.filter(message => message.role === 'toolResult')
   expect(results.map(message => message.isError)).toEqual([false, false, false, false, false, true])
-  expect(results[1].content).toBe('original')
-  expect(results[3].content).toBe('changed')
-  expect(results[5].content).toContain('ENOENT')
+  expect(results[1].content).toEqual([{ type: 'text', text: 'original' }])
+  expect(results[3].content).toEqual([{ type: 'text', text: 'changed' }])
+  expect(results[5].content).toEqual([{ type: 'text', text: expect.stringContaining('ENOENT') }])
   const request = JSON.parse(fetchMock.mock.calls[1][1].body)
   if (api === 'anthropic-messages') {
     expect(request.messages.at(-1).content[4].content[1]).toEqual({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: png.toString('base64') } })
@@ -359,6 +373,6 @@ it('returns actionable missing-workspace errors to the model', async () => {
   runtime.setDirectory()
   const agent = createAgent(tools)
   await agent.prompt(config, { role: 'user', content: '读取' })
-  expect(agent.state.messages.find(message => message.role === 'toolResult')).toMatchObject({ isError: true, content: expect.stringContaining('选择工作文件夹') })
+  expect(agent.state.messages.find(message => message.role === 'toolResult')).toMatchObject({ isError: true, content: [{ type: 'text', text: expect.stringContaining('选择工作文件夹') }] })
   expect(new ToolExecutionError('预期错误')).toBeInstanceOf(Error)
 })

@@ -4,7 +4,7 @@ import type { AgentTool } from '../../src/main/domain/llm'
 export const echoTool: AgentTool = {
   name: 'echo', description: '回传文本',
   parameters: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false },
-  execute: async input => `结果:${input.text}`
+  execute: async input => ({ content: [{ type: 'text', text: `结果:${input.text}` }], details: undefined })
 }
 export interface TestCall { id: string; name: string; arguments: string }
 export const testCall = (id: string, text = '测试'): TestCall => ({ id, name: 'echo', arguments: JSON.stringify({ text }) })

@@ -1,4 +1,4 @@
-import { ToolExecutionError, waitForTool, type ModelStream, type ToolOutput } from '../domain/llm'
+import { ToolExecutionError, waitForTool, type AgentToolResult, type ModelStream } from '../domain/llm'
 import type { AgentContext, AgentLoopEvent, ToolResultMessage } from '../domain/agent'
 import type { ModelConfig } from '../domain/model-config'
 
@@ -54,21 +54,22 @@ export class AgentLoop {
         ids.add(call.id)
         emit({ type: 'tool_execution_start', toolCallId: call.id, name: call.name })
         const registered = context.tools.find(item => item.tool.name === call.name)
-        let content = '工具未注册。'
-        let images: ToolOutput['images']
-        let isError = true
+        let output: AgentToolResult = { content: [{ type: 'text', text: '工具未注册。' }], details: undefined, isError: true }
         if (registered) {
-          if (!registered.validate(call.arguments)) content = '工具参数不符合 JSON Schema。'
+          if (!registered.validate(call.arguments)) output.content = [{ type: 'text', text: '工具参数不符合 JSON Schema。' }]
           else try {
             //waitForTool:工具正常完成，就返回工具结果；用户提前取消，就让等待工具的代码立即收到异常。
-            const output = await waitForTool(() => registered.tool.execute(call.arguments, controller.signal), controller.signal)
-            content = typeof output === 'string' ? output : output.content
-            images = typeof output === 'string' ? undefined : output.images
-            if (typeof content !== 'string') throw new Error('工具结果无效。')
-            isError = false
-          } catch (error) { controller.signal.throwIfAborted(); content = error instanceof ToolExecutionError ? error.message : '工具执行失败。' }
+            const returned = await waitForTool(() => registered.tool.execute(call.arguments, controller.signal), controller.signal)
+            if (!Array.isArray(returned.content) || returned.content.some(block => !block || (block.type === 'text'
+              ? typeof block.text !== 'string'
+              : block.type !== 'image' || typeof block.data !== 'string' || !['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(block.mimeType)))) throw new Error('工具结果无效。')
+            output = structuredClone(returned)
+          } catch (error) {
+            controller.signal.throwIfAborted()
+            output = { content: [{ type: 'text', text: error instanceof ToolExecutionError ? error.message : '工具执行失败。' }], details: undefined, isError: true }
+          }
         }
-        const result: ToolResultMessage = { role: 'toolResult', toolCallId: call.id, content, isError, ...(images?.length ? { images } : {}) }
+        const result: ToolResultMessage = { role: 'toolResult', toolCallId: call.id, content: output.content, details: output.details, isError: output.isError === true }
         messages.push(result)
         toolResults.push(result)
         emit({ type: 'tool_execution_end', toolCallId: call.id, name: call.name, result })

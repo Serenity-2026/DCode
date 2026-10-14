@@ -1,22 +1,24 @@
 import { createTwoFilesPatch } from 'diff'
 import { readFile, writeFile } from 'node:fs/promises'
-import { ToolExecutionError } from '../../domain/llm'
+import { ToolExecutionError, type AgentToolResult } from '../../domain/llm'
 import { truncateOutput } from './output'
 import { decodeText, mutateFile, pathSchema, resolveToolPath } from './file-operations'
 import type { ToolExecutionContext, WorkspaceTool } from './tool-runtime'
 
 interface TextEdit { oldText: string; newText: string }
 interface Replacement { start: number; end: number; text: string }
+/** 应用可以直接展示差异，不必从工具提示中提取。 */
+export interface EditToolDetails { diff: string }
 
 /** 独立批量编辑工具；原文统一校验后写入，文本计算与磁盘操作保持在本模块。 */
-export class EditTool implements WorkspaceTool {
+export class EditTool implements WorkspaceTool<EditToolDetails> {
   readonly name = 'edit'
   readonly description = 'Edit one UTF-8 file using edits: [{oldText, newText}]. Each oldText must identify a unique, non-overlapping region of the original file. All replacements are validated before writing. Returns a unified diff.'
   readonly parameters = { type: 'object', additionalProperties: false, required: ['path', 'edits'], properties: {
     path: pathSchema, edits: { type: 'array', minItems: 1, items: { type: 'object', additionalProperties: false, required: ['oldText', 'newText'], properties: { oldText: { type: 'string', minLength: 1 }, newText: { type: 'string' } } } }
   } }
   /** 统一验证所有替换后写入，队列在底层操作完成前持续持有路径锁。 */
-  async execute(args: Record<string, unknown>, signal: AbortSignal, { cwd }: ToolExecutionContext): Promise<string> {
+  async execute(args: Record<string, unknown>, signal: AbortSignal, { cwd }: ToolExecutionContext): Promise<AgentToolResult<EditToolDetails>> {
     const path = resolveToolPath(args.path as string, cwd)
     return mutateFile(path, async () => {
       signal.throwIfAborted()
@@ -26,7 +28,7 @@ export class EditTool implements WorkspaceTool {
       signal.throwIfAborted()
       await writeFile(path, changed.content, 'utf8')
       signal.throwIfAborted()
-      return `已替换 ${(args.edits as TextEdit[]).length} 处：${args.path}\n${changed.diff}`
+      return { content: [{ type: 'text', text: `已替换 ${(args.edits as TextEdit[]).length} 处：${args.path}\n${changed.diff}` }], details: { diff: changed.diff } }
     })
   }
 }

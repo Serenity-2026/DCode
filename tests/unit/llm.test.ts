@@ -33,7 +33,7 @@ it('sends Anthropic system, grouped tool results, signed thinking and native sch
     { type: 'toolCall', id: 'a', name: 'echo', arguments: { text: '一' } }, { type: 'toolCall', id: 'b', name: 'echo', arguments: { text: '二' } }
   ] }
   const context: LlmMessage[] = [{ role: 'system', content: '系统提示' }, { role: 'user', content: '问题' }, message,
-    { role: 'toolResult', toolCallId: 'a', content: '一', isError: false }, { role: 'toolResult', toolCallId: 'b', content: '失败', isError: true }]
+    { role: 'toolResult', toolCallId: 'a', content: [{ type: 'text', text: '一' }], details: undefined, isError: false }, { role: 'toolResult', toolCallId: 'b', content: [{ type: 'text', text: '失败' }], details: undefined, isError: true }]
   const request = anthropicRequest(selected, context, [echoTool], 1000) as { system: string; messages: { role: string; content: object[] }[]; tools: object[] }
   expect(request.system).toBe('系统提示')
   expect(request.messages).toHaveLength(3)

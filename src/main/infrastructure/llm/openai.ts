@@ -9,8 +9,9 @@ export function openAIRequest(config: ModelConfig, messages: LlmMessage[], tools
   let images: object[] = []
   for (const message of messages) {
     if (message.role === 'toolResult') {
-      converted.push({ role: 'tool', tool_call_id: message.toolCallId, content: message.isError ? JSON.stringify({ error: message.content }) : message.content })
-      images.push(...(message.images || []).map(image => ({ type: 'image_url', image_url: { url: `data:${image.mimeType};base64,${image.data}` } })))
+      const text = message.content.filter(block => block.type === 'text').map(block => block.text).join('\n')
+      converted.push({ role: 'tool', tool_call_id: message.toolCallId, content: message.isError ? JSON.stringify({ error: text }) : text })
+      images.push(...message.content.filter(block => block.type === 'image').map(image => ({ type: 'image_url', image_url: { url: `data:${image.mimeType};base64,${image.data}` } })))
       continue
     }
     if (images.length) { converted.push({ role: 'user', content: images }); images = [] }

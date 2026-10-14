@@ -3,12 +3,54 @@ import { Agent } from '../../src/main/services/agent'
 import { AgentLoop } from '../../src/main/services/agent-loop'
 import { AgentSession } from '../../src/main/services/agent-session'
 import { StateRepository } from '../../src/main/repositories/state-repository'
-import type { AgentTool } from '../../src/main/domain/llm'
+import { ToolExecutionError, type AgentTool, type AgentToolResult } from '../../src/main/domain/llm'
 import type { StreamEvent, ModelApi } from '../../src/shared/types'
 import { create, cleanup, createAgent, config } from './helpers'
 import { anthropicResponse, echoTool, openAIResponse, testCall } from './llm-fixtures'
 
 afterEach(() => { vi.unstubAllGlobals(); cleanup() })
+
+it.each<ModelApi>(['openai-completions', 'anthropic-messages'])('preserves result blocks and details and explicit failure through %s', async api => {
+  const response = api === 'anthropic-messages' ? anthropicResponse : openAIResponse
+  const failed: AgentToolResult = {
+    content: [{ type: 'text', text: '失败输出' }, { type: 'image', data: 'cGlj', mimeType: 'image/png' }, { type: 'text', text: '补充说明' }],
+    details: { exitCode: 7, localOnly: 'metadata-secret' }, isError: true
+  }
+  const execute = vi.fn<AgentTool['execute']>()
+    .mockResolvedValueOnce({ content: [{ type: 'text', text: '成功' }], details: { localOnly: 'metadata-secret' } })
+    .mockResolvedValueOnce(failed)
+    .mockRejectedValueOnce(new ToolExecutionError('可公开错误'))
+    .mockResolvedValueOnce({ content: [], details: undefined, isError: false })
+  const fetchMock = vi.fn().mockResolvedValueOnce(response('', ['a', 'b', 'c', 'd'].map(id => testCall(id)))).mockResolvedValueOnce(response('完成'))
+  vi.stubGlobal('fetch', fetchMock)
+  const agent = createAgent([{ ...echoTool, execute }])
+  const ended: boolean[] = []
+  agent.subscribe(event => { if (event.type === 'tool_execution_end') ended.push(event.result.isError) })
+  await agent.prompt({ ...config, api }, { role: 'user', content: '执行' })
+  const results = agent.state.messages.filter(message => message.role === 'toolResult')
+  expect(results.map(result => result.isError)).toEqual([false, true, true, false])
+  expect(ended).toEqual([false, true, true, false])
+  expect(results[1]).toMatchObject(failed)
+  expect(results[2]).toMatchObject({ content: [{ type: 'text', text: '可公开错误' }], details: undefined })
+  const request = JSON.parse(fetchMock.mock.calls[1][1].body)
+  expect(JSON.stringify(request)).not.toContain('metadata-secret')
+  if (api === 'anthropic-messages') {
+    const blocks = request.messages.at(-1).content
+    expect(blocks.map((block: { is_error: boolean }) => block.is_error)).toEqual([false, true, true, false])
+    expect(blocks[1].content).toEqual([{ type: 'text', text: '失败输出' }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'cGlj' } }, { type: 'text', text: '补充说明' }])
+  } else {
+    expect(JSON.parse(request.messages.find((message: { tool_call_id?: string }) => message.tool_call_id === 'b').content)).toEqual({ error: '失败输出\n补充说明' })
+    expect(request.messages.at(-1)).toEqual({ role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,cGlj' } }] })
+  }
+  expect(agent.state.outcome).toBe('complete')
+})
+
+it.each(['legacy string', { content: [{ type: 'text', text: 1 }], details: undefined }])('turns malformed tool results into errors without accepting string compatibility (%j)', async returned => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(openAIResponse('', [testCall('a')])).mockResolvedValueOnce(openAIResponse('完成')))
+  const agent = createAgent([{ ...echoTool, execute: async () => returned as unknown as AgentToolResult }])
+  await agent.prompt(config, { role: 'user', content: '执行' })
+  expect(agent.state.messages.find(message => message.role === 'toolResult')).toMatchObject({ content: [{ type: 'text', text: '工具执行失败。' }], isError: true })
+})
 
 it.each<ModelApi>(['openai-completions', 'anthropic-messages'])('executes ordered tools and continues for multiple %s turns', async api => {
   const response = api === 'anthropic-messages' ? anthropicResponse : openAIResponse
@@ -54,7 +96,7 @@ it.each<ModelApi>(['openai-completions', 'anthropic-messages'])('feeds unknown, 
 it('stops during a tool and never executes later calls or sends another model request', async () => {
   let started!: () => void
   const running = new Promise<void>(resolve => { started = resolve })
-  const execute = vi.fn<AgentTool['execute']>(async () => { started(); return new Promise<string>(() => {}) })
+  const execute = vi.fn<AgentTool['execute']>(async () => { started(); return new Promise<never>(() => {}) })
   const fetchMock = vi.fn().mockResolvedValue(openAIResponse('', [testCall('a'), testCall('b')]))
   vi.stubGlobal('fetch', fetchMock)
   const agent = createAgent([{ ...echoTool, execute }])
