@@ -8,7 +8,7 @@ import { echoTool, openAIResponse, testCall } from './llm-fixtures'
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); cleanup() })
 
-it('publishes each running tool by call ID across parallel groups and serial barriers without persisting activity', async () => {
+it('retains tool records by call ID across parallel groups, serial barriers and persistence', async () => {
   const { store, path } = await create()
   const releases = new Map<string, () => void>()
   const events: StreamEvent[] = []
@@ -24,25 +24,24 @@ it('publishes each running tool by call ID across parallel groups and serial bar
   const snapshot = session.send({ content: '执行工具' }, config)
   try {
     await vi.waitFor(() => expect(releases.size).toBe(2))
-    expect(events.at(-1)).toMatchObject({ conversationId: snapshot.activeConversationId, runningTools: [{ id: 'a', name: 'echo' }, { id: 'b', name: 'echo' }] })
+    expect(events.at(-1)).toMatchObject({ conversationId: snapshot.activeConversationId, message: { toolExecutions: [{ id: 'a', name: 'echo', status: 'running' }, { id: 'b', name: 'echo', status: 'running' }] } })
     expect(events.at(-1)!.message.content).toBe('准备执行')
-    expect(JSON.stringify(new StateRepository(path).state)).not.toContain('runningTools')
     releases.get('b')!()
-    await vi.waitFor(() => expect(events.at(-1)!.runningTools).toEqual([{ id: 'a', name: 'echo' }]))
+    await vi.waitFor(() => expect(events.at(-1)!.message.toolExecutions).toEqual([{ id: 'a', name: 'echo', status: 'running' }, { id: 'b', name: 'echo', status: 'error' }]))
+    expect(events.find(event => event.message.toolExecutions?.length === 2)!.message.toolExecutions!.every(tool => tool.status === 'running')).toBe(true)
     expect(releases.has('c')).toBe(false)
     releases.get('a')!()
     await vi.waitFor(() => expect(releases.has('c')).toBe(true))
-    expect(events.at(-1)!.runningTools).toEqual([{ id: 'c', name: 'finish' }])
+    expect(events.at(-1)!.message.toolExecutions).toEqual([{ id: 'a', name: 'echo', status: 'complete' }, { id: 'b', name: 'echo', status: 'error' }, { id: 'c', name: 'finish', status: 'running' }])
     releases.get('c')!()
     await agent.waitForIdle()
-    expect(events.some(event => event.runningTools?.length === 0)).toBe(true)
     expect(events.at(-1)!.message.status).toBe('complete')
-    expect(events.at(-1)!.runningTools || []).toEqual([])
-    expect(JSON.stringify(new StateRepository(path).state)).not.toContain('runningTools')
+    expect(events.at(-1)!.message.toolExecutions?.map(tool => tool.status)).toEqual(['complete', 'error', 'complete'])
+    expect(new StateRepository(path).state.conversations[0].messages[1].toolExecutions).toEqual(events.at(-1)!.message.toolExecutions)
   } finally { agent.abort(); await agent.waitForIdle() }
 })
 
-it.each(['stopped', 'error'] as const)('clears tool activity when the task ends as %s', async outcome => {
+it.each(['stopped', 'error'] as const)('settles tool records when the task ends as %s', async outcome => {
   const { store } = await create()
   const events: StreamEvent[] = []
   let release!: () => void
@@ -55,11 +54,11 @@ it.each(['stopped', 'error'] as const)('clears tool activity when the task ends 
   session.send({ content: '执行工具' }, config)
   try {
     await vi.waitFor(() => expect(release).toBeTypeOf('function'))
-    expect(events.at(-1)!.runningTools).toEqual([{ id: 'a', name: 'echo' }])
+    expect(events.at(-1)!.message.toolExecutions).toEqual([{ id: 'a', name: 'echo', status: 'running' }])
     if (outcome === 'stopped') await session.stop()
     else { release(); await agent.waitForIdle() }
     expect(events.at(-1)!.message.status).toBe(outcome)
-    expect(events.at(-1)!.runningTools || []).toEqual([])
+    expect(events.at(-1)!.message.toolExecutions).toEqual([{ id: 'a', name: 'echo', status: outcome === 'stopped' ? 'stopped' : 'complete' }])
   } finally { agent.abort(); await agent.waitForIdle() }
 })
 

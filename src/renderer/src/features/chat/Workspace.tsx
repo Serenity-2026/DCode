@@ -4,7 +4,7 @@ import {
   ArrowUpOutlined, PlusOutlined, SearchOutlined, MessageOutlined, MoreOutlined,
   SettingOutlined, CodeOutlined, BugOutlined, BranchesOutlined, CopyOutlined,
   ReloadOutlined, StopOutlined, DeleteOutlined, EditOutlined, LogoutOutlined,
-  DownOutlined, RightOutlined, FolderOpenOutlined, LoadingOutlined
+  DownOutlined, RightOutlined, FolderOpenOutlined, LoadingOutlined, CheckCircleOutlined, CloseCircleOutlined
 } from '@ant-design/icons'
 import type { Action, Attachment, Message, ModelRefresh, Result, Snapshot, StreamEvent } from '../../../../shared/types'
 import { estimateContext, validateAttachments } from '../../../../shared/context'
@@ -221,12 +221,17 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
    * 依赖 Markdown 组件与 Ant Design；复制走 window.dcode.copyText，最后一条回复可调用 send 重试。
    */
   function renderAssistant(m: Message, last: boolean): ReactNode {
-    const runningTools = m.status === 'streaming' ? streamEvents.current.get(m.id)?.runningTools || [] : []
+    const tools = m.toolExecutions || []
+    const running = tools.some(tool => tool.status === 'running')
     return <div className="assistant-content">
       {m.reasoning && <details className="reasoning"><summary>思考过程</summary><p>{m.reasoning}</p></details>}
-      {m.content ? <Markdown content={m.content} /> : m.status === 'streaming' && !runningTools.length ? <div className="thinking-dots" aria-label="正在生成"><i /><i /><i /></div> : null}
-      {runningTools.length > 0 && <div className="tool-activity" role="status" aria-label="工具执行状态">
-        {runningTools.map(tool => <Tag key={tool.id} icon={<LoadingOutlined spin />}>正在执行 {tool.name}</Tag>)}
+      {m.content ? <Markdown content={m.content} /> : m.status === 'streaming' && !running ? <div className="thinking-dots" aria-label="正在生成"><i /><i /><i /></div> : null}
+      {tools.length > 0 && <div className="tool-activity" role="group" aria-label="工具调用记录">
+        {tools.map(tool => <Tag key={tool.id} role={tool.status === 'running' ? 'status' : undefined} aria-label={tool.status === 'running' ? '工具执行状态' : undefined}
+          color={tool.status === 'error' ? 'error' : undefined}
+          icon={tool.status === 'running' ? <LoadingOutlined spin /> : tool.status === 'complete' ? <CheckCircleOutlined /> : tool.status === 'error' ? <CloseCircleOutlined /> : <StopOutlined />}>
+          {{ running: '正在执行', complete: '已完成', error: '执行失败', stopped: '已停止' }[tool.status]} {tool.name}
+        </Tag>)}
       </div>}
       {m.status === 'error' && <Alert title={m.error || '生成失败，请重试。'} type="error" showIcon />}
       {m.status === 'stopped' && <div className="message-status">已停止生成</div>}

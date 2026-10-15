@@ -30,6 +30,7 @@ export interface Message {
   error?: string
   createdAt: string
   attachments?: Attachment[]
+  toolExecutions?: ToolExecution[]
 }
 
 /** 属于一个账号的完整对话，StateService 持久化，AgentSession 构建模型上下文。 */
@@ -84,11 +85,11 @@ export type Action =
   | { type: 'reasoning-effort'; effort: ReasoningEffort | null }
   | { type: 'theme'; theme: Theme }
 
-/** 单次工具调用的运行标识；同名并行调用按 ID 区分，不包含参数或结果。 */
-export interface RunningTool { id: string; name: string }
+/** 单次真实工具调用的展示记录，按 ID 区分同名调用，不包含参数或结果正文。 */
+export interface ToolExecution { id: string; name: string; status: 'running' | 'complete' | 'error' | 'stopped' }
 
-/** 流更新携带完整消息与当前工具列表；工具状态仅用于界面，不写入对话历史。 */
-export interface StreamEvent { conversationId: string; message: Message; runningTools?: RunningTool[] }
+/** 流更新携带完整消息及工具记录，Workspace 按消息 ID 合并。 */
+export interface StreamEvent { conversationId: string; message: Message }
 
 /** 主进程 IPC 的成功/失败结果，不向界面泄露秘密。 */
 export type Result<T> = { ok: true; value: T } | { ok: false; error: string }

@@ -35,6 +35,11 @@ function validState(value: unknown): boolean {
     conversationIds.add(c.id)
     if (c.messages.some(m => !m || typeof m.id !== 'string' || !['user', 'assistant'].includes(m.role) || typeof m.content !== 'string' || typeof m.reasoning !== 'string' || !['complete', 'streaming', 'stopped', 'error'].includes(m.status) || typeof m.createdAt !== 'string' || (m.error !== undefined && typeof m.error !== 'string'))) return false
     if (new Set(c.messages.map(m => m.id)).size !== c.messages.length) return false
+    for (const message of c.messages) if (message.toolExecutions !== undefined) {
+      const tools = message.toolExecutions
+      if (!Array.isArray(tools) || tools.some(tool => !tool || typeof tool.id !== 'string' || !tool.id || typeof tool.name !== 'string' || !tool.name || !['running', 'complete', 'error', 'stopped'].includes(tool.status))) return false
+      if (new Set(tools.map(tool => tool.id)).size !== tools.length) return false
+    }
     try { for (const message of c.messages) validateAttachments(message.attachments) } catch { return false }
   }
   if (state.activeUserId !== null && !ids.has(state.activeUserId)) return false

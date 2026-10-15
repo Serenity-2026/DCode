@@ -17,7 +17,10 @@ export class StateService {
       for (const profile of user.providers) this.reconcileEfforts(profile)
     }
     for (const conversation of this.state.conversations) {
-      for (const message of conversation.messages) if (message.status === 'streaming') message.status = 'stopped'
+      for (const message of conversation.messages) {
+        if (message.status === 'streaming') message.status = 'stopped'
+        for (const tool of message.toolExecutions || []) if (tool.status === 'running') tool.status = 'stopped'
+      }
     }
     this.save()
   }

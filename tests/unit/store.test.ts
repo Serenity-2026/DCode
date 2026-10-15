@@ -32,9 +32,11 @@ describe('account-owned conversations', () => {
     const { store, path } = await create()
     const { message } = store.begin('测试问题', false, 'test-model')
     message.content = '部分回答'
+    message.toolExecutions = [{ id: 'read-1', name: 'read', status: 'complete' }, { id: 'write-1', name: 'write', status: 'running' }]
     store.save()
     const restored = new StateService(new StateRepository(path))
     expect(restored.state.conversations[0].messages[1]).toMatchObject({ content: '部分回答', status: 'stopped' })
+    expect(restored.state.conversations[0].messages[1].toolExecutions).toEqual([{ id: 'read-1', name: 'read', status: 'complete' }, { id: 'write-1', name: 'write', status: 'stopped' }])
     expect(restored.state.activeConversationId).toBe(store.state.activeConversationId)
     expect(restored.snapshot().conversations).toEqual([])
     expect(JSON.parse(readFileSync(path, 'utf8')).schemaVersion).toBe(3)
@@ -106,6 +108,21 @@ describe('account-owned conversations', () => {
       writeFileSync(path, broken)
       expect(() => new StateService(new StateRepository(path))).toThrow('无法读取')
       expect(readFileSync(path, 'utf8')).toBe(broken)
+    }
+  })
+
+  it('rejects malformed or duplicate tool records without overwriting the file', async () => {
+    const { store, path } = await create()
+    store.begin('工具记录', false, 'test')
+    const original = structuredClone(store.state)
+    const tool = { id: 'call', name: 'read', status: 'complete' }
+    for (const tools of [null, {}, [null], [{ ...tool, status: 'unknown' }], [{ ...tool, name: 1 }], [{ ...tool, id: '' }], [tool, tool]]) {
+      const broken = structuredClone(original)
+      Object.assign(broken.conversations[0].messages[1], { toolExecutions: tools })
+      const bytes = JSON.stringify(broken)
+      writeFileSync(path, bytes)
+      expect(() => new StateRepository(path)).toThrow('无法读取')
+      expect(readFileSync(path, 'utf8')).toBe(bytes)
     }
   })
 })

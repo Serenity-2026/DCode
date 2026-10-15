@@ -111,6 +111,14 @@ test.beforeAll(async () => {
         response.writeHead(401); response.end('Invalid key'); return
       }
       const toolStatusPrompt = payload.messages.filter((message: { role: string }) => message.role === 'user').at(-1)?.content
+      if (typeof toolStatusPrompt === 'string' && toolStatusPrompt.includes('快速读取续写验证')) {
+        const results = payload.messages.filter((message: { role: string }) => message.role === 'tool')
+        const calls = results.length === 0 ? [{ id: 'quick_read', name: 'read', arguments: JSON.stringify({ path: 'story.txt' }) }]
+          : results.length === 1 ? [{ id: 'quick_write', name: 'write', arguments: JSON.stringify({ path: 'story.txt', content: `${results[0].content}\n续写段落` }) }] : []
+        const stream = openAIResponse(calls.length ? '' : '续写完成', calls)
+        response.writeHead(200, { 'Content-Type': 'text/event-stream' })
+        void stream.text().then(body => response.end(body)); return
+      }
       if (typeof toolStatusPrompt === 'string' && toolStatusPrompt.includes('工具状态')) {
         const hasResults = payload.messages.some((message: { role: string }) => message.role === 'tool')
         const calls = [{ id: 'status_bash', name: 'bash', arguments: JSON.stringify({ command: toolStatusPrompt.includes('停止') ? 'sleep 30' : 'sleep 3' }) }]
@@ -226,7 +234,33 @@ test('shows the running tool across conversation navigation and clears it on com
   await expect(activity).toHaveText('正在执行 bash')
   await page.getByRole('button', { name: '停止生成', exact: true }).click()
   await expect(activity).toHaveCount(0)
-  expect(readFileSync(join(directory, 'state.json'), 'utf8')).not.toContain('runningTools')
+  expect(JSON.parse(readFileSync(join(directory, 'state.json'), 'utf8')).conversations[0].messages.at(-1).toolExecutions).toEqual([{ id: 'status_bash', name: 'bash', status: 'stopped' }])
+})
+
+test('retains fast read and write records after continuing a file, navigation and restart', async () => {
+  await launch()
+  await authenticate('quicktools', true)
+  const project = join(directory, 'story-project')
+  mkdirSync(project)
+  writeFileSync(join(project, 'story.txt'), '故事开头')
+  await application.evaluate(({ dialog }, project) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [project] }) }, project)
+  await page.getByRole('button', { name: '添加附件', exact: true }).click()
+  await page.getByRole('menuitem', { name: /添加文件夹/ }).click()
+  await page.getByRole('textbox', { name: '消息', exact: true }).fill('快速读取续写验证')
+  await page.getByRole('button', { name: '发送消息', exact: true }).click()
+  const reply = page.locator('article[data-role="assistant"][data-status="complete"]')
+  await expect(reply).toContainText('续写完成')
+  await expect(reply.getByText('已完成 read', { exact: true })).toBeVisible()
+  await expect(reply.getByText('已完成 write', { exact: true })).toBeVisible()
+  expect(readFileSync(join(project, 'story.txt'), 'utf8')).toBe('故事开头\n续写段落')
+  await page.getByRole('button', { name: '新对话', exact: true }).click()
+  await expect(page.getByRole('group', { name: '工具调用记录', exact: true })).toHaveCount(0)
+  await page.getByRole('button', { name: '快速读取续写验证', exact: true }).click()
+  await expect(reply.getByText('已完成 read', { exact: true })).toBeVisible()
+  await application.close()
+  await launch()
+  await expect(page.getByText('已完成 read', { exact: true })).toBeVisible()
+  await expect(page.getByText('已完成 write', { exact: true })).toBeVisible()
 })
 
 test('production read/bash/edit/write use the selected folder and recover it after restart', async () => {
