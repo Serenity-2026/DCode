@@ -50,30 +50,6 @@ it('retains full tool context across standalone prompts without any session or s
   expect(agent.state.messages.at(-1)).toMatchObject({ content: [{ type: 'text', text: '第二答' }] })
 })
 
-it.each(['cancel', 'observer'])('records completed parallel results in call order on interruption (%s)', async interruption => {
-  const fetchMock = vi.fn().mockResolvedValueOnce(openAIResponse('', [testCall('a', 'first'), testCall('b', 'waiting'), testCall('c', 'last')]))
-  vi.stubGlobal('fetch', fetchMock)
-  const agent = createAgent([{ ...echoTool, executionMode: 'parallel', execute: async args => {
-    if (args.text === 'waiting' && interruption === 'cancel') return new Promise<never>(() => {})
-    return { content: [{ type: 'text', text: String(args.text) }], details: undefined }
-  } }])
-  const events: AgentEvent[] = []
-  agent.subscribe(event => {
-    events.push(event)
-    if (event.type === 'tool_execution_end' && event.toolCallId === 'c') {
-      if (interruption === 'cancel') agent.abort()
-      else throw new Error('订阅者失败')
-    }
-  })
-  await agent.prompt(config, { role: 'user', content: '问题' })
-  const completed = interruption === 'cancel' ? ['a', 'c'] : ['a', 'b', 'c']
-  expect(agent.state.outcome).toBe(interruption === 'cancel' ? 'stopped' : 'error')
-  if (interruption === 'observer') expect(agent.state.errorMessage).toBe('订阅者失败')
-  expect(agent.state.messages.flatMap(message => message.role === 'toolResult' ? [message.toolCallId] : [])).toEqual(completed)
-  expect(events.flatMap(event => event.type === 'message_end' && event.message.role === 'toolResult' ? [event.message.toolCallId] : [])).toEqual(completed)
-  expect(fetchMock).toHaveBeenCalledOnce()
-})
-
 it('isolates imported messages, state snapshots and each subscriber from model context', async () => {
   const fetchMock = vi.fn().mockResolvedValueOnce(openAIResponse('', [testCall('a')])).mockResolvedValueOnce(openAIResponse('完成'))
   vi.stubGlobal('fetch', fetchMock)

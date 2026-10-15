@@ -43,19 +43,7 @@ export class AgentLoop {
         if (ids.has(call.id)) throw new Error('模型工具调用 ID 重复。')
         ids.add(call.id)
       }
-      const completed = new Map<string, ToolResultMessage>()
-      try {
-        toolResults.push(...await this.executor.execute(calls, context.tools, controller.signal, event => {
-          if (event.type === 'tool_execution_end') completed.set(event.toolCallId, structuredClone(event.result))
-          emit(event)
-        }))
-      } finally {
-        // 正式消息由循环记录；取消或订阅失败时也保留已完成结果，且顺序与模型调用一致。
-        for (const call of calls) {
-          const result = completed.get(call.id)
-          if (result) emit({ type: 'message_end', message: result })
-        }
-      }
+      toolResults.push(...await this.executor.execute(calls, context.tools, controller.signal, emit))
       messages.push(...toolResults)
       emit({ type: 'turn_end', message: reply, toolResults })
       controller.signal.throwIfAborted()
