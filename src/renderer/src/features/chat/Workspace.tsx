@@ -324,8 +324,8 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
                   : 'M2 17V6a2 2 0 0 1 2-2h5l2 2h8a2 2 0 0 1 2 2v2M2 20h16l4-10H6L2 20Z'} />
               </svg><span className="folder-name">{folder.name}</span>
             </Button>
-            <Button className="folder-new-chat" type="text" icon={<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
-              <path d="M12 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6M16 4l4 4M9 15l4-1 8-8a2.12 2.12 0 0 0-3-3l-8 8-1 4Z" />
+            <Button className="folder-new-chat" type="text" icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+              <path d="M12 4H8a4 4 0 0 0-4 4v8a4 4 0 0 0 4 4h8a4 4 0 0 0 4-4v-4M16 4l4 4M9.5 15l3.6-1c.3-.1.6-.2.8-.5l7-7a2.5 2.5 0 0 0-3.5-3.5l-7 7c-.3.2-.4.5-.5.8l-1 3.6a.5.5 0 0 0 .6.6Z" />
             </svg>} disabled={interacting} aria-label={`在 ${folder.name} 中新建对话`} title="新建对话" onClick={() => void createConversation(folder.conversations[0].id)} />
             </div>
           </Dropdown>
