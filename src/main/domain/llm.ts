@@ -58,7 +58,7 @@ export interface AgentTool<TDetails = unknown> extends ToolDefinition {
   execute(argumentsValue: Record<string, unknown>, signal: AbortSignal): Promise<AgentToolResult<TDetails>>
 }
 
-/** 可向模型展示的预期工具错误；其他异常仍由循环隐藏细节。 */
+/** 预期工具错误直接作为结果文本；其他调用异常由执行器加前缀后返回模型。 */
 export class ToolExecutionError extends Error {}
 
 /** 会话只配置本轮目录，系统工具实现磁盘与进程访问。 */

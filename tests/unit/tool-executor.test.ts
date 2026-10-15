@@ -49,7 +49,7 @@ it('runs contiguous parallel groups with serial barriers and records results in 
   finished.f.release()
   expect((await pending).map(message => message.toolCallId)).toEqual(names)
   expect(events.flatMap(event => event.type === 'tool_execution_end' ? [event.toolCallId] : [])).toEqual(['b', 'a', 'c', 'e', 'd', 'f'])
-  expect(events.flatMap(event => event.type === 'message_end' && event.message.role === 'toolResult' ? [event.message.toolCallId] : [])).toEqual(names)
+  expect(events.some(event => event.type === 'message_end')).toBe(false)
 })
 
 it('defaults undeclared tools to serial and keeps consecutive serial calls separate', async () => {
@@ -73,19 +73,31 @@ it('defaults undeclared tools to serial and keeps consecutive serial calls separ
 it('converts invalid and failed calls into results and continues through later groups', async () => {
   const invalid = vi.fn(async () => result('不应执行'))
   const tools = [
-    registered('private', 'parallel', async () => { throw new Error('private-secret') }),
+    registered('unexpected', 'parallel', async () => { throw new Error('执行故障') }),
     registered('public', 'parallel', async () => { throw new ToolExecutionError('可公开错误') }),
     registered('bad', 'parallel', async () => ({ content: 'not-blocks' } as unknown as AgentToolResult)),
     registered('invalid', 'parallel', invalid),
     registered('last', 'parallel', async () => ({ ...result('失败输出'), isError: true, details: { exitCode: 7 }, structuredContent: [1, null] }))
   ]
-  const calls = [call('private'), call('public'), call('bad'), { ...call('invalid'), arguments: { text: 1 } }, call('unknown'), call('last')]
+  const calls = [call('unexpected'), call('public'), call('bad'), { ...call('invalid'), arguments: { text: 1 } }, call('unknown'), call('last')]
   const outputs = await new ToolExecutor().execute(calls, tools, new AbortController().signal, () => {})
   expect(outputs.map(output => output.isError)).toEqual([true, true, true, true, true, true])
-  expect(outputs.map(output => output.content)).toEqual(['工具执行失败。', '可公开错误', '工具执行失败。', '工具参数不符合 JSON Schema。', '工具未注册。', '失败输出'].map(text => [{ type: 'text', text }]))
+  expect(outputs.map(output => output.content)).toEqual(['工具调用异常：执行故障', '可公开错误', '工具调用异常：工具结果无效。', '工具参数不符合 JSON Schema。', '工具未注册。', '失败输出'].map(text => [{ type: 'text', text }]))
   expect(outputs.at(-1)).toMatchObject({ details: { exitCode: 7 }, structuredContent: [1, null] })
-  expect(JSON.stringify(outputs)).not.toContain('private-secret')
   expect(invalid).not.toHaveBeenCalled()
+})
+
+it.each([new Error('校验器故障'), '校验器故障'])('returns validation exceptions as paired error results and continues (%s)', async cause => {
+  const broken = registered('broken', 'parallel')
+  broken.validate = () => { throw cause }
+  const events: AgentLoopEvent[] = []
+  const tools = [broken, registered('sibling', 'parallel'), registered('later', 'sequential')]
+  const outputs = await new ToolExecutor().execute(tools.map(item => call(item.tool.name)), tools, new AbortController().signal, event => events.push(event))
+  expect(outputs.map(output => output.toolCallId)).toEqual(['broken', 'sibling', 'later'])
+  expect(outputs[0]).toMatchObject({ role: 'toolResult', toolCallId: 'broken', isError: true, content: [{ type: 'text', text: '工具调用异常：校验器故障' }] })
+  expect(events.filter(event => event.type === 'tool_execution_start')).toHaveLength(3)
+  expect(events.filter(event => event.type === 'tool_execution_end')).toHaveLength(3)
+  expect(events.some(event => event.type === 'message_end')).toBe(false)
 })
 
 it('retains completed results on parallel cancellation and never starts later groups or emits late completion', async () => {
@@ -109,13 +121,13 @@ it('retains completed results on parallel cancellation and never starts later gr
   await Promise.all([started.promise, completed.promise])
   controller.abort(); await rejected
   expect(next).not.toHaveBeenCalled()
-  expect(events.flatMap(event => event.type === 'message_end' && event.message.role === 'toolResult' ? [event.message.toolCallId] : [])).toEqual(['done'])
+  expect(events.flatMap(event => event.type === 'tool_execution_end' ? [event.toolCallId] : [])).toEqual(['done'])
   const count = events.length
   late.release(); await late.promise
   expect(events).toHaveLength(count)
 })
 
-it('settles started siblings before propagating a framework failure and skips later groups', async () => {
+it.each(['tool_execution_start', 'tool_execution_end'])('settles started siblings before propagating an observer failure at %s and skips later groups', async eventType => {
   const started = gate()
   const fault = gate()
   const sibling = gate()
@@ -123,7 +135,7 @@ it('settles started siblings before propagating a framework failure and skips la
   const tools = [registered('a', 'parallel'), registered('b', 'parallel', async () => { started.release(); await sibling.promise; return result('b') }), registered('next', 'sequential', next)]
   let settled = false
   const pending = new ToolExecutor().execute(tools.map(item => call(item.tool.name)), tools, new AbortController().signal, event => {
-    if (event.type === 'tool_execution_end' && event.toolCallId === 'a') { fault.release(); throw new Error('事件订阅失败') }
+    if (event.type === eventType && event.toolCallId === 'a') { fault.release(); throw new Error('事件订阅失败') }
   })
   void pending.then(() => { settled = true }, () => { settled = true })
   const rejected = expect(pending).rejects.toThrow('事件订阅失败')
@@ -141,7 +153,6 @@ it('isolates simultaneous batches on one executor and isolates emitted result co
   await started.promise
   const second = await executor.execute([call('same')], [registered('same', 'parallel', async () => result('second'))], new AbortController().signal, event => {
     if (event.type === 'tool_execution_end') event.result.content = [{ type: 'text', text: 'mutated' }]
-    if (event.type === 'message_end' && event.message.role === 'toolResult') event.message.content = []
   })
   expect(second[0].content).toEqual([{ type: 'text', text: 'second' }])
   waiting.release()

@@ -172,11 +172,11 @@ it('keeps result metadata isolated and cancellation takes precedence over termin
   expect(fetch).toHaveBeenCalledOnce()
 })
 
-it.each(['legacy string', { content: [{ type: 'text', text: 1 }], details: undefined }])('turns malformed tool results into errors without accepting string compatibility (%j)', async returned => {
+it.each([null, 'legacy string', { content: [{ type: 'text', text: 1 }], details: undefined }])('turns malformed tool results into errors without accepting string compatibility (%j)', async returned => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(openAIResponse('', [testCall('a')])).mockResolvedValueOnce(openAIResponse('完成')))
   const agent = createAgent([{ ...echoTool, execute: async () => returned as unknown as AgentToolResult }])
   await agent.prompt(config, { role: 'user', content: '执行' })
-  expect(agent.state.messages.find(message => message.role === 'toolResult')).toMatchObject({ content: [{ type: 'text', text: '工具执行失败。' }], isError: true })
+  expect(agent.state.messages.find(message => message.role === 'toolResult')).toMatchObject({ content: [{ type: 'text', text: '工具调用异常：工具结果无效。' }], isError: true })
 })
 
 it.each<ModelApi>(['openai-completions', 'anthropic-messages'])('executes ordered tools and continues for multiple %s turns', async api => {
@@ -206,7 +206,7 @@ it.each<ModelApi>(['openai-completions', 'anthropic-messages'])('executes ordere
 
 it.each<ModelApi>(['openai-completions', 'anthropic-messages'])('feeds unknown, invalid and failed calls back through %s without executing invalid input', async api => {
   const response = api === 'anthropic-messages' ? anthropicResponse : openAIResponse
-  const execute = vi.fn(async () => { throw new Error('private-key') })
+  const execute = vi.fn(async () => { throw new Error('执行故障') })
   const fetchMock = vi.fn().mockResolvedValueOnce(response('', [{ ...testCall('a'), name: 'shell' }, { ...testCall('b'), arguments: '{"text":1}' }, testCall('c')]))
     .mockResolvedValueOnce(response('已处理工具错误'))
   vi.stubGlobal('fetch', fetchMock)
@@ -215,9 +215,11 @@ it.each<ModelApi>(['openai-completions', 'anthropic-messages'])('feeds unknown, 
   expect(agent.state.outcome).toBe('complete')
   expect(execute).toHaveBeenCalledOnce()
   const messages = JSON.parse(fetchMock.mock.calls[1][1].body).messages
-  expect(JSON.stringify(messages)).not.toContain('private-key')
-  if (api === 'anthropic-messages') expect(messages.at(-1).content.map((block: { is_error: boolean }) => block.is_error)).toEqual([true, true, true])
-  else expect(messages.filter((message: { role: string }) => message.role === 'tool').map((message: { content: string }) => JSON.parse(message.content).error)).toEqual(['工具未注册。', '工具参数不符合 JSON Schema。', '工具执行失败。'])
+  const errors = ['工具未注册。', '工具参数不符合 JSON Schema。', '工具调用异常：执行故障']
+  if (api === 'anthropic-messages') {
+    expect(messages.at(-1).content.map((block: { is_error: boolean }) => block.is_error)).toEqual([true, true, true])
+    expect(messages.at(-1).content.map((block: { content: string }) => block.content)).toEqual(errors)
+  } else expect(messages.filter((message: { role: string }) => message.role === 'tool').map((message: { content: string }) => JSON.parse(message.content).error)).toEqual(errors)
 })
 
 it('stops during a tool and never executes later calls or sends another model request', async () => {
