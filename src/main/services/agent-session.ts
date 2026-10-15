@@ -18,7 +18,7 @@ export class AgentSession {
   }
 
   /** 等待终止事件完成保存之前，IPC 与窗口都继续视为忙碌。 */
-  get busy(): boolean { return this.agent.busy }
+  get busy(): boolean { return this.agent.busy || Boolean(this.workspace?.changing) }
 
   /** 创建回复占位，替换为当前会话成功历史，再把本次问题交给 Agent。 */
   send(input: SendInput, config: ModelConfig): Snapshot {
@@ -30,6 +30,7 @@ export class AgentSession {
     const target = this.target = { conversationId: conversation.id, messageId: message.id, lastSave: Date.now(), lastEmit: 0 }
     try {
       this.workspace?.setDirectory(conversation.directory)
+      this.workspace?.setTurn?.({ conversationId: conversation.id, messageId: message.id })
       const context = toLlmMessages(contextMessages(conversation))
       const prompt = context.pop() as Extract<LlmMessage, { role: 'user' }>
       this.agent.replaceMessages(context)
@@ -48,6 +49,7 @@ export class AgentSession {
   async stop(): Promise<Snapshot> {
     this.agent.abort()
     await this.agent.waitForIdle()
+    await this.workspace?.waitForChanges?.()
     this.store.save()
     return this.store.snapshot()
   }
@@ -68,7 +70,7 @@ export class AgentSession {
         message.error = errors.join('\n')
         report = true
       }
-      try { this.emit({ conversationId: conversation.id, message: structuredClone(message) }) } catch (error) {
+      try { this.emit({ conversationId: conversation.id, message: this.store.publicMessage(message, conversation.id) }) } catch (error) {
         errors.push(`界面通知失败：${error instanceof Error ? error.message : '无法推送回复。'}`)
         message.error = errors.join('\n')
         report = true
@@ -89,7 +91,7 @@ export class AgentSession {
       message.reasoning += event.delta.reasoning || ''
       if (Date.now() - target.lastSave >= 500) { this.store.save(); target.lastSave = Date.now() }
       if (Date.now() - target.lastEmit >= 30) {
-        this.emit({ conversationId: conversation.id, message: structuredClone(message) })
+        this.emit({ conversationId: conversation.id, message: this.store.publicMessage(message, conversation.id) })
         target.lastEmit = Date.now()
       }
     } else if (event.type === 'tool_execution_start' || event.type === 'tool_execution_end') {
@@ -107,7 +109,7 @@ export class AgentSession {
         }
       }
       // 保留已结束的调用，快速工具也可见；状态立即推送，不受正文节流影响。
-      this.emit({ conversationId: conversation.id, message: structuredClone(message) })
+      this.emit({ conversationId: conversation.id, message: this.store.publicMessage(message, conversation.id) })
     } else if (event.type === 'agent_end') {
       message.status = event.outcome
       for (const tool of message.toolExecutions || []) if (tool.status === 'running') tool.status = event.outcome === 'stopped' ? 'stopped' : 'error'
@@ -115,7 +117,7 @@ export class AgentSession {
       conversation.updatedAt = new Date().toISOString()
       this.store.save()
       this.target = undefined
-      this.emit({ conversationId: conversation.id, message: structuredClone(message) })
+      this.emit({ conversationId: conversation.id, message: this.store.publicMessage(message, conversation.id) })
     }
   }
 }

@@ -17,6 +17,19 @@ export interface AttachmentSelection { attachments: Attachment[]; skipped: numbe
 /** AgentSession 的发送输入，重试复用已保存的附件，不能通过此接口要求读取本机路径。 */
 export interface SendInput { content: string; retry?: boolean; attachments?: Attachment[]; conversationId?: string | null }
 
+/** 撤销一轮的全部文件或其中一个文件；不接受页面提交磁盘路径。 */
+export interface UndoFilesInput { conversationId: string; messageId: string; changeId?: string }
+
+/** 每轮按文件汇总的净变化；完整恢复副本仅保存在主进程。 */
+export interface FileChange {
+  id: string
+  path: string
+  additions: number
+  deletions: number
+  status: 'pending' | 'applied' | 'reverted'
+  preview: FilePreview
+}
+
 /** 项目名称与用户通过原生选择器确认的父目录；不选位置时使用应用工作区。 */
 export interface ProjectDraft { name: string; parentDirectory?: string }
 
@@ -34,6 +47,7 @@ export interface Message {
   createdAt: string
   attachments?: Attachment[]
   toolExecutions?: ToolExecution[]
+  fileChanges?: FileChange[]
 }
 
 /** 属于一个账号的完整对话，StateService 持久化，AgentSession 构建模型上下文。 */
@@ -138,6 +152,8 @@ export interface DCodeAPI {
   selectAttachments(kind: 'file' | 'folder'): Promise<Result<AttachmentSelection>>
   /** 停止指定会话的任务并等待结果保存，不影响其他会话。 */
   stop(conversationId: string): Promise<Result<Snapshot>>
+  /** 撤销指定回复的文件修改，保留聊天记录。 */
+  undoFiles(input: UndoFilesInput): Promise<Result<Snapshot>>
   /** 订阅消息更新，返回退订函数。 */
   onStream(callback: (event: StreamEvent) => void): () => void
   /** 校验后在系统浏览器打开链接。 */

@@ -62,7 +62,16 @@ export interface AgentTool<TDetails = unknown> extends ToolDefinition {
 export class ToolExecutionError extends Error {}
 
 /** 会话只配置本轮目录，系统工具实现磁盘与进程访问。 */
-export interface ToolWorkspace { setDirectory(directory?: string): void }
+export interface ToolWorkspace {
+  readonly changing?: boolean
+  setDirectory(directory?: string): void
+  setTurn?(turn: FileChangeTurn): void
+  waitForChanges?(): Promise<void>
+}
+
+/** 文件工具把实际写操作交给应用记录，运行层不依赖会话服务或仓库。 */
+export interface FileChangeTurn { conversationId: string; messageId: string }
+export type RecordFileChange = (turn: FileChangeTurn, path: string, before: string | null, after: string, write: () => Promise<void>) => Promise<void>
 
 /** AgentSession 只消费文本增量，完整内容块由模型端口返回给循环。 */
 export interface LlmDelta { content?: string; reasoning?: string }

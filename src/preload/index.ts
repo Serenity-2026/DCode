@@ -34,6 +34,8 @@ const api: DCodeAPI = {
   selectAttachments: (kind) => ipcRenderer.invoke(channels.selectAttachments, kind),
   /** 请求 AgentSessions.stop 取消指定会话的任务，等待主进程保存后获取最终快照。 */
   stop: (conversationId) => ipcRenderer.invoke(channels.stop, conversationId),
+  /** 撤销指定回复中的文件修改，主进程核对账号归属和磁盘当前内容。 */
+  undoFiles: (input) => ipcRenderer.invoke(channels.undoFiles, input),
   /** 将链接交给主进程校验，再由 Electron shell 打开系统浏览器。 */
   openLink: (url) => ipcRenderer.invoke(channels.openLink, url),
   /** 将文本交给主进程的 Electron clipboard 复制，不暴露剪贴板读取能力。 */

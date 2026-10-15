@@ -131,6 +131,32 @@ button { -webkit-app-region: no-drag; }
 .user-content { margin-left: 32px; line-height: 1.85; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .assistant-content { margin-left: 32px; }
 .assistant-timeline { min-width: 0; }
+.file-changes-card { margin-top: 20px; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--panel); }
+.file-changes-header { display: flex; align-items: center; gap: 12px; padding: 16px; background: var(--hover); border-bottom: 1px solid var(--line); }
+.file-changes-icon { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; flex-shrink: 0; border-radius: 10px; color: var(--muted); background: var(--surface); font-size: 21px; }
+.file-changes-heading { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 4px; }
+.file-changes-heading strong { font-size: 13px; font-weight: 550; }
+.file-changes-counts { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; font: 12px/1.5 ui-monospace, SFMono-Regular, monospace; font-variant-numeric: tabular-nums; }
+.file-additions { color: #328854; }
+.file-deletions { color: #cc4e4e; }
+.shell[data-theme='dark'] .file-additions { color: #63c589; }
+.shell[data-theme='dark'] .file-deletions { color: #ef8181; }
+.file-changes-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.file-changes-actions button { font-size: 12px; }
+.file-changes-view { background: transparent; border-color: var(--line); color: var(--text); border-radius: 8px; }
+.file-changes-list { list-style: none; padding: 6px 12px; margin: 0; }
+.file-change-row { display: flex; align-items: center; gap: 6px; min-width: 0; min-height: 38px; }
+.file-change-path { flex: 1; min-width: 0; height: 34px; padding: 0 4px; justify-content: flex-start; color: var(--text); font-size: 12px; }
+.file-change-path > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-change-directory { color: var(--muted); }
+.file-change-undo { opacity: 0; color: var(--muted); flex-shrink: 0; }
+.file-change-row:hover .file-change-undo, .file-change-row:focus-within .file-change-undo { opacity: 1; }
+.file-change-status { color: var(--muted); font-size: 10px; white-space: nowrap; }
+.file-change-row[data-status='reverted'] .file-change-path { opacity: .6; }
+@media (max-width: 980px) {
+  .file-changes-header { flex-wrap: wrap; gap: 8px; padding: 12px; }
+  .file-changes-actions { margin-left: auto; }
+}
 .tool-call { margin: 8px 0 14px; color: var(--muted); font-size: 12px; }
 .tool-call-header { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; min-height: 32px; }
 .tool-call-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); flex-shrink: 0; align-self: center; }

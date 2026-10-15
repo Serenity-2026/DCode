@@ -77,13 +77,21 @@ export class StateService {
     return structuredClone({
       users: user ? [publicUser(user)] : [], activeUserId: user?.id || null,
       activeConversationId: user ? this.state.activeConversationId : null,
-      conversations: user ? this.state.conversations.filter(c => c.userId === user.id) : [],
+      conversations: user ? this.state.conversations.filter(c => c.userId === user.id).map(c => ({ ...c, messages: c.messages.map(message => this.publicMessage(message, c.id)) })) : [],
       theme: user?.theme || 'light',
       providers: user?.providers.map(({ encryptedApiKey: _secret, ...profile }) => profile) || [],
       activeProviderId: user?.activeProviderId || null, selectedModel: user?.selectedModel || null, fastMode: user?.fastMode || false,
       reasoningEffort: selectedEffort(selected, user?.selectedModel || null),
       config: { baseUrl: selected?.baseUrl || '', model: user?.selectedModel || '', configured: Boolean(selected?.encryptedApiKey && selected.availableModels.includes(user?.selectedModel || '')) }
     })
+  }
+
+  /** 给公开消息附加本轮文件摘要；恢复副本和内部磁盘位置不进入 renderer。 */
+  publicMessage(message: Message, conversationId: string): Message {
+    const { fileChanges: _ignored, ...publicMessage } = message
+    const changes = (this.state.fileChanges || []).filter(change => change.conversationId === conversationId && change.messageId === message.id && (change.before !== change.after || change.status === 'reverted'))
+      .map(({ id, path, additions, deletions, status, preview }) => ({ id, path, additions, deletions, status, preview }))
+    return structuredClone({ ...publicMessage, ...(changes.length ? { fileChanges: changes } : {}) })
   }
 
   /** 按 ID 查找当前用户所属的会话；不存在或属于其他用户时拒绝访问。 */
@@ -166,6 +174,7 @@ export class StateService {
           break
         default: throw new Error('无效操作。')
       }
+      if (this.state.fileChanges) this.state.fileChanges = this.state.fileChanges.filter(change => this.state.conversations.some(c => c.id === change.conversationId))
     })
   }
 
@@ -179,9 +188,10 @@ export class StateService {
     return this.transaction(() => {
       if (conversationId === null) throw new Error('请先新建对话并选择工作文件夹。')
       const c = this.conversation(conversationId)
+      let previousMessageId: string | undefined
       if (retry) {
         if (c.messages.at(-1)?.role !== 'assistant' || c.messages.at(-2)?.role !== 'user') throw new Error('没有可重新生成的回复。')
-        c.messages.pop()
+        previousMessageId = c.messages.pop()!.id
       } else {
         const text = attachments.length && content === '' ? '' : textInput(content, 32_000)
         if (!c.messages.length && c.title === '新对话') c.title = (text || attachments[0].name).replace(/\s+/g, ' ').slice(0, 32)
@@ -191,6 +201,8 @@ export class StateService {
       c.updatedAt = new Date().toISOString()
       const message: Message = { id: randomUUID(), role: 'assistant', content: '', reasoning: '', status: 'streaming', createdAt: new Date().toISOString() }
       c.messages.push(message)
+      // 重新生成仍属于同一次提问，已发生的文件修改和原始恢复副本随新回复保留。
+      for (const change of this.state.fileChanges || []) if (change.messageId === previousMessageId) change.messageId = message.id
       return { conversation: c, message }
     })
   }

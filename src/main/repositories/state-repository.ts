@@ -47,6 +47,20 @@ function validState(value: unknown): boolean {
     }
     try { for (const message of c.messages) validateAttachments(message.attachments) } catch { return false }
   }
+  if (state.fileChanges !== undefined) {
+    if (!Array.isArray(state.fileChanges)) return false
+    const changeIds = new Set<string>()
+    const base64 = (text: unknown): boolean => text === null || typeof text === 'string' && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(text)
+    for (const change of state.fileChanges) {
+      if (!change || typeof change.id !== 'string' || !change.id || changeIds.has(change.id)) return false
+      changeIds.add(change.id)
+      const conversation = state.conversations.find(c => c.id === change.conversationId && c.userId === change.userId)
+      if (!conversation?.messages.some(message => message.id === change.messageId && message.role === 'assistant')) return false
+      if (typeof change.path !== 'string' || !change.path || ![change.absolutePath, change.parentDirectory].every(path => typeof path === 'string' && isAbsolute(path) && !path.includes('\0'))) return false
+      if (!base64(change.before) || !base64(change.after) || !['pending', 'applied', 'reverted'].includes(change.status)) return false
+      if (![change.additions, change.deletions].every(count => Number.isSafeInteger(count) && count >= 0) || !isFilePreview(change.preview)) return false
+    }
+  }
   if (state.activeUserId !== null && !ids.has(state.activeUserId)) return false
   if (state.activeConversationId !== null && !state.conversations.some(c => c.id === state.activeConversationId && c.userId === state.activeUserId)) return false
   if (state.session !== null) {

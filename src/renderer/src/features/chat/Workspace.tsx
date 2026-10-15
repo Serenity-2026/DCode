@@ -6,7 +6,7 @@ import {
   ReloadOutlined, StopOutlined, DeleteOutlined, EditOutlined, LogoutOutlined,
   DownOutlined, RightOutlined, LoadingOutlined
 } from '@ant-design/icons'
-import type { Action, Attachment, Message, ModelRefresh, Result, Snapshot, StreamEvent } from '../../../../shared/types'
+import type { Action, Attachment, Message, ModelRefresh, Result, Snapshot, StreamEvent, ToolExecution } from '../../../../shared/types'
 import { estimateContext, validateAttachments } from '../../../../shared/context'
 import { AssistantTimeline } from './components/AssistantTimeline'
 import { FilePreviewPanel } from './components/FilePreviewPanel'
@@ -18,6 +18,7 @@ import { MessageNavigation } from './components/MessageNavigation'
 import { BrandMark } from '../../components/BrandMark'
 import { WelcomeCloud } from './components/WelcomeCloud'
 import { ProjectDialog } from './components/ProjectDialog'
+import { FileChangesCard } from './components/FileChangesCard'
 
 /**
  * 对话工作台组件，组织会话侧栏、输入框、用户管理和设置弹窗。
@@ -34,7 +35,7 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
   const [stopping, setStopping] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [projectOpen, setProjectOpen] = useState(false)
-  const [previewSelection, setPreviewSelection] = useState<{ messageId: string; toolId: string } | null>(null)
+  const [previewSelection, setPreviewSelection] = useState<{ messageId: string; toolId?: string; changeId?: string } | null>(null)
   const [modelsLoading, setModelsLoading] = useState(snapshot.providers.length > 0)
   const initialRefresh = useRef<Promise<Result<ModelRefresh>> | null>(null)
   const [edit, setEdit] = useState<{ type: 'user' | 'conversation'; id: string; value: string } | null>(null)
@@ -46,7 +47,10 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
   const inFlight = useRef(false)
   const user = snapshot.users.find(u => u.id === snapshot.activeUserId)!
   const active = snapshot.conversations.find(c => c.id === snapshot.activeConversationId)
-  const previewTool = active?.messages.find(message => message.id === previewSelection?.messageId)?.toolExecutions?.find(tool => tool.id === previewSelection?.toolId)
+  const previewMessage = active?.messages.find(message => message.id === previewSelection?.messageId)
+  const previewChange = previewMessage?.fileChanges?.find(change => change.id === previewSelection?.changeId)
+  const previewTool: ToolExecution | undefined = previewChange ? { id: previewChange.id, name: 'edit', status: previewChange.status === 'pending' ? 'running' : 'complete', path: previewChange.path, preview: previewChange.preview }
+    : previewMessage?.toolExecutions?.find(tool => tool.id === previewSelection?.toolId)
   const folderName = active?.directory.split(/[\\/]/).filter(Boolean).at(-1) || active?.directory
   const generating = Boolean(active?.messages.some(m => m.status === 'streaming'))
   const interacting = pending || stopping || modelsLoading || projectOpen
@@ -232,6 +236,23 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
     finally { setStopping(false) }
   }
 
+  /** 撤销使用主进程备份；刷新目标消息的流缓存，避免旧事件覆盖撤销后的文件状态。 */
+  async function undoFiles(messageId: string, changeId?: string): Promise<void> {
+    if (inFlight.current || busy || !active) return
+    inFlight.current = true; setPending(true)
+    try {
+      const result = await window.dcode.undoFiles({ conversationId: active.id, messageId, changeId })
+      streamEvents.current.delete(messageId)
+      if (result.ok) installSnapshot(result.value)
+      else {
+        void toast.error(result.error)
+        const state = await window.dcode.getState()
+        if (state.ok) installSnapshot(state.value)
+      }
+    } catch { void toast.error('撤销失败，请重试。') }
+    finally { inFlight.current = false; setPending(false) }
+  }
+
   /** 主动撤销保持登录的令牌并通知 Root 显示登录页，聊天与模型配置留在账号下。 */
   async function logout(): Promise<void> {
     if (interacting || inFlight.current) return
@@ -282,6 +303,9 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
         }} />}
         {last && <Button type="text" size="small" icon={<ReloadOutlined />} aria-label="重新生成" disabled={busy} onClick={() => void send(true)}>重新生成</Button>}
       </div>}
+      {Boolean(m.fileChanges?.length) && <FileChangesCard changes={m.fileChanges!} loading={pending}
+        disabled={busy || snapshot.conversations.some(conversation => conversation.messages.some(message => message.status === 'streaming'))}
+        onUndo={changeId => void undoFiles(m.id, changeId)} onView={change => setPreviewSelection({ messageId: m.id, changeId: change.id })} />}
     </div>
   }
 

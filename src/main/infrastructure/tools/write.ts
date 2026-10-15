@@ -19,7 +19,7 @@ export class WriteTool implements WorkspaceTool<WriteToolDetails> {
     path: pathSchema, content: { type: 'string' }
   } }
   /** 覆盖前校验已读时间；新建使用独占创建，避免检查后出现的文件被覆盖。 */
-  async execute(args: Record<string, unknown>, signal: AbortSignal, { cwd, readFileState }: ToolExecutionContext): Promise<AgentToolResult<WriteToolDetails>> {
+  async execute(args: Record<string, unknown>, signal: AbortSignal, { cwd, readFileState, change }: ToolExecutionContext): Promise<AgentToolResult<WriteToolDetails>> {
     const path = resolveToolPath(args.path as string, cwd)
     return mutateFile(path, async () => {
       signal.throwIfAborted()
@@ -37,7 +37,11 @@ export class WriteTool implements WorkspaceTool<WriteToolDetails> {
       if (current && (await stat(path)).mtimeMs !== current.mtimeMs) throw new ToolExecutionError('文件修改时间已变化，请重新使用 read 读取后再覆盖。')
       signal.throwIfAborted()
       readFileState.delete(path)
-      try { await writeFile(path, args.content as string, { encoding: 'utf8', flag: current ? 'w' : 'wx' }) }
+      const write = async (): Promise<void> => { signal.throwIfAborted(); await writeFile(path, args.content as string, { encoding: 'utf8', flag: current ? 'w' : 'wx' }) }
+      try {
+        if (change) await change(path, current ? before : null, args.content as string, write)
+        else await write()
+      }
       catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new ToolExecutionError('文件已存在，请先使用 read 读取该文件，再使用 write 覆盖。')
         throw error

@@ -13,6 +13,7 @@ export const channels = {
   createProject: 'dcode:create-project',
   send: 'dcode:send',
   stop: 'dcode:stop',
+  undoFiles: 'dcode:undo-files',
   stream: 'dcode:stream',
   openLink: 'dcode:open-link',
   copyText: 'dcode:copy-text'

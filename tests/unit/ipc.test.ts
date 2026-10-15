@@ -6,6 +6,8 @@ import { AgentSession } from '../../src/main/services/agent-session'
 import { AgentSessions } from '../../src/main/services/agent-sessions'
 import { registerStateController } from '../../src/main/controllers/state-controller'
 import { registerAuthController } from '../../src/main/controllers/auth-controller'
+import { registerFileChangeController } from '../../src/main/controllers/file-change-controller'
+import { FileChanges } from '../../src/main/services/file-changes'
 import { channels } from '../../src/shared/channels'
 import { cleanup, create, createAgent, unexpectedTaskError } from './helpers'
 
@@ -84,4 +86,26 @@ it('waits for all tasks before revoking authentication', async () => {
   expect(store.snapshot().activeUserId).not.toBeNull()
   release()
   await expect(logout).resolves.toMatchObject({ ok: true, value: { activeUserId: null } })
+})
+
+it('protects file undo from running agents and holds the IPC guard until restoration finishes', async () => {
+  const { store } = await create()
+  const sessions = new AgentSessions(store, () => ({ session: new AgentSession(store, () => {}, createAgent(), unexpectedTaskError), dispose: () => {} }))
+  const changes = new FileChanges(store, () => {})
+  let release!: () => void
+  const undo = vi.spyOn(changes, 'undo').mockImplementation(() => new Promise(resolve => { release = () => resolve(store.snapshot()) }))
+  const running = vi.spyOn(sessions, 'busy', 'get').mockReturnValue(true)
+  const { window, event } = source()
+  const router = new IpcRouter(() => window)
+  registerFileChangeController(router, changes, sessions)
+  const input = { conversationId: store.state.activeConversationId!, messageId: 'target', changeId: 'file' }
+  await expect(handlers.get(channels.undoFiles)!(event, input)).resolves.toMatchObject({ ok: false, error: expect.stringContaining('请先停止') })
+  expect(undo).not.toHaveBeenCalled()
+  running.mockReturnValue(false)
+  const pending = handlers.get(channels.undoFiles)!(event, input)
+  await expect(router.exclusive(() => 'new task')).rejects.toThrow('请等待')
+  release()
+  await expect(pending).resolves.toMatchObject({ ok: true })
+  expect(undo).toHaveBeenCalledWith(input)
+  await expect(router.exclusive(() => 'next')).resolves.toBe('next')
 })

@@ -116,6 +116,19 @@ test.beforeAll(async () => {
         response.writeHead(401); response.end('Invalid key'); return
       }
       const toolStatusPrompt = payload.messages.filter((message: { role: string }) => message.role === 'user').at(-1)?.content
+      if (typeof toolStatusPrompt === 'string' && toolStatusPrompt.includes('文件撤销验证')) {
+        const hasResults = payload.messages.some((message: { role: string }) => message.role === 'tool')
+        const calls = [
+          { id: 'undo_read', name: 'read', arguments: JSON.stringify({ path: 'existing.txt' }) },
+          { id: 'undo_edit', name: 'edit', arguments: JSON.stringify({ path: 'existing.txt', edits: [{ oldText: '原始内容', newText: '中间内容' }] }) },
+          { id: 'undo_write', name: 'write', arguments: JSON.stringify({ path: 'existing.txt', content: '最终内容\n' }) },
+          { id: 'undo_new', name: 'write', arguments: JSON.stringify({ path: 'nested/new.ts', content: 'export const value = 42\n' }) },
+          { id: 'undo_empty', name: 'write', arguments: JSON.stringify({ path: 'empty.txt', content: '' }) }
+        ]
+        const stream = openAIResponse(hasResults ? '本轮文件修改完成。' : '正在修改文件。', hasResults ? [] : calls)
+        response.writeHead(200, { 'Content-Type': 'text/event-stream' })
+        void stream.text().then(body => response.end(body)); return
+      }
       if (typeof toolStatusPrompt === 'string' && toolStatusPrompt.includes('快速读取续写验证')) {
         const results = payload.messages.filter((message: { role: string }) => message.role === 'tool')
         const calls = results.length === 0 ? [{ id: 'quick_read', name: 'read', arguments: JSON.stringify({ path: 'story.txt' }) }]
@@ -312,6 +325,55 @@ test('retains fast read and write records after continuing a file, navigation an
   await expect(page.getByLabel('文件差异', { exact: true })).toContainText('+续写段落')
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   await expect(page.getByRole('button', { name: '发送消息', exact: true })).toBeVisible()
+})
+
+test('groups round file changes, previews diffs and undoes individual or all files after restart', async () => {
+  await launch()
+  await authenticate('fileundo', true)
+  const project = join(directory, 'workspace')
+  const original = '\ufeff原始内容\r\n'
+  writeFileSync(join(project, 'existing.txt'), original)
+  await page.getByRole('textbox', { name: '消息', exact: true }).fill('文件撤销验证')
+  await page.getByRole('button', { name: '发送消息', exact: true }).click()
+  const reply = page.locator('article[data-role="assistant"][data-status="complete"]')
+  let card = reply.getByRole('region', { name: '本轮文件变更', exact: true })
+  await expect(reply).toContainText('本轮文件修改完成。')
+  await expect(card).toContainText('已编辑 3 个文件')
+  await expect(card.locator('.file-change-row')).toHaveCount(3)
+  await expect(card.locator('.file-changes-heading')).toContainText('+2')
+  await expect(card.locator('.file-changes-heading')).toContainText('-1')
+  await expect.poll(() => reply.evaluate(element => element.lastElementChild?.lastElementChild?.getAttribute('aria-label'))).toBe('本轮文件变更')
+  await card.getByRole('button', { name: '查看变更 existing.txt', exact: true }).click()
+  await expect(page.getByLabel('文件差异', { exact: true })).toContainText(/-\ufeff?原始内容/)
+  await expect(page.getByLabel('文件差异', { exact: true })).toContainText('+最终内容')
+  await page.getByRole('button', { name: '关闭文件预览', exact: true }).click()
+  await application.close()
+  await launch()
+  card = page.getByRole('region', { name: '本轮文件变更', exact: true })
+  await expect(card).toContainText('已编辑 3 个文件')
+  await card.getByRole('button', { name: '撤销文件 existing.txt', exact: true }).click()
+  await expect(card.locator('.file-change-row').filter({ hasText: 'existing.txt' })).toContainText('已撤销')
+  expect(readFileSync(join(project, 'existing.txt'))).toEqual(Buffer.from(original))
+  expect(existsSync(join(project, 'nested/new.ts'))).toBe(true)
+  writeFileSync(join(project, 'nested/new.ts'), '用户后续编辑')
+  await card.getByRole('button', { name: '撤销本轮修改', exact: true }).click()
+  await expect(page.getByText(/文件已被后续修改，无法撤销/)).toBeVisible()
+  expect(existsSync(join(project, 'empty.txt'))).toBe(true)
+  writeFileSync(join(project, 'nested/new.ts'), 'export const value = 42\n')
+  await card.getByRole('button', { name: '撤销本轮修改', exact: true }).click()
+  await expect(card).toContainText('已撤销 3 个文件')
+  await expect(card.getByRole('button', { name: '撤销本轮修改', exact: true })).toBeDisabled()
+  expect(existsSync(join(project, 'nested/new.ts'))).toBe(false)
+  expect(existsSync(join(project, 'empty.txt'))).toBe(false)
+  await expect(page.locator('article[data-role="assistant"][data-status="complete"]')).toContainText('本轮文件修改完成。')
+  await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(820, 620))
+  await card.getByRole('button', { name: '查看变更', exact: true }).click()
+  await expect(page.getByLabel('文件差异', { exact: true })).toBeVisible()
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await application.close()
+  await launch()
+  card = page.getByRole('region', { name: '本轮文件变更', exact: true })
+  await expect(card).toContainText('已撤销 3 个文件')
 })
 
 test('production read/bash/edit/write use the selected folder and recover it after restart', async () => {

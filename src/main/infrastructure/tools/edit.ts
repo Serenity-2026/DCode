@@ -20,7 +20,7 @@ export class EditTool implements WorkspaceTool<EditToolDetails> {
     path: pathSchema, edits: { type: 'array', minItems: 1, items: { type: 'object', additionalProperties: false, required: ['oldText', 'newText'], properties: { oldText: { type: 'string', minLength: 1 }, newText: { type: 'string' } } } }
   } }
   /** 统一验证所有替换后写入，队列在底层操作完成前持续持有路径锁。 */
-  async execute(args: Record<string, unknown>, signal: AbortSignal, { cwd, readFileState }: ToolExecutionContext): Promise<AgentToolResult<EditToolDetails>> {
+  async execute(args: Record<string, unknown>, signal: AbortSignal, { cwd, readFileState, change }: ToolExecutionContext): Promise<AgentToolResult<EditToolDetails>> {
     const path = resolveToolPath(args.path as string, cwd)
     return mutateFile(path, async () => {
       signal.throwIfAborted()
@@ -32,11 +32,14 @@ export class EditTool implements WorkspaceTool<EditToolDetails> {
       await ensureUnchanged()
       const data = await readFile(path, { signal })
       signal.throwIfAborted()
-      const changed = editText(decodeText(data), args.edits as TextEdit[], args.path as string)
+      const before = decodeText(data)
+      const changed = editText(before, args.edits as TextEdit[], args.path as string)
       await ensureUnchanged()
       signal.throwIfAborted()
       readFileState.delete(path)
-      await writeFile(path, changed.content, 'utf8')
+      const write = async (): Promise<void> => { signal.throwIfAborted(); await writeFile(path, changed.content, 'utf8') }
+      if (change) await change(path, before, changed.content, write)
+      else await write()
       const updatedTimestamp = (await stat(path)).mtimeMs
       signal.throwIfAborted()
       readFileState.set(path, updatedTimestamp)

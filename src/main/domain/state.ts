@@ -1,4 +1,15 @@
-import type { Conversation, ProviderProfile, Theme, User } from '../../shared/types'
+import type { Conversation, FileChange, ProviderProfile, Theme, User } from '../../shared/types'
+
+/** 主进程保存的完整字节快照，以 base64 保留 BOM、换行和空文件；null 表示文件不存在。 */
+export interface StoredFileChange extends FileChange {
+  userId: string
+  conversationId: string
+  messageId: string
+  absolutePath: string
+  parentDirectory: string
+  before: string | null
+  after: string | null
+}
 
 /** 仅在主进程保存的账号记录；Auth 管理密码与会话，Models 管理密钥密文。 */
 export interface StoredUser extends User {
@@ -22,4 +33,5 @@ export interface StoredState {
   activeConversationId: string | null
   conversations: Conversation[]
   session: RememberedSession | null
+  fileChanges?: StoredFileChange[]
 }

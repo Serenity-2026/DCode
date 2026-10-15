@@ -1,9 +1,14 @@
 import { rmSync } from 'node:fs'
 import { isAbsolute } from 'node:path'
-import { ToolExecutionError, type AgentTool, type AgentToolResult, type ToolDefinition, type ToolExecutionMode, type ToolWorkspace } from '../../domain/llm'
+import { ToolExecutionError, type AgentTool, type AgentToolResult, type FileChangeTurn, type RecordFileChange, type ToolDefinition, type ToolExecutionMode, type ToolWorkspace } from '../../domain/llm'
 
 /** 本次执行固定的目录、会话内已读文件的 mtimeMs 与退出时清理的临时资源。 */
-export interface ToolExecutionContext { readonly cwd: string; readonly readFileState: Map<string, number>; readonly temporaryDirectories: Set<string> }
+export interface ToolExecutionContext {
+  readonly cwd: string
+  readonly readFileState: Map<string, number>
+  readonly temporaryDirectories: Set<string>
+  change?: (path: string, before: string | null, after: string, write: () => Promise<void>) => Promise<void>
+}
 
 /** 独立本机工具声明；运行层提供上下文后转换为 Agent 已有的工具契约。 */
 export interface WorkspaceTool<TDetails = unknown> extends ToolDefinition {
@@ -16,6 +21,20 @@ export class ToolRuntime implements ToolWorkspace {
   private directory?: string
   private readFileState = new Map<string, number>()
   private readonly temporaryDirectories = new Set<string>()
+  private turn?: FileChangeTurn
+  private readonly changes = new Set<Promise<void>>()
+
+  /** 应用注入持久化回调；独立使用工具时仍可不启用变更记录。 */
+  constructor(private readonly recordChange?: RecordFileChange) {}
+
+  /** 模型取消后，实际文件写入和恢复副本保存仍可能尚未结束。 */
+  get changing(): boolean { return this.changes.size > 0 }
+
+  /** 固定本次用户提问对应的回复 ID，取消后的磁盘收尾仍归属原轮次。 */
+  setTurn(turn: FileChangeTurn): void { this.turn = { ...turn } }
+
+  /** 停止和退出等待已经开始的文件写入结算，不等待不配合取消的其他工具。 */
+  async waitForChanges(): Promise<void> { await Promise.allSettled([...this.changes]) }
 
   /** 会话层每次发送前替换目录，undefined 清除此前的会话目录。 */
   setDirectory(directory?: string): void {
@@ -29,7 +48,13 @@ export class ToolRuntime implements ToolWorkspace {
       signal.throwIfAborted()
       const cwd = this.directory
       if (!cwd || !isAbsolute(cwd)) throw new ToolExecutionError('请先选择工作文件夹。')
-      try { return await tool.execute(args, signal, { cwd, readFileState: this.readFileState, temporaryDirectories: this.temporaryDirectories }) }
+      const turn = this.turn
+      const change: ToolExecutionContext['change'] = this.recordChange && turn ? async (path, before, after, write) => {
+        const pending = this.recordChange!(turn, path, before, after, write)
+        this.changes.add(pending)
+        try { await pending } finally { this.changes.delete(pending) }
+      } : undefined
+      try { return await tool.execute(args, signal, { cwd, readFileState: this.readFileState, temporaryDirectories: this.temporaryDirectories, change }) }
       catch (error) {
         signal.throwIfAborted()
         const code = (error as NodeJS.ErrnoException)?.code

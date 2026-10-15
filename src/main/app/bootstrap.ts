@@ -27,6 +27,8 @@ import { registerModelController } from '../controllers/model-controller'
 import { registerChatController } from '../controllers/chat-controller'
 import { registerStateController } from '../controllers/state-controller'
 import { registerDesktopController } from '../controllers/desktop-controller'
+import { registerFileChangeController } from '../controllers/file-change-controller'
+import { FileChanges } from '../services/file-changes'
 
 /** 应用装配入口，依次连接 Repository、Service、Controller 和窗口，集中管理 ready、激活和退出。 */
 export async function startApplication(): Promise<void> {
@@ -67,9 +69,11 @@ export async function startApplication(): Promise<void> {
     const models = new Models(state, secrets, config)
     const auth = new Auth(state, secrets, models)
     await auth.restore()
+    const changes = new FileChanges(state, event => windows?.publish(event))
+    await changes.recover()
     const loop = new AgentLoop((config, messages, controller, onDelta, tools) => streamModel(config, messages, controller, onDelta, { tools }))
     const generation = new AgentSessions(state, () => {
-      const toolRuntime = new ToolRuntime()
+      const toolRuntime = new ToolRuntime((turn, path, before, after, write) => changes.record(turn, path, before, after, write))
       const tools = [new ReadTool(), new BashTool(), new EditTool(), new WriteTool()].map(tool => toolRuntime.bind(tool))
       const agent = new Agent(loop, tools)
       return { session: new AgentSession(state, event => windows?.publish(event), agent, error => reportError('任务收尾失败', error), toolRuntime), dispose: () => toolRuntime.dispose() }
@@ -89,6 +93,7 @@ export async function startApplication(): Promise<void> {
     registerModelController(router, models)
     registerStateController(router, state, generation)
     registerChatController(router, generation, models, state)
+    registerFileChangeController(router, changes, generation)
     registerDesktopController(router, desktop)
     mainWindow.create()
     app.on('activate', () => {
