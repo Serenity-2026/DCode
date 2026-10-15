@@ -8,6 +8,61 @@ import { echoTool, openAIResponse, testCall } from './llm-fixtures'
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); cleanup() })
 
+it('publishes each running tool by call ID across parallel groups and serial barriers without persisting activity', async () => {
+  const { store, path } = await create()
+  const releases = new Map<string, () => void>()
+  const events: StreamEvent[] = []
+  const execute = async (input: Record<string, unknown>) => {
+    await new Promise<void>(resolve => releases.set(input.text as string, resolve))
+    if (input.text === 'b') throw new Error('工具失败')
+    return { content: [{ type: 'text' as const, text: '完成' }], details: undefined }
+  }
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(openAIResponse('准备执行', [testCall('a', 'a'), testCall('b', 'b'), { ...testCall('c', 'c'), name: 'finish' }]))
+    .mockResolvedValueOnce(openAIResponse('全部完成')))
+  const agent = createAgent([{ ...echoTool, executionMode: 'parallel', execute }, { ...echoTool, name: 'finish', execute }])
+  const session = new AgentSession(store, event => events.push(event), agent, unexpectedTaskError)
+  const snapshot = session.send({ content: '执行工具' }, config)
+  try {
+    await vi.waitFor(() => expect(releases.size).toBe(2))
+    expect(events.at(-1)).toMatchObject({ conversationId: snapshot.activeConversationId, runningTools: [{ id: 'a', name: 'echo' }, { id: 'b', name: 'echo' }] })
+    expect(events.at(-1)!.message.content).toBe('准备执行')
+    expect(JSON.stringify(new StateRepository(path).state)).not.toContain('runningTools')
+    releases.get('b')!()
+    await vi.waitFor(() => expect(events.at(-1)!.runningTools).toEqual([{ id: 'a', name: 'echo' }]))
+    expect(releases.has('c')).toBe(false)
+    releases.get('a')!()
+    await vi.waitFor(() => expect(releases.has('c')).toBe(true))
+    expect(events.at(-1)!.runningTools).toEqual([{ id: 'c', name: 'finish' }])
+    releases.get('c')!()
+    await agent.waitForIdle()
+    expect(events.some(event => event.runningTools?.length === 0)).toBe(true)
+    expect(events.at(-1)!.message.status).toBe('complete')
+    expect(events.at(-1)!.runningTools || []).toEqual([])
+    expect(JSON.stringify(new StateRepository(path).state)).not.toContain('runningTools')
+  } finally { agent.abort(); await agent.waitForIdle() }
+})
+
+it.each(['stopped', 'error'] as const)('clears tool activity when the task ends as %s', async outcome => {
+  const { store } = await create()
+  const events: StreamEvent[] = []
+  let release!: () => void
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(openAIResponse('', [testCall('a')])).mockRejectedValueOnce(new Error('模型失败')))
+  const agent = createAgent([{ ...echoTool, execute: async () => {
+    await new Promise<void>(resolve => { release = resolve })
+    return { content: [{ type: 'text', text: '结果' }], details: undefined }
+  } }])
+  const session = new AgentSession(store, event => events.push(event), agent, unexpectedTaskError)
+  session.send({ content: '执行工具' }, config)
+  try {
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+    expect(events.at(-1)!.runningTools).toEqual([{ id: 'a', name: 'echo' }])
+    if (outcome === 'stopped') await session.stop()
+    else { release(); await agent.waitForIdle() }
+    expect(events.at(-1)!.message.status).toBe(outcome)
+    expect(events.at(-1)!.runningTools || []).toEqual([])
+  } finally { agent.abort(); await agent.waitForIdle() }
+})
+
 it('blocks concurrent sends and saves partial content on cancellation', async () => {
   const { store, path } = await create()
   let received!: () => void

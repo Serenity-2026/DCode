@@ -110,6 +110,14 @@ test.beforeAll(async () => {
       if (request.headers.authorization === 'Bearer invalid-key') {
         response.writeHead(401); response.end('Invalid key'); return
       }
+      const toolStatusPrompt = payload.messages.filter((message: { role: string }) => message.role === 'user').at(-1)?.content
+      if (typeof toolStatusPrompt === 'string' && toolStatusPrompt.includes('工具状态')) {
+        const hasResults = payload.messages.some((message: { role: string }) => message.role === 'tool')
+        const calls = [{ id: 'status_bash', name: 'bash', arguments: JSON.stringify({ command: toolStatusPrompt.includes('停止') ? 'sleep 30' : 'sleep 3' }) }]
+        const stream = openAIResponse(hasResults ? '工具状态验证完成' : '准备执行命令', hasResults ? [] : calls)
+        response.writeHead(200, { 'Content-Type': 'text/event-stream' })
+        void stream.text().then(body => response.end(body)); return
+      }
       const fileToolPrompt = payload.messages.some((message: { role: string; content: unknown }) => message.role === 'user' && typeof message.content === 'string' && message.content.includes('文件工具集成验证'))
       if (fileToolPrompt) {
         const hasResults = payload.messages.some((message: { role: string }) => message.role === 'tool')
@@ -186,6 +194,39 @@ test('runs conversations in parallel, stops only the active task and saves all t
   const persisted = JSON.parse(readFileSync(join(directory, 'state.json'), 'utf8'))
   expect(persisted.activeUserId).toBeNull()
   expect(persisted.conversations.slice(-2).map((c: { messages: { status: string }[] }) => c.messages[1].status)).toEqual(['stopped', 'stopped'])
+})
+
+test('shows the running tool across conversation navigation and clears it on completion, stop and retry', async () => {
+  await launch()
+  await authenticate('toolstatus', true)
+  const project = join(directory, 'tool-project')
+  mkdirSync(project)
+  await application.evaluate(({ dialog }, project) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [project] }) }, project)
+  await page.getByRole('button', { name: '添加附件', exact: true }).click()
+  await page.getByRole('menuitem', { name: /添加文件夹/ }).click()
+  const input = page.getByRole('textbox', { name: '消息', exact: true })
+  const activity = page.getByRole('status', { name: '工具执行状态', exact: true })
+  await input.fill('工具状态验证')
+  await page.getByRole('button', { name: '发送消息', exact: true }).click()
+  await expect(activity).toHaveText('正在执行 bash')
+  await expect(page.locator('article[data-role="assistant"]')).toContainText('准备执行命令')
+  await page.getByRole('button', { name: '新对话', exact: true }).click()
+  await expect(activity).toHaveCount(0)
+  await page.getByRole('button', { name: '工具状态验证', exact: true }).click()
+  await expect(activity).toHaveText('正在执行 bash')
+  await expect(page.locator('article[data-role="assistant"][data-status="complete"]')).toContainText('工具状态验证完成', { timeout: 10_000 })
+  await expect(activity).toHaveCount(0)
+  await input.fill('工具状态停止验证')
+  await page.getByRole('button', { name: '发送消息', exact: true }).click()
+  await expect(activity).toHaveText('正在执行 bash')
+  await page.getByRole('button', { name: '停止生成', exact: true }).click()
+  await expect(activity).toHaveCount(0)
+  await expect(page.getByText('已停止生成', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '重新生成', exact: true }).click()
+  await expect(activity).toHaveText('正在执行 bash')
+  await page.getByRole('button', { name: '停止生成', exact: true }).click()
+  await expect(activity).toHaveCount(0)
+  expect(readFileSync(join(directory, 'state.json'), 'utf8')).not.toContain('runningTools')
 })
 
 test('production read/bash/edit/write use the selected folder and recover it after restart', async () => {

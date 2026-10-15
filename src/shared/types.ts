@@ -84,8 +84,11 @@ export type Action =
   | { type: 'reasoning-effort'; effort: ReasoningEffort | null }
   | { type: 'theme'; theme: Theme }
 
-/** 流更新携带完整消息，Workspace 按 ID 替换对应回复。 */
-export interface StreamEvent { conversationId: string; message: Message }
+/** 单次工具调用的运行标识；同名并行调用按 ID 区分，不包含参数或结果。 */
+export interface RunningTool { id: string; name: string }
+
+/** 流更新携带完整消息与当前工具列表；工具状态仅用于界面，不写入对话历史。 */
+export interface StreamEvent { conversationId: string; message: Message; runningTools?: RunningTool[] }
 
 /** 主进程 IPC 的成功/失败结果，不向界面泄露秘密。 */
 export type Result<T> = { ok: true; value: T } | { ok: false; error: string }

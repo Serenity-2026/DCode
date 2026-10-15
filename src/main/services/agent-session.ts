@@ -1,4 +1,4 @@
-import type { SendInput, Snapshot, StreamEvent } from '../../shared/types'
+import type { RunningTool, SendInput, Snapshot, StreamEvent } from '../../shared/types'
 import { contextMessages, conversationDirectory } from '../../shared/context'
 import type { AgentEvent } from '../domain/agent'
 import { toLlmMessages, type LlmMessage, type ToolWorkspace } from '../domain/llm'
@@ -9,7 +9,7 @@ import { StateService } from './state-service'
 /** 应用会话层：准备上下文、保存正文和推送界面；运行控制由独立 Agent 负责。 */
 export class AgentSession {
   // 用 ID 定位当前仓库对象，其他会话的事务回滚不会使流式更新写到旧引用。
-  private target?: { conversationId: string; messageId: string; lastSave: number; lastEmit: number }
+  private target?: { conversationId: string; messageId: string; lastSave: number; lastEmit: number; runningTools: RunningTool[] }
 
   /** 订阅 Agent 事件并注入应用报告回调；本层只恢复会话状态，不持有取消控制器。 */
   constructor(private store: StateService, private emit: (event: StreamEvent) => void, private readonly agent: Agent, private readonly reportError: (error: unknown) => void, private readonly workspace?: ToolWorkspace) {
@@ -27,7 +27,7 @@ export class AgentSession {
     if (!input || typeof input !== 'object' || (input.retry !== undefined && typeof input.retry !== 'boolean')) throw new Error('无效请求。')
     if (!config.apiKey) throw new Error('请先配置模型 API 密钥。')
     const { conversation, message } = this.store.begin(input.content, Boolean(input.retry), config.model, input.attachments, input.conversationId)
-    const target = this.target = { conversationId: conversation.id, messageId: message.id, lastSave: Date.now(), lastEmit: 0 }
+    const target = this.target = { conversationId: conversation.id, messageId: message.id, lastSave: Date.now(), lastEmit: 0, runningTools: [] }
     try {
       this.workspace?.setDirectory(conversationDirectory(conversation))
       const context = toLlmMessages(contextMessages(conversation))
@@ -88,9 +88,14 @@ export class AgentSession {
       message.reasoning += event.delta.reasoning || ''
       if (Date.now() - target.lastSave >= 500) { this.store.save(); target.lastSave = Date.now() }
       if (Date.now() - target.lastEmit >= 30) {
-        this.emit({ conversationId: conversation.id, message: structuredClone(message) })
+        this.emit({ conversationId: conversation.id, message: structuredClone(message), runningTools: structuredClone(target.runningTools) })
         target.lastEmit = Date.now()
       }
+    } else if (event.type === 'tool_execution_start' || event.type === 'tool_execution_end') {
+      if (event.type === 'tool_execution_start') target.runningTools.push({ id: event.toolCallId, name: event.name })
+      else target.runningTools = target.runningTools.filter(tool => tool.id !== event.toolCallId)
+      // 工具状态立即推送，不受正文节流影响，也不进入持久化消息。
+      this.emit({ conversationId: conversation.id, message: structuredClone(message), runningTools: structuredClone(target.runningTools) })
     } else if (event.type === 'agent_end') {
       message.status = event.outcome
       if (event.error) message.error = event.error

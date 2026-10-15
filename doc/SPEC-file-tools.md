@@ -40,6 +40,13 @@ write 在获得路径队列、创建父目录后，紧邻写入前检查文件�
 
 主进程 infrastructure 承担磁盘/进程操作。AgentSession 仅根据会话配置工作目录；Agent/Loop 不读取系统路径。OpenAI 在配对工具结果后追加 user 图片消息，Anthropic 在 tool_result 中嵌入图片。预期工具错误可回传具体原因，未分类异常仍使用通用错误，避免泄露秘密。
 
+## 工具执行状态
+
+- 回复区域实时显示“正在执行 {工具名}”，并行调用分别显示，按调用 ID 跟踪；工具结束（包括失败）后移除对应状态，串行工具只在开始执行时显示。
+- AgentSession 消费已有的 tool_execution_start / tool_execution_end，将当前运行列表随 StreamEvent 立即推送，不受正文节流影响；不向界面传递工具参数或结果。
+- Workspace 按回复消息 ID 缓存状态，切换会话后仍能显示该会话的工具；任务完成、停止或报错时清除。无运行工具且回复为空时继续显示原有生成指示。
+- 运行列表只存在会话内存和流事件中，不写入 state.json，不加入模型上下文或持久化历史。
+
 ## 统一工具结果
 
 2026-10-14 核对 pi 最新发布为 [v1.2.0](https://github.com/earendil-works/pi/releases/tag/v1.2.0)，参考其 [AgentToolResult](https://github.com/earendil-works/pi/blob/v1.2.0/packages/agent/src/types.ts) 与 [执行循环](https://github.com/earendil-works/pi/blob/v1.2.0/packages/agent/src/agent-loop.ts)，自行实现当前需要的子集，不引入 pi 依赖。
