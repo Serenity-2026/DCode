@@ -244,7 +244,7 @@ it('isolates read records by runtime, preserves same-directory followups and cle
   expect(readFileSync(path, 'utf8')).toBe('changed')
 })
 
-it('checks staleness after acquiring the path queue', async () => {
+it.each(['edit', 'write'])('checks %s staleness after acquiring the path queue', async name => {
   const { directory, run } = fixture()
   const path = join(directory, 'edit')
   writeFileSync(path, 'original')
@@ -253,7 +253,7 @@ it('checks staleness after acquiring the path queue', async () => {
   const waiting = new Promise<void>(resolve => { release = resolve })
   const changedTime = new Date(statSync(path).mtimeMs + 10_000)
   const external = mutateFile(path, async () => { await waiting; utimesSync(path, changedTime, changedTime) })
-  const editing = run('edit', { path, edits: [{ oldText: 'original', newText: 'changed' }] })
+  const editing = run(name, name === 'edit' ? { path, edits: [{ oldText: 'original', newText: 'changed' }] } : { path, content: 'changed' })
   const rejected = expect(editing).rejects.toThrow('修改时间已变化')
   release()
   await Promise.all([external, rejected])
@@ -283,10 +283,61 @@ it('creates parent directories, completely overwrites and supports empty content
   const { directory, run } = fixture()
   const path = join(directory, 'nested', '中文.txt')
   expect(await run('write', { path: 'nested/中文.txt', content: '旧内容' })).toEqual({ content: [{ type: 'text', text: '已写入：nested/中文.txt' }], details: undefined })
+  await expect(run('write', { path, content: '未读覆盖' })).rejects.toThrow('请先使用 read')
+  expect(readFileSync(path, 'utf8')).toBe('旧内容')
+  await run('read', { path: 'nested/中文.txt' })
   await run('write', { path, content: '新' })
   expect(readFileSync(path, 'utf8')).toBe('新')
   await run('write', { path, content: '' })
   expect(readFileSync(path).length).toBe(0)
+})
+
+it.each([-1, 1])('refuses overwrites when mtime changes in either direction (%s), then recovers after read', async direction => {
+  const { directory, run } = fixture()
+  const path = join(directory, 'write')
+  writeFileSync(path, 'original')
+  await expect(run('write', { path, content: 'changed' })).rejects.toThrow('请先使用 read')
+  await run('read', { path })
+  const changedTime = new Date(statSync(path).mtimeMs + direction * 10_000)
+  utimesSync(path, changedTime, changedTime)
+  await expect(run('write', { path, content: 'changed' })).rejects.toThrow('修改时间已变化')
+  expect(readFileSync(path, 'utf8')).toBe('original')
+  await run('read', { path })
+  await run('write', { path, content: 'changed' })
+  await run('edit', { path, edits: [{ oldText: 'changed', newText: 'final' }] })
+  expect(readFileSync(path, 'utf8')).toBe('final')
+})
+
+it('does not overwrite a file created externally after the existence check', async () => {
+  const { directory, run } = fixture()
+  const path = join(directory, 'new')
+  const write = fileSystem.writeFile
+  vi.spyOn(fileSystem, 'writeFile').mockImplementationOnce(async (...args) => {
+    writeFileSync(path, 'external')
+    await write(...args)
+  })
+  await expect(run('write', { path, content: 'overwrite' })).rejects.toThrow('请先使用 read')
+  expect(readFileSync(path, 'utf8')).toBe('external')
+})
+
+it.each(['failed', 'cancelled'])('invalidates the read record after a %s overwrite', async outcome => {
+  const { directory, run } = fixture()
+  const path = join(directory, 'write')
+  writeFileSync(path, 'original')
+  await run('read', { path })
+  const controller = new AbortController()
+  const write = fileSystem.writeFile
+  const intercepted = vi.spyOn(fileSystem, 'writeFile').mockImplementationOnce(async (...args) => {
+    if (outcome === 'failed') throw Object.assign(new Error('磁盘空间不足'), { code: 'ENOSPC' })
+    await write(...args)
+    controller.abort()
+  })
+  await expect(run('write', { path, content: 'changed' }, controller.signal)).rejects.toThrow()
+  intercepted.mockRestore()
+  await expect(run('write', { path, content: 'retry' })).rejects.toThrow('请先使用 read')
+  await run('read', { path })
+  await run('write', { path, content: 'retry' })
+  expect(readFileSync(path, 'utf8')).toBe('retry')
 })
 
 it('edits disjoint regions against the original, in any order, and preserves BOM/CRLF', async () => {
@@ -329,6 +380,8 @@ it('uses fuzzy matching only where needed and preserves untouched Unicode and wh
 
 it('serializes same-path mutations and skips a queued cancelled write', async () => {
   const { directory, run } = fixture()
+  writeFileSync(join(directory, 'edit'), 'original')
+  await run('read', { path: 'edit' })
   const controller = new AbortController()
   const first = run('write', { path: 'edit', content: 'first' })
   const cancelled = run('write', { path: 'edit', content: 'cancelled' }, controller.signal)
