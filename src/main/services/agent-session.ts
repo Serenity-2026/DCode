@@ -95,8 +95,9 @@ export class AgentSession {
     } else if (event.type === 'tool_execution_start' || event.type === 'tool_execution_end') {
       if (event.type === 'tool_execution_start') {
         const path = ['read', 'write', 'edit'].includes(event.name) && typeof event.arguments.path === 'string' && event.arguments.path.trim() && !event.arguments.path.includes('\0') ? event.arguments.path : undefined
+        const command = event.name === 'bash' && typeof event.arguments.command === 'string' ? event.arguments.command : undefined
         const tools = message.toolExecutions ||= []
-        tools.push({ id: event.toolCallId, name: event.name, status: 'running', offset: message.content.length, ...(path ? { path } : {}) })
+        tools.push({ id: event.toolCallId, name: event.name, status: 'running', offset: message.content.length, ...(path ? { path } : {}), ...(command !== undefined ? { command } : {}) })
       } else {
         const tool = message.toolExecutions?.find(tool => tool.id === event.toolCallId)
         if (tool) {

@@ -1,6 +1,6 @@
 import { Fragment, type ReactNode } from 'react'
 import { Button } from 'antd'
-import { CodeOutlined, EditOutlined, FileAddOutlined, FileTextOutlined, LinkOutlined, LoadingOutlined } from '@ant-design/icons'
+import { CodeOutlined, EditOutlined, FileAddOutlined, FileTextOutlined } from '@ant-design/icons'
 import type { Message, ToolExecution } from '../../../../../shared/types'
 import { Markdown } from './Markdown'
 
@@ -15,20 +15,22 @@ export function AssistantTimeline({ message, selectedToolId, onPreview }: {
     cursor = offset
     const running = tool.status === 'running'
     const name = tool.path?.split(/[\\/]/).at(-1) || tool.path
-    const icon = running ? <LoadingOutlined spin /> : tool.name === 'read' ? <FileTextOutlined />
+    const icon = tool.name === 'read' ? <FileTextOutlined />
       : tool.name === 'write' ? <FileAddOutlined /> : tool.name === 'edit' ? <EditOutlined /> : <CodeOutlined />
+    const status = { running: '正在执行', complete: '执行成功', error: '执行失败', stopped: '已停止' }[tool.status]
     return <Fragment key={tool.id}>
       {text && <Markdown content={text} />}
       <div className="tool-call" data-tool-id={tool.id} data-tool-status={tool.status}
         role={running ? 'status' : 'group'} aria-label={running ? '工具执行状态' : '工具调用记录'}>
-        <span className="tool-call-icon">{icon}</span>
+        <span className="tool-call-dot" role="img" aria-label={status} title={status} />
+        <span className="tool-call-icon" aria-hidden="true">{icon}</span>
         {running && <span>正在调用</span>}
         <code className="tool-call-name">{tool.name}</code>
         {running && <span>工具</span>}
-        {tool.path && <Button className="tool-file-link" type="link" href="#file-preview" icon={<LinkOutlined />} iconPlacement="end"
+        {tool.command !== undefined && <code className="tool-call-command">{tool.command}</code>}
+        {tool.path && <Button className="tool-file-link" type="link" href="#file-preview"
           title={tool.path} aria-label={`预览文件 ${name}`} aria-controls="file-preview" aria-expanded={selectedToolId === tool.id}
           onClick={event => { event.preventDefault(); onPreview(tool) }}>{name}</Button>}
-        {!running && <span className="tool-call-status">{{ running: '', complete: '已完成', error: '执行失败', stopped: '已停止' }[tool.status]}</span>}
       </div>
     </Fragment>
   })

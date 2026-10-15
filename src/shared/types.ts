@@ -95,6 +95,7 @@ export interface ToolExecution {
   status: 'running' | 'complete' | 'error' | 'stopped'
   offset?: number
   path?: string
+  command?: string
   preview?: FilePreview
 }
 

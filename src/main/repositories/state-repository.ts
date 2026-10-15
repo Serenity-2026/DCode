@@ -41,6 +41,7 @@ function validState(value: unknown): boolean {
       if (new Set(tools.map(tool => tool.id)).size !== tools.length) return false
       if (tools.some(tool => (tool.offset !== undefined && (!Number.isSafeInteger(tool.offset) || tool.offset < 0 || tool.offset > message.content.length))
         || (tool.path !== undefined && (typeof tool.path !== 'string' || !tool.path.trim() || tool.path.includes('\0')))
+        || (tool.command !== undefined && typeof tool.command !== 'string')
         || (tool.preview !== undefined && !isFilePreview(tool.preview)))) return false
     }
     try { for (const message of c.messages) validateAttachments(message.attachments) } catch { return false }

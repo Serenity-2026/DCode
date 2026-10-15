@@ -43,11 +43,12 @@ it('retains tool records by call ID across parallel groups, serial barriers and 
 })
 
 it.each(['stopped', 'error'] as const)('settles tool records when the task ends as %s', async outcome => {
-  const { store } = await create()
+  const { store, path } = await create()
   const events: StreamEvent[] = []
   let release!: () => void
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(openAIResponse('', [testCall('a')])).mockRejectedValueOnce(new Error('模型失败')))
-  const agent = createAgent([{ ...echoTool, execute: async () => {
+  const command = 'printf "%s\\n" "中文参数"\npwd'
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(openAIResponse('', [{ id: 'a', name: 'bash', arguments: JSON.stringify({ command }) }])).mockRejectedValueOnce(new Error('模型失败')))
+  const agent = createAgent([{ ...echoTool, name: 'bash', parameters: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] }, execute: async () => {
     await new Promise<void>(resolve => { release = resolve })
     return { content: [{ type: 'text', text: '结果' }], details: undefined }
   } }])
@@ -55,11 +56,12 @@ it.each(['stopped', 'error'] as const)('settles tool records when the task ends 
   session.send({ content: '执行工具' }, config)
   try {
     await vi.waitFor(() => expect(release).toBeTypeOf('function'))
-    expect(events.at(-1)!.message.toolExecutions).toMatchObject([{ id: 'a', name: 'echo', status: 'running' }])
+    expect(events.at(-1)!.message.toolExecutions).toMatchObject([{ id: 'a', name: 'bash', command, status: 'running' }])
     if (outcome === 'stopped') await session.stop()
     else { release(); await agent.waitForIdle() }
     expect(events.at(-1)!.message.status).toBe(outcome)
-    expect(events.at(-1)!.message.toolExecutions).toMatchObject([{ id: 'a', name: 'echo', status: outcome === 'stopped' ? 'stopped' : 'complete' }])
+    expect(events.at(-1)!.message.toolExecutions).toMatchObject([{ id: 'a', name: 'bash', command, status: outcome === 'stopped' ? 'stopped' : 'complete' }])
+    expect(new StateRepository(path).state.conversations[0].messages[1].toolExecutions?.[0].command).toBe(command)
   } finally { agent.abort(); await agent.waitForIdle() }
 })
 
