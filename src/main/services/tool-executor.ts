@@ -46,7 +46,7 @@ export class ToolExecutor {
   /** 执行单项并转换预期错误；取消与订阅者异常由批次边界向上传播。 */
   private async executeOne({ call, registered }: Invocation, signal: AbortSignal, emit: (event: AgentLoopEvent) => void): Promise<ToolResultMessage> {
     signal.throwIfAborted()
-    emit({ type: 'tool_execution_start', toolCallId: call.id, name: call.name })
+    emit({ type: 'tool_execution_start', toolCallId: call.id, name: call.name, arguments: structuredClone(call.arguments) })
     let output: AgentToolResult = { content: [{ type: 'text', text: '工具未注册。' }], details: undefined, isError: true }
     if (registered) {
       if (!registered.validate(call.arguments)) output.content = [{ type: 'text', text: '工具参数不符合 JSON Schema。' }]

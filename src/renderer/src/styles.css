@@ -111,7 +111,42 @@ button { -webkit-app-region: no-drag; }
 .message-time { color: var(--muted); font-size: 10px; font-weight: 400; margin-left: auto; }
 .user-content { margin-left: 32px; line-height: 1.85; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .assistant-content { margin-left: 32px; }
-.tool-activity { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.assistant-timeline { min-width: 0; }
+.tool-call { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; min-height: 32px; margin: 8px 0 14px; color: var(--muted); font-size: 12px; }
+.tool-call-icon { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); flex-shrink: 0; }
+.tool-call-name { color: var(--text); font-size: 12px; }
+.tool-file-link { height: 26px; padding: 0 3px; max-width: 100%; font-size: 12px; color: var(--accent); }
+.tool-file-link span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-call-status { font-size: 10px; opacity: .8; }
+.tool-call[data-tool-status="error"] .tool-call-status { color: #cc6868; }
+.workspace-panels { flex: 1; min-height: 0; height: 0; }
+.chat-pane { height: 100%; display: flex; flex-direction: column; min-width: 0; }
+.shell:has(.file-preview) .messages { padding-right: 24px; padding-left: 46px; }
+.shell:has(.file-preview) .composer-area { padding-right: 20px; padding-left: 20px; }
+.shell:has(.file-preview) .composer-tools { flex-wrap: wrap; }
+.shell:has(.file-preview) .composer-right { flex-wrap: wrap; margin-left: auto; }
+.file-preview { height: 100%; min-width: 0; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--panel); }
+.file-preview-header { height: 46px; flex-shrink: 0; display: flex; align-items: center; gap: 9px; padding: 0 14px; border-bottom: 1px solid var(--line); color: var(--muted); }
+.file-preview-header strong { color: var(--text); font-size: 12px; font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-preview-header button { margin-left: auto; flex-shrink: 0; }
+.file-preview-path { padding: 10px 15px 0; font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0; }
+.file-preview-tabs { flex: 1; min-height: 0; }
+.file-preview-tabbar { margin: 0 !important; padding: 0 15px; flex-shrink: 0; }
+.file-preview-tabs .ant-tabs-body-holder { flex: 1; min-height: 0; overflow: hidden; }
+.file-preview-tabbody, .file-preview-tabcontent { height: 100%; min-height: 0; }
+.file-preview-empty { flex: 1; display: flex; align-items: center; justify-content: center; gap: 9px; color: var(--muted); font-size: 12px; }
+.file-code-scroll { height: 100%; overflow: auto; outline-offset: -2px; }
+.file-code { min-width: 100%; width: max-content; margin: 0; padding: 16px 0; font: 12px/1.9 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; }
+.file-code-line { display: flex; min-height: 23px; padding: 0 16px; }
+.file-code-line code { white-space: pre; font: inherit; }
+.file-line-number { position: sticky; left: 0; min-width: 34px; margin-right: 18px; text-align: right; color: var(--muted); user-select: none; background: var(--panel); }
+.file-code-line[data-kind="addition"] { background: #4eac6b18; color: #38834c; }
+.file-code-line[data-kind="deletion"] { background: #d5656518; color: #b55757; }
+.file-code-line[data-kind="hunk"] { color: #6d8db7; background: #6d8db710; }
+.file-code-line[data-kind="meta"] { color: var(--muted); }
+.shell[data-theme="dark"] .file-code-line[data-kind="addition"] { color: #8ecb9f; }
+.shell[data-theme="dark"] .file-code-line[data-kind="deletion"] { color: #df9a9a; }
+.file-preview-footer { display: flex; align-items: center; gap: 12px; flex-shrink: 0; padding: 9px 15px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; }
 .markdown { font-size: 14px; line-height: 1.85; overflow-wrap: anywhere; }
 .markdown p { margin: 0 0 14px; }
 .markdown h1, .markdown h2, .markdown h3 { font-size: 18px; margin: 22px 0 12px; font-weight: 600; }

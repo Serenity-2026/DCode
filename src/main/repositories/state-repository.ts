@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { StoredState } from '../domain/state'
-import { reasoningEfforts, validateAttachments } from '../../shared/context'
+import { isFilePreview, reasoningEfforts, validateAttachments } from '../../shared/context'
 import { modelApis } from '../../shared/model-api'
 
 /** 校验当前磁盘结构、唯一性及账号/会话归属，不转换其他版本的数据。 */
@@ -39,6 +39,9 @@ function validState(value: unknown): boolean {
       const tools = message.toolExecutions
       if (!Array.isArray(tools) || tools.some(tool => !tool || typeof tool.id !== 'string' || !tool.id || typeof tool.name !== 'string' || !tool.name || !['running', 'complete', 'error', 'stopped'].includes(tool.status))) return false
       if (new Set(tools.map(tool => tool.id)).size !== tools.length) return false
+      if (tools.some(tool => (tool.offset !== undefined && (!Number.isSafeInteger(tool.offset) || tool.offset < 0 || tool.offset > message.content.length))
+        || (tool.path !== undefined && (typeof tool.path !== 'string' || !tool.path.trim() || tool.path.includes('\0')))
+        || (tool.preview !== undefined && !isFilePreview(tool.preview)))) return false
     }
     try { for (const message of c.messages) validateAttachments(message.attachments) } catch { return false }
   }

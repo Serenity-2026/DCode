@@ -4,24 +4,33 @@ import { MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons'
 import type { Theme } from '../../../shared/types'
 
 /** 工作台分栏布局；依赖 Ant Design Splitter 和 Workspace 提供的内容，独立处理拖动以避免重绘聊天消息。 */
-export function WorkspaceLayout({ theme, sidebar, header, children }: {
-  theme: Theme; sidebar: ReactNode; header: ReactNode; children: ReactNode
+export function WorkspaceLayout({ theme, sidebar, header, children, preview }: {
+  theme: Theme; sidebar: ReactNode; header: ReactNode; children: ReactNode; preview?: ReactNode
 }): ReactNode {
   const [width, setWidth] = useState(() => Math.min(246, window.innerWidth / 3))
   const lastWidth = useRef(width)
   const dragStartWidth = useRef(width)
   const collapsed = width === 0
+  const hasPreview = Boolean(preview)
+
+  /** 文件面板打开时保留聊天和预览的最低可用宽度，窄窗口收起会话栏。 */
+  function sidebarLimit(): number { return Math.min(window.innerWidth / 3, hasPreview ? Math.max(0, window.innerWidth - 680) : Infinity) }
 
   // 窗口缩小时同步宽度上限；保留收起前宽度，展开时再按当前窗口限制。
   useEffect(() => {
-    const resize = (): void => setWidth(current => Math.min(current, window.innerWidth / 3))
+    const resize = (): void => setWidth(current => {
+      const next = Math.min(current, sidebarLimit())
+      return next < 180 ? 0 : next
+    })
+    resize()
     window.addEventListener('resize', resize)
     return () => window.removeEventListener('resize', resize)
-  }, [])
+  }, [hasPreview])
 
   /** Splitter 连续拖动时立即更新宽度，低于 180px 收起；不调用 Workspace 或主进程。 */
   function resize(sizes: number[]): void {
-    setWidth(sizes[0] < 180 ? 0 : Math.min(sizes[0], window.innerWidth / 3))
+    const next = Math.min(sizes[0], sidebarLimit())
+    setWidth(next < 180 ? 0 : next)
   }
 
   /** 拖动结束记住展开宽度；拖动收起保留手势开始前的宽度，供顶部按钮恢复。 */
@@ -31,7 +40,7 @@ export function WorkspaceLayout({ theme, sidebar, header, children }: {
 
   /** 顶部按钮切换侧栏，恢复上次宽度并限制在当前窗口的三分之一以内。 */
   function toggle(): void {
-    if (collapsed) setWidth(Math.min(lastWidth.current, window.innerWidth / 3))
+    if (collapsed) { const next = Math.min(lastWidth.current, sidebarLimit()); setWidth(next < 180 ? 0 : next) }
     else { lastWidth.current = width; setWidth(0) }
   }
 
@@ -50,7 +59,12 @@ export function WorkspaceLayout({ theme, sidebar, header, children }: {
             </Tooltip>
             {header}
           </header>
-          {children}
+          <Splitter className="workspace-panels" styles={{ panel: { overflow: 'hidden' } }}>
+            <Splitter.Panel key="chat" min={hasPreview ? 320 : 0}>
+              <div className="chat-pane">{children}</div>
+            </Splitter.Panel>
+            {hasPreview && <Splitter.Panel key="preview" defaultSize="44%" min={300} max="65%">{preview}</Splitter.Panel>}
+          </Splitter>
         </main>
       </Splitter.Panel>
     </Splitter>

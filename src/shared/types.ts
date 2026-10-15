@@ -85,8 +85,18 @@ export type Action =
   | { type: 'reasoning-effort'; effort: ReasoningEffort | null }
   | { type: 'theme'; theme: Theme }
 
-/** 单次真实工具调用的展示记录，按 ID 区分同名调用，不包含参数或结果正文。 */
-export interface ToolExecution { id: string; name: string; status: 'running' | 'complete' | 'error' | 'stopped' }
+/** 调用时的有界文本快照；修改工具另附统一差异，不从界面读取任意磁盘路径。 */
+export interface FilePreview { content: string; diff?: string; startLine?: number; totalLines?: number; truncated?: boolean }
+
+/** 工具调用在回复正文中的位置、文件链接和预览；不保存完整调用参数。 */
+export interface ToolExecution {
+  id: string
+  name: string
+  status: 'running' | 'complete' | 'error' | 'stopped'
+  offset?: number
+  path?: string
+  preview?: FilePreview
+}
 
 /** 流更新携带完整消息及工具记录，Workspace 按消息 ID 合并。 */
 export interface StreamEvent { conversationId: string; message: Message }

@@ -3,9 +3,10 @@ import { ToolExecutionError, type AgentToolResult, type ToolImage } from '../../
 import { decodeText, pathSchema, resolveToolPath } from './file-operations'
 import { truncateOutput } from './output'
 import type { ToolExecutionContext, WorkspaceTool } from './tool-runtime'
+import type { FilePreview } from '../../../shared/types'
 
 /** 文本分页与截断信息，应用无需从提示文字解析下一页。 */
-export interface ReadToolDetails { totalLines: number; nextOffset?: number; truncation?: { lines: number; bytes: number } }
+export interface ReadToolDetails { totalLines: number; nextOffset?: number; truncation?: { lines: number; bytes: number }; preview?: FilePreview }
 
 /** 图片依真实文件头识别，避免将二进制误解码成文本；使用双协议共同支持的格式。 */
 function imageType(data: Buffer): ToolImage['mimeType'] | undefined {
@@ -43,6 +44,7 @@ export class ReadTool implements WorkspaceTool<ReadToolDetails | undefined> {
     const readLines = output.truncated ? output.lines : Math.min(lines.length - start, (args.limit as number | undefined) ?? lines.length)
     const next = start + readLines + 1
     if (next <= lines.length) details.nextOffset = next
+    details.preview = { content: output.content, startLine: start + 1, totalLines: lines.length, truncated: output.truncated || start > 0 || next <= lines.length }
     readFileState.set(path, timestamp)
     return { content: [{ type: 'text', text: output.content + (next <= lines.length ? `\n\n[显示第 ${start + 1}–${next - 1} 行，共 ${lines.length} 行；使用 offset=${next} 继续。]` : '') }], details }
   }

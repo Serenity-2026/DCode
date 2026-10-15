@@ -1,4 +1,13 @@
-import type { Attachment, Conversation, ModelDetails, ProviderProfile, ReasoningEffort } from './types'
+import type { Attachment, Conversation, FilePreview, ModelDetails, ProviderProfile, ReasoningEffort } from './types'
+
+/** 校验工具提供或磁盘恢复的预览，避免非文本内容进入文件面板。 */
+export function isFilePreview(value: unknown): value is FilePreview {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const preview = value as FilePreview
+  return typeof preview.content === 'string' && (preview.diff === undefined || typeof preview.diff === 'string')
+    && (preview.truncated === undefined || typeof preview.truncated === 'boolean')
+    && [preview.startLine, preview.totalLines].every(number => number === undefined || Number.isSafeInteger(number) && number > 0)
+}
 
 /** 推理档位白名单供 Models 解析元数据、StateService 校验输入、界面生成滑块共用。 */
 export const reasoningEfforts: ReasoningEffort[] = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']

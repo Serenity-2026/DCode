@@ -1,14 +1,15 @@
 import { createTwoFilesPatch } from 'diff'
 import { readFile, stat, writeFile } from 'node:fs/promises'
 import { ToolExecutionError, type AgentToolResult } from '../../domain/llm'
-import { truncateOutput } from './output'
+import { createFilePreview, truncateOutput } from './output'
+import type { FilePreview } from '../../../shared/types'
 import { decodeText, mutateFile, pathSchema, resolveToolPath } from './file-operations'
 import type { ToolExecutionContext, WorkspaceTool } from './tool-runtime'
 
 interface TextEdit { oldText: string; newText: string }
 interface Replacement { start: number; end: number; text: string }
 /** 应用可以直接展示差异，不必从工具提示中提取。 */
-export interface EditToolDetails { diff: string }
+export interface EditToolDetails { diff: string; preview: FilePreview }
 
 /** 独立批量编辑工具；原文统一校验后写入，文本计算与磁盘操作保持在本模块。 */
 export class EditTool implements WorkspaceTool<EditToolDetails> {
@@ -39,7 +40,7 @@ export class EditTool implements WorkspaceTool<EditToolDetails> {
       const updatedTimestamp = (await stat(path)).mtimeMs
       signal.throwIfAborted()
       readFileState.set(path, updatedTimestamp)
-      return { content: [{ type: 'text', text: `已替换 ${(args.edits as TextEdit[]).length} 处：${args.path}\n${changed.diff}` }], details: { diff: changed.diff } }
+      return { content: [{ type: 'text', text: `已替换 ${(args.edits as TextEdit[]).length} 处：${args.path}\n${changed.diff}` }], details: { diff: changed.diff, preview: createFilePreview(changed.content, changed.diff) } }
     })
   }
 }

@@ -1,6 +1,15 @@
+import type { FilePreview } from '../../../shared/types'
+
 /** 文件读取保留开头，命令输出保留结尾；行数与 UTF-8 字节数同时限额。 */
 export const maxOutputLines = 2000
 export const maxOutputBytes = 50 * 1024
+
+/** 文件预览与工具输出共用限额，原始全文不进入应用历史或渲染进程。 */
+export function createFilePreview(content: string, diff: string): FilePreview {
+  const text = truncateOutput(content)
+  const patch = truncateOutput(diff)
+  return { content: text.content, diff: patch.content, totalLines: content.split('\n').length, truncated: text.truncated || patch.truncated }
+}
 
 /** 从 UTF-8 字符边界截取尾部，避免中文或 emoji 变成替换字符。 */
 export function utf8Tail(data: Buffer, limit: number): Buffer {

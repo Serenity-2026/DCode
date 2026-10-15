@@ -42,10 +42,17 @@ write 在获得路径队列、创建父目录后，紧邻写入前检查文件�
 
 ## 工具执行状态
 
-- 回复区域实时显示“正在执行 {工具名}”，并行调用分别显示，按调用 ID 跟踪；结束后保留“已完成 / 执行失败 / 已停止”记录，避免快速 read/edit/write 在浏览器绘制前结束而不可见。串行工具只在开始执行时加入记录。
-- AgentSession 消费已有的 tool_execution_start / tool_execution_end，将名称、调用 ID 与状态保存为回复的可选 toolExecutions，随完整 StreamEvent 立即推送，不受正文节流影响；不传递工具参数或结果正文。
+- 工具调用按发生时正文的 UTF-16 偏移穿插显示，形成“文字 → 调用行 → 后续文字”，不汇总到回复底部。开始时显示小图标、“正在调用 {工具名} 工具”及文件链接，结束后保留 read/write/edit 与文件名、完成/失败/停止状态；同名并行调用按调用 ID 区分。
+- ToolExecutor 的开始事件携带参数副本，AgentSession 只提取文件工具的有效 path、正文偏移、调用 ID 和状态；完整参数不传递给界面或写入历史。更新仍立即随完整 StreamEvent 推送，不受正文节流影响。
 - 记录随回复保存至 state.json，切换会话和重启后仍可查看；完成、停止或报错时结算尚在运行的记录，启动恢复时将遗留 running 标记为 stopped。旧消息缺少此字段时按无记录处理，不改变 schema 版本。
 - 记录不加入模型请求上下文。只有真实工具事件产生记录，模型直接使用附件快照回答或续写时不显示工具调用。
+
+## 右侧文件预览
+
+- 点击调用行的文件链接，在工作台右侧打开可调整宽度、关闭的只读面板；聊天和输入区保留，窄窗口收起会话栏。切换会话或删除会话时关闭预览，关闭预览不停止任务。
+- read 预览本次实际读取的文本和起始行；write 预览写入后文本与写入前磁盘内容的统一差异；edit 预览修改后文本与已有 diff。“内容 / 修改”标签切换视图，差异使用增删着色，正文显示行号。
+- 预览是调用时快照，随工具记录保存；主进程不向 renderer 开放任意路径读取，也不把预览再次加入模型请求。文本、差异各保留至多 2000 行或 50 KiB，分页或截断显示“部分内容”。失败、取消、图片读取和旧记录没有文本快照时显示对应状态。
+- 已有记录缺少正文偏移时保留在回复末尾，缺少文件路径时只展示工具名；不从历史正文猜测路径、顺序或文件内容。
 
 ## 统一工具结果
 
@@ -53,10 +60,10 @@ write 在获得路径队列、创建父目录后，紧邻写入前检查文件�
 
 - AgentTool 和 WorkspaceTool 的 execute 统一返回 `Promise<AgentToolResult<TDetails>>`，取消字符串兼容。完整结果契约包含 `content` 文本/图片内容块数组、`details`（没有附加信息时为 undefined）及可选 `structuredContent`、`usage`、`isError`、`terminate`，与 pi v1.2.0 的字段保持一致；不增加进度回调。
 - ToolExecutor 以 `isError === true` 确定返回结果的失败状态；工具抛出异常时生成错误结果，取消仍终止任务。最终 toolResult 含必填 isError，工具结束事件携带同一结果。内容块与 details 被复制，工具返回对象、订阅事件与 Agent 状态互不污染。
-- read 在 details 返回文本总行数、下一页 offset 和截断行数/字节数，图片直接作为 content 中的 image 块；write 返回文本块且 details 为 undefined；edit 返回文本块并在 details 保存有界 diff；bash 返回退出码、超时状态以及可选截断信息和完整日志路径。bash 的非零退出与工具超时返回 isError: true，仍保留输出和 details；进程/日志系统故障继续抛出预期异常。
+- read 在 details 返回文本总行数、下一页 offset、截断信息及 preview，图片直接作为 content 中的 image 块；write 在 details 返回文本与差异 preview；edit 保留原有有界 diff 并补充 preview；bash 返回退出码、超时状态以及可选截断信息和完整日志路径。bash 的非零退出与工具超时返回 isError: true，仍保留输出和 details；进程/日志系统故障继续抛出预期异常。
 - structuredContent 为 JsonValue，支持 JSON 对象、数组、基本值和 null；usage 沿用 pi 的 token、缓存、推理及成本字段，描述工具自身的调用用量，不加入主对话上下文估算。两个字段都随工具结果保留在 Agent 状态和事件，成功与失败均不丢失。
 - terminate 是整批工具结束后的终止提示：本轮所有工具结果都为 terminate: true 才结束，不再请求模型；混合结果、未知工具、非法参数和抛出的异常不触发该规则。仍先完成整批执行和结果事件，取消始终优先于正常终止。
-- 模型适配层仅转换 content 与错误状态，不发送 details、structuredContent、usage 或 terminate；OpenAI 合并文字块，并在整批工具结果配对后追加图片消息，Anthropic 保留混合内容块的顺序。这些附加字段仅留在本次运行状态与事件，不写入应用对话历史。
+- 模型适配层仅转换 content 与错误状态，不发送 details、structuredContent、usage 或 terminate；OpenAI 合并文字块，并在整批工具结果配对后追加图片消息，Anthropic 保留混合内容块的顺序。会话层仅保存预览所需的 preview，不保存完整工具结果、structuredContent、usage 或 terminate。
 
 ## 清理与任务错误
 

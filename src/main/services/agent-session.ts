@@ -1,5 +1,5 @@
 import type { SendInput, Snapshot, StreamEvent } from '../../shared/types'
-import { contextMessages, conversationDirectory } from '../../shared/context'
+import { contextMessages, conversationDirectory, isFilePreview } from '../../shared/context'
 import type { AgentEvent } from '../domain/agent'
 import { toLlmMessages, type LlmMessage, type ToolWorkspace } from '../domain/llm'
 import type { ModelConfig } from '../domain/model-config'
@@ -93,10 +93,17 @@ export class AgentSession {
         target.lastEmit = Date.now()
       }
     } else if (event.type === 'tool_execution_start' || event.type === 'tool_execution_end') {
-      if (event.type === 'tool_execution_start') (message.toolExecutions ||= []).push({ id: event.toolCallId, name: event.name, status: 'running' })
-      else {
+      if (event.type === 'tool_execution_start') {
+        const path = ['read', 'write', 'edit'].includes(event.name) && typeof event.arguments.path === 'string' && event.arguments.path.trim() && !event.arguments.path.includes('\0') ? event.arguments.path : undefined
+        const tools = message.toolExecutions ||= []
+        tools.push({ id: event.toolCallId, name: event.name, status: 'running', offset: message.content.length, ...(path ? { path } : {}) })
+      } else {
         const tool = message.toolExecutions?.find(tool => tool.id === event.toolCallId)
-        if (tool) tool.status = event.result.isError ? 'error' : 'complete'
+        if (tool) {
+          tool.status = event.result.isError ? 'error' : 'complete'
+          const details = event.result.details as { preview?: unknown } | undefined
+          if (tool.path && !event.result.isError && isFilePreview(details?.preview)) tool.preview = structuredClone(details.preview)
+        }
       }
       // 保留已结束的调用，快速工具也可见；状态立即推送，不受正文节流影响。
       this.emit({ conversationId: conversation.id, message: structuredClone(message) })

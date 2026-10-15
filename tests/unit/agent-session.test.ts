@@ -27,12 +27,13 @@ it('retains tool records by call ID across parallel groups, serial barriers and 
     expect(events.at(-1)).toMatchObject({ conversationId: snapshot.activeConversationId, message: { toolExecutions: [{ id: 'a', name: 'echo', status: 'running' }, { id: 'b', name: 'echo', status: 'running' }] } })
     expect(events.at(-1)!.message.content).toBe('准备执行')
     releases.get('b')!()
-    await vi.waitFor(() => expect(events.at(-1)!.message.toolExecutions).toEqual([{ id: 'a', name: 'echo', status: 'running' }, { id: 'b', name: 'echo', status: 'error' }]))
+    await vi.waitFor(() => expect(events.at(-1)!.message.toolExecutions).toMatchObject([{ id: 'a', name: 'echo', status: 'running' }, { id: 'b', name: 'echo', status: 'error' }]))
+    expect(events.at(-1)!.message.toolExecutions?.map(tool => tool.offset)).toEqual(['准备执行'.length, '准备执行'.length])
     expect(events.find(event => event.message.toolExecutions?.length === 2)!.message.toolExecutions!.every(tool => tool.status === 'running')).toBe(true)
     expect(releases.has('c')).toBe(false)
     releases.get('a')!()
     await vi.waitFor(() => expect(releases.has('c')).toBe(true))
-    expect(events.at(-1)!.message.toolExecutions).toEqual([{ id: 'a', name: 'echo', status: 'complete' }, { id: 'b', name: 'echo', status: 'error' }, { id: 'c', name: 'finish', status: 'running' }])
+    expect(events.at(-1)!.message.toolExecutions).toMatchObject([{ id: 'a', name: 'echo', status: 'complete' }, { id: 'b', name: 'echo', status: 'error' }, { id: 'c', name: 'finish', status: 'running' }])
     releases.get('c')!()
     await agent.waitForIdle()
     expect(events.at(-1)!.message.status).toBe('complete')
@@ -54,11 +55,11 @@ it.each(['stopped', 'error'] as const)('settles tool records when the task ends 
   session.send({ content: '执行工具' }, config)
   try {
     await vi.waitFor(() => expect(release).toBeTypeOf('function'))
-    expect(events.at(-1)!.message.toolExecutions).toEqual([{ id: 'a', name: 'echo', status: 'running' }])
+    expect(events.at(-1)!.message.toolExecutions).toMatchObject([{ id: 'a', name: 'echo', status: 'running' }])
     if (outcome === 'stopped') await session.stop()
     else { release(); await agent.waitForIdle() }
     expect(events.at(-1)!.message.status).toBe(outcome)
-    expect(events.at(-1)!.message.toolExecutions).toEqual([{ id: 'a', name: 'echo', status: outcome === 'stopped' ? 'stopped' : 'complete' }])
+    expect(events.at(-1)!.message.toolExecutions).toMatchObject([{ id: 'a', name: 'echo', status: outcome === 'stopped' ? 'stopped' : 'complete' }])
   } finally { agent.abort(); await agent.waitForIdle() }
 })
 

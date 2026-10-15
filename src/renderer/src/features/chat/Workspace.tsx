@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react'
-import { Alert, App as AntApp, Button, Dropdown, Input, Modal, Tag } from 'antd'
+import { Alert, App as AntApp, Button, Dropdown, Input, Modal } from 'antd'
 import {
   ArrowUpOutlined, PlusOutlined, SearchOutlined, MessageOutlined, MoreOutlined,
   SettingOutlined, CodeOutlined, BugOutlined, BranchesOutlined, CopyOutlined,
   ReloadOutlined, StopOutlined, DeleteOutlined, EditOutlined, LogoutOutlined,
-  DownOutlined, RightOutlined, FolderOpenOutlined, LoadingOutlined, CheckCircleOutlined, CloseCircleOutlined
+  DownOutlined, RightOutlined, FolderOpenOutlined, LoadingOutlined
 } from '@ant-design/icons'
 import type { Action, Attachment, Message, ModelRefresh, Result, Snapshot, StreamEvent } from '../../../../shared/types'
 import { estimateContext, validateAttachments } from '../../../../shared/context'
-import { Markdown } from './components/Markdown'
+import { AssistantTimeline } from './components/AssistantTimeline'
+import { FilePreviewPanel } from './components/FilePreviewPanel'
 import { ModelSettings } from '../settings/ModelSettings'
 import { ComposerTools } from './components/ComposerTools'
 import { AttachmentList } from './components/AttachmentList'
@@ -30,6 +31,7 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
   const [pending, setPending] = useState(false)
   const [stopping, setStopping] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [previewSelection, setPreviewSelection] = useState<{ messageId: string; toolId: string } | null>(null)
   const [modelsLoading, setModelsLoading] = useState(snapshot.providers.length > 0)
   const initialRefresh = useRef<Promise<Result<ModelRefresh>> | null>(null)
   const [edit, setEdit] = useState<{ type: 'user' | 'conversation'; id: string; value: string } | null>(null)
@@ -41,6 +43,7 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
   const inFlight = useRef(false)
   const user = snapshot.users.find(u => u.id === snapshot.activeUserId)!
   const active = snapshot.conversations.find(c => c.id === snapshot.activeConversationId)
+  const previewTool = active?.messages.find(message => message.id === previewSelection?.messageId)?.toolExecutions?.find(tool => tool.id === previewSelection?.toolId)
   const selectedFolder = attachments.find(item => item.kind === 'folder')
   const generating = Boolean(active?.messages.some(m => m.status === 'streaming'))
   const interacting = pending || stopping || modelsLoading
@@ -132,6 +135,7 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
       installSnapshot(result.value)
       if (['conversation:select', 'conversation:delete'].includes(action.type)) {
         setDraft(''); setAttachments([]); follow.current = true; jumping.current = false
+        setPreviewSelection(null)
       }
       return true
     } catch { void toast.error('操作失败，请重试。'); return false }
@@ -225,14 +229,9 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
     const running = tools.some(tool => tool.status === 'running')
     return <div className="assistant-content">
       {m.reasoning && <details className="reasoning"><summary>思考过程</summary><p>{m.reasoning}</p></details>}
-      {m.content ? <Markdown content={m.content} /> : m.status === 'streaming' && !running ? <div className="thinking-dots" aria-label="正在生成"><i /><i /><i /></div> : null}
-      {tools.length > 0 && <div className="tool-activity" role="group" aria-label="工具调用记录">
-        {tools.map(tool => <Tag key={tool.id} role={tool.status === 'running' ? 'status' : undefined} aria-label={tool.status === 'running' ? '工具执行状态' : undefined}
-          color={tool.status === 'error' ? 'error' : undefined}
-          icon={tool.status === 'running' ? <LoadingOutlined spin /> : tool.status === 'complete' ? <CheckCircleOutlined /> : tool.status === 'error' ? <CloseCircleOutlined /> : <StopOutlined />}>
-          {{ running: '正在执行', complete: '已完成', error: '执行失败', stopped: '已停止' }[tool.status]} {tool.name}
-        </Tag>)}
-      </div>}
+      <AssistantTimeline message={m} selectedToolId={previewSelection?.messageId === m.id ? previewSelection.toolId : undefined}
+        onPreview={tool => setPreviewSelection({ messageId: m.id, toolId: tool.id })} />
+      {!m.content && m.status === 'streaming' && !running && <div className="thinking-dots" aria-label="正在生成"><i /><i /><i /></div>}
       {m.status === 'error' && <Alert title={m.error || '生成失败，请重试。'} type="error" showIcon />}
       {m.status === 'stopped' && <div className="message-status">已停止生成</div>}
       {m.status !== 'streaming' && <div className="message-actions">
@@ -248,7 +247,7 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
   const modelName = snapshot.config.model
   const usedTokens = estimateContext(active, draft, attachments, generating)
   return <>
-    <WorkspaceLayout theme={snapshot.theme} sidebar={
+    <WorkspaceLayout theme={snapshot.theme} preview={previewTool && <FilePreviewPanel key={`${previewSelection!.messageId}:${previewTool.id}`} tool={previewTool} onClose={() => setPreviewSelection(null)} />} sidebar={
     <aside className="sidebar">
       <div className="window-space" />
       <div className="brand"><span className="brand-mark"><BrandMark /></span><span className="brand-name">DCode</span><span className="brand-version">0.1</span></div>

@@ -27,7 +27,7 @@ export type AgentLoopEvent =
   | { type: 'message_start'; message: AssistantMessage }
   | { type: 'message_update'; delta: LlmDelta }
   | { type: 'message_end'; message: AssistantMessage | ToolResultMessage }
-  | { type: 'tool_execution_start'; toolCallId: string; name: string }
+  | { type: 'tool_execution_start'; toolCallId: string; name: string; arguments: Record<string, unknown> }
   | { type: 'tool_execution_end'; toolCallId: string; name: string; result: ToolResultMessage }
   | { type: 'turn_end'; message: AssistantMessage; toolResults: ToolResultMessage[] }
 

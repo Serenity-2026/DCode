@@ -116,7 +116,8 @@ describe('account-owned conversations', () => {
     store.begin('工具记录', false, 'test')
     const original = structuredClone(store.state)
     const tool = { id: 'call', name: 'read', status: 'complete' }
-    for (const tools of [null, {}, [null], [{ ...tool, status: 'unknown' }], [{ ...tool, name: 1 }], [{ ...tool, id: '' }], [tool, tool]]) {
+    for (const tools of [null, {}, [null], [{ ...tool, status: 'unknown' }], [{ ...tool, name: 1 }], [{ ...tool, id: '' }], [tool, tool],
+      [{ ...tool, offset: -1 }], [{ ...tool, offset: 1 }], [{ ...tool, path: '\0' }], [{ ...tool, preview: { content: 1 } }], [{ ...tool, preview: { content: '', totalLines: 0 } }]]) {
       const broken = structuredClone(original)
       Object.assign(broken.conversations[0].messages[1], { toolExecutions: tools })
       const bytes = JSON.stringify(broken)
