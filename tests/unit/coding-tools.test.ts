@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+import * as fileSystem from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { ToolRuntime, type WorkspaceTool } from '../../src/main/infrastructure/tools/tool-runtime'
@@ -7,6 +8,7 @@ import { ReadTool } from '../../src/main/infrastructure/tools/read'
 import { BashTool } from '../../src/main/infrastructure/tools/bash'
 import { EditTool } from '../../src/main/infrastructure/tools/edit'
 import { WriteTool } from '../../src/main/infrastructure/tools/write'
+import { mutateFile } from '../../src/main/infrastructure/tools/file-operations'
 import { toolValidator } from '../../src/main/infrastructure/tool-schema'
 import { ToolExecutionError } from '../../src/main/domain/llm'
 import { AgentSession } from '../../src/main/services/agent-session'
@@ -15,6 +17,8 @@ import { anthropicResponse, openAIResponse } from './llm-fixtures'
 import { create, createAgent, config, cleanup, unexpectedTaskError } from './helpers'
 import type { ModelApi } from '../../src/shared/types'
 import { contextMessages, estimateContext } from '../../src/shared/context'
+
+vi.mock('node:fs/promises', async importOriginal => ({ ...await importOriginal<typeof import('node:fs/promises')>() }))
 
 const fixtures: { directory: string; runtime: ToolRuntime }[] = []
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6Z9sAAAAASUVORK5CYII=', 'base64')
@@ -45,7 +49,7 @@ async function waitFile(path: string): Promise<void> {
 }
 
 afterEach(() => {
-  vi.unstubAllGlobals(); cleanup()
+  vi.restoreAllMocks(); vi.unstubAllGlobals(); cleanup()
   for (const { directory, runtime } of fixtures.splice(0)) { runtime.dispose(); rmSync(directory, { recursive: true, force: true }) }
 })
 
@@ -163,8 +167,116 @@ it('returns image blocks by file signature and rejects invalid UTF-8 and binary 
   writeFileSync(join(directory, 'bad'), Buffer.from([0xff, 0xfe]))
   await expect(run('read', { path: 'bad' })).rejects.toThrow('UTF-8')
   writeFileSync(join(directory, 'binary'), Buffer.from([0, 1, 2]))
-  await expect(run('edit', { path: 'binary', edits: [{ oldText: 'a', newText: 'b' }] })).rejects.toThrow('二进制')
+  await expect(run('read', { path: 'binary' })).rejects.toThrow('二进制')
+  await expect(run('edit', { path: 'binary', edits: [{ oldText: 'a', newText: 'b' }] })).rejects.toThrow('请先使用 read')
   expect(readFileSync(join(directory, 'binary'))).toEqual(Buffer.from([0, 1, 2]))
+})
+
+it('refuses an unread edit even when oldText matches, then permits consecutive edits after read', async () => {
+  const { directory, run } = fixture()
+  const path = join(directory, 'edit')
+  writeFileSync(path, 'original')
+  await expect(run('edit', { path, edits: [{ oldText: 'original', newText: 'changed' }] })).rejects.toThrow('请先使用 read')
+  expect(readFileSync(path, 'utf8')).toBe('original')
+  await run('read', { path: './edit' })
+  await run('edit', { path, edits: [{ oldText: 'original', newText: 'changed' }] })
+  await run('edit', { path: 'edit', edits: [{ oldText: 'changed', newText: 'final' }] })
+  expect(readFileSync(path, 'utf8')).toBe('final')
+})
+
+it.each([-1, 1])('refuses any mtime change, including unchanged content and a backwards timestamp (%s)', async direction => {
+  const { directory, run } = fixture()
+  const path = join(directory, 'edit')
+  writeFileSync(path, 'original')
+  await run('read', { path: 'edit' })
+  const changedTime = new Date(statSync(path).mtimeMs + direction * 10_000)
+  utimesSync(path, changedTime, changedTime)
+  await expect(run('edit', { path: 'edit', edits: [{ oldText: 'original', newText: 'changed' }] })).rejects.toThrow('修改时间已变化')
+  expect(readFileSync(path, 'utf8')).toBe('original')
+  await run('read', { path: 'edit' })
+  await run('edit', { path: 'edit', edits: [{ oldText: 'original', newText: 'changed' }] })
+  expect(readFileSync(path, 'utf8')).toBe('changed')
+})
+
+it('tracks paginated reads of long files and rejects changes outside the returned page', async () => {
+  const { directory, run } = fixture()
+  const path = join(directory, 'long')
+  const original = Array.from({ length: 2100 }, (_, index) => `line-${index + 1}`).join('\n')
+  writeFileSync(path, original)
+  expect((await run('read', { path: 'long' })).details).toMatchObject({ nextOffset: 2001 })
+  await run('edit', { path: 'long', edits: [{ oldText: 'line-1\n', newText: 'first\n' }] })
+  await run('read', { path: 'long', offset: 2001, limit: 10 })
+  const changedTime = new Date(statSync(path).mtimeMs + 10_000)
+  writeFileSync(path, readFileSync(path, 'utf8') + '\nexternal')
+  utimesSync(path, changedTime, changedTime)
+  await expect(run('edit', { path: 'long', edits: [{ oldText: 'line-2001\n', newText: 'updated\n' }] })).rejects.toThrow('修改时间已变化')
+  expect(readFileSync(path, 'utf8')).toContain('line-2001\n')
+})
+
+it('does not count failed or contentless reads, or write calls, as a successful read', async () => {
+  const { directory, run } = fixture()
+  writeFileSync(join(directory, 'edit'), 'original')
+  await expect(run('read', { path: 'edit', offset: 2 })).rejects.toThrow('offset')
+  await expect(run('edit', { path: 'edit', edits: [{ oldText: 'original', newText: 'changed' }] })).rejects.toThrow('请先使用 read')
+  await run('write', { path: 'written', content: 'original' })
+  await expect(run('edit', { path: 'written', edits: [{ oldText: 'original', newText: 'changed' }] })).rejects.toThrow('请先使用 read')
+  writeFileSync(join(directory, 'huge-line'), '中'.repeat(20_000))
+  await run('read', { path: 'huge-line' })
+  await expect(run('edit', { path: 'huge-line', edits: [{ oldText: '中'.repeat(20_000), newText: 'changed' }] })).rejects.toThrow('请先使用 read')
+})
+
+it('isolates read records by runtime, preserves same-directory followups and clears changed workspaces', async () => {
+  const first = fixture()
+  const second = fixture()
+  const path = join(first.directory, 'edit')
+  writeFileSync(path, 'original')
+  await first.run('read', { path })
+  second.runtime.setDirectory(first.directory)
+  await expect(second.run('edit', { path, edits: [{ oldText: 'original', newText: 'wrong' }] })).rejects.toThrow('请先使用 read')
+  first.runtime.setDirectory(first.directory)
+  await first.run('edit', { path, edits: [{ oldText: 'original', newText: 'changed' }] })
+  first.runtime.setDirectory(second.directory)
+  first.runtime.setDirectory(first.directory)
+  await expect(first.run('edit', { path, edits: [{ oldText: 'changed', newText: 'wrong' }] })).rejects.toThrow('请先使用 read')
+  await first.run('read', { path })
+  first.runtime.dispose()
+  await expect(first.run('edit', { path, edits: [{ oldText: 'changed', newText: 'wrong' }] })).rejects.toThrow('请先使用 read')
+  expect(readFileSync(path, 'utf8')).toBe('changed')
+})
+
+it('checks staleness after acquiring the path queue', async () => {
+  const { directory, run } = fixture()
+  const path = join(directory, 'edit')
+  writeFileSync(path, 'original')
+  await run('read', { path })
+  let release!: () => void
+  const waiting = new Promise<void>(resolve => { release = resolve })
+  const changedTime = new Date(statSync(path).mtimeMs + 10_000)
+  const external = mutateFile(path, async () => { await waiting; utimesSync(path, changedTime, changedTime) })
+  const editing = run('edit', { path, edits: [{ oldText: 'original', newText: 'changed' }] })
+  const rejected = expect(editing).rejects.toThrow('修改时间已变化')
+  release()
+  await Promise.all([external, rejected])
+  expect(readFileSync(path, 'utf8')).toBe('original')
+})
+
+it.each(['read', 'edit'])('rejects a file changed during the %s disk read', async name => {
+  const { directory, run } = fixture()
+  const path = join(directory, 'edit')
+  writeFileSync(path, 'original')
+  if (name === 'edit') await run('read', { path })
+  const changedTime = new Date(statSync(path).mtimeMs + 10_000)
+  const read = fileSystem.readFile
+  const intercepted = vi.spyOn(fileSystem, 'readFile').mockImplementationOnce(async () => {
+    const data = await read(path)
+    utimesSync(path, changedTime, changedTime)
+    return data
+  })
+  try {
+    await expect(run(name, { path, ...(name === 'edit' ? { edits: [{ oldText: 'original', newText: 'changed' }] } : {}) })).rejects.toThrow('修改时间已变化')
+  } finally { intercepted.mockRestore() }
+  expect(readFileSync(path, 'utf8')).toBe('original')
+  await expect(run('edit', { path, edits: [{ oldText: 'original', newText: 'changed' }] })).rejects.toThrow(name === 'read' ? '请先使用 read' : '修改时间已变化')
 })
 
 it('creates parent directories, completely overwrites and supports empty content', async () => {
@@ -180,6 +292,7 @@ it('creates parent directories, completely overwrites and supports empty content
 it('edits disjoint regions against the original, in any order, and preserves BOM/CRLF', async () => {
   const { directory, run } = fixture()
   writeFileSync(join(directory, 'edit'), '\ufeff第一处\r\n不变\r\n第二处\r\n')
+  await run('read', { path: 'edit' })
   const output = await run('edit', { path: 'edit', edits: [{ oldText: '第二处\n', newText: '第二处更新\n' }, { oldText: '第一处', newText: '第一处更新' }] })
   const result = output.content.filter(block => block.type === 'text').map(block => block.text).join('\n')
   expect(output.details).toEqual({ diff: expect.stringContaining('-第一处\n+第一处更新') })
@@ -198,6 +311,7 @@ it.each([
   const { directory, run } = fixture()
   const original = '重复\nabcdef\n重复'
   writeFileSync(join(directory, 'edit'), original)
+  await run('read', { path: 'edit' })
   await expect(run('edit', { path: 'edit', edits })).rejects.toThrow(error)
   expect(readFileSync(join(directory, 'edit'), 'utf8')).toBe(original)
 })
@@ -205,9 +319,11 @@ it.each([
 it('uses fuzzy matching only where needed and preserves untouched Unicode and whitespace', async () => {
   const { directory, run } = fixture()
   writeFileSync(join(directory, 'edit'), '保留“引号”  \nconst value = “旧”  \n另一行—保留\t\n')
+  await run('read', { path: 'edit' })
   await run('edit', { path: 'edit', edits: [{ oldText: 'const value = "旧"', newText: 'const value = "新"' }] })
   expect(readFileSync(join(directory, 'edit'), 'utf8')).toBe('保留“引号”  \nconst value = "新"\n另一行—保留\t\n')
   writeFileSync(join(directory, 'edit'), 'value = “重复”\nvalue = "重复"')
+  await run('read', { path: 'edit' })
   await expect(run('edit', { path: 'edit', edits: [{ oldText: 'value = "重复"', newText: 'new' }] })).rejects.toThrow('不唯一')
 })
 
@@ -217,7 +333,7 @@ it('serializes same-path mutations and skips a queued cancelled write', async ()
   const first = run('write', { path: 'edit', content: 'first' })
   const cancelled = run('write', { path: 'edit', content: 'cancelled' }, controller.signal)
   const rejected = expect(cancelled).rejects.toThrow()
-  const next = run('edit', { path: 'edit', edits: [{ oldText: 'first', newText: 'last' }] })
+  const next = run('write', { path: 'edit', content: 'last' })
   controller.abort()
   await Promise.all([first, rejected, next])
   expect(readFileSync(join(directory, 'edit'), 'utf8')).toBe('last')
@@ -307,6 +423,24 @@ it.each<ModelApi>(['openai-completions', 'anthropic-messages'])('runs real file 
     expect(request.messages.slice(-7, -1).map((message: { role: string }) => message.role)).toEqual(Array(6).fill('tool'))
     expect(request.messages.at(-1)).toEqual({ role: 'user', content: [{ type: 'image_url', image_url: { url: `data:image/png;base64,${png.toString('base64')}` } }] })
   }
+})
+
+it.each<ModelApi>(['openai-completions', 'anthropic-messages'])('returns unread edit errors and allows read/edit recovery through %s', async api => {
+  const { directory, tools } = fixture()
+  writeFileSync(join(directory, 'edit'), 'original')
+  const calls = [
+    { id: 'unread', name: 'edit', arguments: JSON.stringify({ path: 'edit', edits: [{ oldText: 'original', newText: 'changed' }] }) },
+    { id: 'read', name: 'read', arguments: JSON.stringify({ path: 'edit' }) },
+    { id: 'retry', name: 'edit', arguments: JSON.stringify({ path: 'edit', edits: [{ oldText: 'original', newText: 'changed' }] }) }
+  ]
+  const response = api === 'anthropic-messages' ? anthropicResponse : openAIResponse
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(response('', calls)).mockResolvedValueOnce(response('已更新')))
+  const agent = createAgent(tools)
+  await agent.prompt({ ...config, api }, { role: 'user', content: '编辑文件' })
+  const results = agent.state.messages.filter(message => message.role === 'toolResult')
+  expect(results.map(message => message.isError)).toEqual([true, false, false])
+  expect(results[0].content).toEqual([{ type: 'text', text: expect.stringContaining('请先使用 read') }])
+  expect(readFileSync(join(directory, 'edit'), 'utf8')).toBe('changed')
 })
 
 it('recovers selected directories for followups/retries and clears them on conversation/account changes', async () => {

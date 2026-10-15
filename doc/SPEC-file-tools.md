@@ -13,13 +13,13 @@
 2026-10-13 将工具声明和实现拆为独立模块，保留现有参数、输出和取消行为：
 
 - `read.ts`、`bash.ts`、`edit.ts`、`write.ts` 分别导出 `ReadTool`、`BashTool`、`EditTool`、`WriteTool` 类，实现 `WorkspaceTool`，声明只读的 name、description、parameters，并显式标注 execute 的参数和返回类型。具体工具不依赖其他工具，也不依赖应用会话或存储。
-- `tool-runtime.ts` 定义 `WorkspaceTool` 与执行上下文，并提供 `ToolRuntime.bind(tool): AgentTool`。只负责本轮 cwd、取消检查、预期系统错误转换和临时目录清理；不导入、枚举或判断具体工具名称。
+- `tool-runtime.ts` 定义 `WorkspaceTool` 与执行上下文，并提供 `ToolRuntime.bind(tool): AgentTool`。负责本轮 cwd、会话内文件读取时间记录、取消检查、预期系统错误转换和临时目录清理；不导入、枚举或判断具体工具名称。
 - `file-operations.ts` 提供文件路径解析、UTF-8 解码及同路径写入互斥；`output.ts` 提供输出截断。公共模块不依赖具体工具。
 - `bootstrap.ts` 显式导入工具类，在会话工厂中用 `[new ReadTool(), new BashTool(), new EditTool(), new WriteTool()].map(tool => runtime.bind(tool))` 注入 Agent，为每个会话创建独立工具实例与 runtime，并将该 runtime 作为 ToolWorkspace 注入对应 AgentSession。目录在每次执行开始时捕获；账号/会话目录恢复规则不变。
 
 新增本机工具时，在独立文件导出实现 WorkspaceTool 的类，并在 bootstrap 的数组中创建实例注册。无需修改其他工具、ToolRuntime、Agent 或 AgentLoop。不需要工作目录的工具可以直接实现 AgentTool 注入 Agent。暂不引入基类继承、动态扫描、插件加载器或依赖注入框架。
 
-工具可声明只用于本地执行的 executionMode。ReadTool 为 parallel，BashTool、EditTool、WriteTool 为 sequential；未声明时默认串行。ToolRuntime.bind 与 Agent 注册保留该属性，模型只接收 name、description、parameters。ToolExecutor 将连续并行调用合组、串行调用各自成组，组间按源顺序等待；详见 `SPEC-tool-executor.md`。文件读取版本校验尚未实现，同路径修改仍使用既有队列。
+工具可声明只用于本地执行的 executionMode。ReadTool 为 parallel，BashTool、EditTool、WriteTool 为 sequential；未声明时默认串行。ToolRuntime.bind 与 Agent 注册保留该属性，模型只接收 name、description、parameters。ToolExecutor 将连续并行调用合组、串行调用各自成组，组间按源顺序等待；详见 `SPEC-tool-executor.md`。编辑版本校验由文件工具在现有同路径队列内执行，不进入通用执行器。
 
 ## 行为
 
@@ -27,6 +27,14 @@
 - `bash({ command, timeout? })`：执行 bash 命令，cwd 固定为本次选择目录；timeout 单位秒，不传时没有工具级默认超时。合并 stdout/stderr，返回最后 2000 行或 50 KiB；截断时完整内容保存在系统临时目录并返回路径，可继续用 read/bash 检查，应用退出清理。非零退出码和超时作为错误 toolResult 回传，停止终止命令及子进程。Windows 需要 PATH 中可用的 bash（如 Git Bash）。
 - `edit({ path, edits: [{ oldText, newText }] })`：所有替换匹配原始文件，唯一且不重叠，统一校验成功后写入；不创建不存在的文件。优先精确匹配，缺失时参考 pi 对 Unicode 标点/空格、尾部空白做容错；未触及的行不因容错而重写。保留 UTF-8 BOM 和原有 LF/CRLF，拒绝空 oldText、歧义、重叠、没有变化的操作。返回成功信息和有界 unified diff。
 - `write({ path, content })`：UTF-8 新建或完整覆盖，自动创建父目录；允许空内容。同一路径的 write/edit 串行，取消后正在进行的磁盘写入不能撤销，但不会释放互斥后让下一次写入与旧操作交错。
+
+### 编辑前读取与版本检查
+
+2026-10-15 为 edit 增加 Read-before-edit 与 Staleness check。每个会话的 ToolRuntime 保存 `Map<规范化绝对路径, mtimeMs>`，不缓存全文、不计算文件哈希、不持久化。相同目录的后续提问保留记录，工作目录变化或 runtime 清理时重置；不同会话不共享记录。
+
+read 在读取前后比较原始精度的 mtimeMs，发生变化就失败；成功返回文本（包括分页、截断后实际返回的文本）才保存时间。失败、取消、单行超限而未返回文本、图片读取、附件和 bash 不建立可编辑文本的读取记录。edit 在获得路径队列后检查已读记录，并在读取当前内容前及写入前复核 mtimeMs；没有记录或时间不相等（包括时间回退、内容相同但时间变化）均返回预期工具错误，要求重新 read。edit 成功后更新记录，支持连续编辑；启动写入时移除旧记录，写入失败或写入期间取消后须重新 read。write 保持原有创建/覆盖行为，不计为 read。
+
+本轮仅检查修改时间：内容改变但 mtimeMs 未变时可能漏检，也不保证最后一次检查与写入之间的外部修改被发现。分页读取不证明模型已看过文件的所有区域，原文匹配、唯一性及重叠检查继续执行。
 
 主进程 infrastructure 承担磁盘/进程操作。AgentSession 仅根据会话配置工作目录；Agent/Loop 不读取系统路径。OpenAI 在配对工具结果后追加 user 图片消息，Anthropic 在 tool_result 中嵌入图片。预期工具错误可回传具体原因，未分类异常仍使用通用错误，避免泄露秘密。
 

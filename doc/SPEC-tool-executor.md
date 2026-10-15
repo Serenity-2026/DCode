@@ -2,7 +2,7 @@
 
 ## 范围与契约
 
-ToolExecutor 负责单个 turn 的工具查找、参数校验、分组执行、取消、结果校验及工具事件。AgentLoop 只负责模型请求、正式消息和轮次推进；执行器不依赖具体工具、文件系统、会话或存储。本次不实现文件读取版本校验。
+ToolExecutor 负责单个 turn 的工具查找、参数校验、分组执行、取消、结果校验及工具事件。AgentLoop 只负责模型请求、正式消息和轮次推进；执行器不依赖具体工具、文件系统、会话或存储。文件读取版本校验由文件工具实现，见 `SPEC-file-tools.md`。
 
 AgentTool 与 WorkspaceTool 可声明本地 executionMode：parallel 或 sequential，未声明默认 sequential。ToolRuntime.bind 与 Agent 注册保留此属性；公开工具声明和供应商请求仅包含 name、description、parameters，不发送执行属性或 handler。内置 ReadTool 声明 parallel，BashTool、EditTool、WriteTool 声明 sequential。
 

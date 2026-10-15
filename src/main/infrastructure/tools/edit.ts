@@ -1,5 +1,5 @@
 import { createTwoFilesPatch } from 'diff'
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile, stat, writeFile } from 'node:fs/promises'
 import { ToolExecutionError, type AgentToolResult } from '../../domain/llm'
 import { truncateOutput } from './output'
 import { decodeText, mutateFile, pathSchema, resolveToolPath } from './file-operations'
@@ -14,21 +14,31 @@ export interface EditToolDetails { diff: string }
 export class EditTool implements WorkspaceTool<EditToolDetails> {
   readonly name = 'edit'
   readonly executionMode = 'sequential'
-  readonly description = 'Edit one UTF-8 file using edits: [{oldText, newText}]. Each oldText must identify a unique, non-overlapping region of the original file. All replacements are validated before writing. Returns a unified diff.'
+  readonly description = 'Edit one UTF-8 file using edits: [{oldText, newText}]. Read the file with read first; if its modification time changes, read it again. Each oldText must identify a unique, non-overlapping region of the original file. All replacements are validated before writing. Returns a unified diff.'
   readonly parameters = { type: 'object', additionalProperties: false, required: ['path', 'edits'], properties: {
     path: pathSchema, edits: { type: 'array', minItems: 1, items: { type: 'object', additionalProperties: false, required: ['oldText', 'newText'], properties: { oldText: { type: 'string', minLength: 1 }, newText: { type: 'string' } } } }
   } }
   /** 统一验证所有替换后写入，队列在底层操作完成前持续持有路径锁。 */
-  async execute(args: Record<string, unknown>, signal: AbortSignal, { cwd }: ToolExecutionContext): Promise<AgentToolResult<EditToolDetails>> {
+  async execute(args: Record<string, unknown>, signal: AbortSignal, { cwd, readFileState }: ToolExecutionContext): Promise<AgentToolResult<EditToolDetails>> {
     const path = resolveToolPath(args.path as string, cwd)
     return mutateFile(path, async () => {
       signal.throwIfAborted()
+      const timestamp = readFileState.get(path)
+      if (timestamp === undefined) throw new ToolExecutionError('请先使用 read 读取该文件，再使用 edit 编辑。')
+      const ensureUnchanged = async (): Promise<void> => {
+        if ((await stat(path)).mtimeMs !== timestamp) throw new ToolExecutionError('文件修改时间已变化，请重新使用 read 读取后再编辑。')
+      }
+      await ensureUnchanged()
       const data = await readFile(path, { signal })
       signal.throwIfAborted()
       const changed = editText(decodeText(data), args.edits as TextEdit[], args.path as string)
+      await ensureUnchanged()
       signal.throwIfAborted()
+      readFileState.delete(path)
       await writeFile(path, changed.content, 'utf8')
+      const updatedTimestamp = (await stat(path)).mtimeMs
       signal.throwIfAborted()
+      readFileState.set(path, updatedTimestamp)
       return { content: [{ type: 'text', text: `已替换 ${(args.edits as TextEdit[]).length} 处：${args.path}\n${changed.diff}` }], details: { diff: changed.diff } }
     })
   }

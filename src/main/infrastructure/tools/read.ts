@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { ToolExecutionError, type AgentToolResult, type ToolImage } from '../../domain/llm'
 import { decodeText, pathSchema, resolveToolPath } from './file-operations'
 import { truncateOutput } from './output'
@@ -25,8 +25,11 @@ export class ReadTool implements WorkspaceTool<ReadToolDetails | undefined> {
     path: pathSchema, offset: { type: 'integer', minimum: 1 }, limit: { type: 'integer', minimum: 1 }
   } }
   /** 读取当前磁盘内容，文本按行分页；图片经统一结果传到模型适配层。 */
-  async execute(args: Record<string, unknown>, signal: AbortSignal, { cwd }: ToolExecutionContext): Promise<AgentToolResult<ReadToolDetails | undefined>> {
-    const data = await readFile(resolveToolPath(args.path as string, cwd), { signal })
+  async execute(args: Record<string, unknown>, signal: AbortSignal, { cwd, readFileState }: ToolExecutionContext): Promise<AgentToolResult<ReadToolDetails | undefined>> {
+    const path = resolveToolPath(args.path as string, cwd)
+    const timestamp = (await stat(path)).mtimeMs
+    const data = await readFile(path, { signal })
+    if ((await stat(path)).mtimeMs !== timestamp) throw new ToolExecutionError('读取期间文件修改时间已变化，请重新使用 read。')
     signal.throwIfAborted()
     const mimeType = imageType(data)
     if (mimeType) return { content: [{ type: 'text', text: `读取图片：${args.path} (${mimeType})` }, { type: 'image', data: data.toString('base64'), mimeType }], details: undefined }
@@ -40,6 +43,7 @@ export class ReadTool implements WorkspaceTool<ReadToolDetails | undefined> {
     const readLines = output.truncated ? output.lines : Math.min(lines.length - start, (args.limit as number | undefined) ?? lines.length)
     const next = start + readLines + 1
     if (next <= lines.length) details.nextOffset = next
+    readFileState.set(path, timestamp)
     return { content: [{ type: 'text', text: output.content + (next <= lines.length ? `\n\n[显示第 ${start + 1}–${next - 1} 行，共 ${lines.length} 行；使用 offset=${next} 继续。]` : '') }], details }
   }
 }
