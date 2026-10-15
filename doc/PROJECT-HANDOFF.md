@@ -7,7 +7,7 @@
 - 项目根目录：`/Users/a1/Documents/open-source/DCode`。
 - DCode 是 Electron 桌面 Coding Harness。目前完成本机账号、模型配置、流式对话和桌面交互框架。
 - 技术栈：TypeScript 5.9、Electron 44、React 19、Ant Design 6；electron-vite 构建，electron-builder 打包；Vitest 单元测试、Playwright Electron E2E。
-- 当前能与模型对话、把用户主动选择的文本文件/目录作为上下文，已接入 function call / agent loop、OpenAI/Anthropic 统一消息层及 read、bash、edit、write 生产工具。会话创建时选择工作目录，取消则在文档/DCode 下创建默认目录；会话按文件夹分类。尚未实现云端账号同步。
+- 当前能与模型对话、把用户主动选择的文本文件/目录作为上下文，已接入 function call / agent loop、OpenAI/Anthropic 统一消息层及 read、bash、edit、write 生产工具。会话创建时选择工作目录，取消则在 Electron 动态获取的 userData/workspaces 下创建默认目录；会话按文件夹分类。尚未实现云端账号同步。
 - Agent 基本框架、四个本机编码工具和多会话并行任务已经完成；本轮没有待完成的功能需求。下一步功能由用户在新窗口指定，开发时继续沿用当前分层，逐步增加能力。
 - 用户是 Java 程序员，了解部分 TS 语法；交流用中文。每个类和核心方法前写中文注释，说明职责与依赖。
 

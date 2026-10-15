@@ -7,22 +7,23 @@ import { StateRepository } from '../../src/main/repositories/state-repository'
 import { contextMessages } from '../../src/shared/context'
 import { create, cleanup, config } from './helpers'
 
-const native = vi.hoisted(() => ({ documents: '', choose: vi.fn() }))
-vi.mock('electron', () => ({ app: { getPath: () => native.documents }, dialog: { showOpenDialog: native.choose } }))
+const native = vi.hoisted(() => ({ getPath: vi.fn(), choose: vi.fn() }))
+vi.mock('electron', () => ({ app: { getPath: native.getPath }, dialog: { showOpenDialog: native.choose } }))
 afterEach(() => { vi.restoreAllMocks(); cleanup() })
 
 it('selects a folder without reading its contents and creates unique default directories on cancellation', async () => {
   const { directory } = await create(config, false)
-  native.documents = directory
+  native.getPath.mockReturnValue(directory)
   const desktop = new ElectronDesktop(() => null)
   native.choose.mockResolvedValueOnce({ canceled: false, filePaths: [directory] })
   expect(await desktop.selectDirectory()).toBe(realpathSync(directory))
-  expect(existsSync(join(directory, 'DCode'))).toBe(false)
+  expect(existsSync(join(directory, 'workspaces'))).toBe(false)
   native.choose.mockResolvedValue({ canceled: true, filePaths: [] })
   const first = await desktop.selectDirectory()
   const second = await desktop.selectDirectory()
   expect(first).not.toBe(second)
-  expect(readdirSync(join(directory, 'DCode'))).toHaveLength(2)
+  expect(native.getPath).toHaveBeenCalledWith('userData')
+  expect(readdirSync(join(directory, 'workspaces'))).toHaveLength(2)
   expect(first.split('/').at(-1)).toMatch(/^dcode-\d{8}-\d{12}$/)
   await expect(desktop.checkDirectory(first)).resolves.toBeUndefined()
 })

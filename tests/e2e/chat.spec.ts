@@ -1,7 +1,7 @@
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test'
 import { createServer, type Server } from 'node:http'
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { AddressInfo } from 'node:net'
 import { anthropicEvents, openAIResponse, testCall } from '../unit/llm-fixtures'
@@ -23,12 +23,9 @@ async function launch(live = false): Promise<void> {
     ...(live ? {} : { BASE_URL: baseUrl, API_KEY: 'e2e-local-key' })
   } })
   page = await application.firstWindow()
-  const documents = join(directory, 'documents')
-  mkdirSync(documents, { recursive: true })
-  await application.evaluate(({ app, dialog }, documents) => {
-    app.setPath('documents', documents)
+  await application.evaluate(({ dialog }) => {
     dialog.showOpenDialog = async () => ({ canceled: true, filePaths: [] })
-  }, documents)
+  })
 }
 
 /** 从账号界面注册或登录，验证 AuthScreen 与 preload 的认证调用链。 */
@@ -757,7 +754,8 @@ test('welcome animation, folder groups, context creation, default directory and 
   const saved = await page.evaluate(() => window.dcode.getState())
   if (!saved.ok) throw new Error(saved.error)
   const defaultDirectory = saved.value.conversations.find(c => c.id === saved.value.activeConversationId)!.directory
-  expect(defaultDirectory).toMatch(/\/documents\/DCode\/dcode-\d{8}-\d{12}$/)
+  expect(dirname(defaultDirectory)).toBe(join(directory, 'workspaces'))
+  expect(defaultDirectory).toMatch(/\/dcode-\d{8}-\d{12}$/)
   expect(realpathSync(defaultDirectory)).toBe(defaultDirectory)
   await application.close()
   await launch()

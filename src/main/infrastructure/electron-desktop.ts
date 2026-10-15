@@ -15,7 +15,7 @@ export class ElectronDesktop implements DesktopAccess {
   async selectDirectory(): Promise<string> {
     const result = await dialog.showOpenDialog(this.getWindow()!, { title: '选择工作文件夹', properties: ['openDirectory', 'createDirectory'] })
     if (!result.canceled && result.filePaths[0]) return realpath(result.filePaths[0])
-    const root = join(app.getPath('documents'), 'DCode')
+    const root = join(app.getPath('userData'), 'workspaces')
     await mkdir(root, { recursive: true })
     const now = new Date()
     const date = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`
