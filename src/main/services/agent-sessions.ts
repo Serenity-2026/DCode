@@ -19,18 +19,19 @@ export class AgentSessions {
   /** 会话级互斥和删除保护不受当前导航位置影响。 */
   isBusy(id: string): boolean { return this.sessions.get(id)?.session.busy || false }
 
-  /** 对指定会话发送，null 创建新会话；不同会话使用各自运行实例。 */
+  /** 对已绑定目录的会话发送；不同会话使用各自运行实例。 */
   send(input: SendInput, config: ModelConfig): Snapshot {
     this.store.requireUser()
     if (this.stopping) throw new Error('正在停止任务，请稍后重试。')
     if (!input || typeof input !== 'object') throw new Error('无效请求。')
     const id = input.conversationId === undefined ? this.store.state.activeConversationId : input.conversationId
-    if (id !== null) this.store.conversation(id)
-    const existing = id ? this.sessions.get(id) : undefined
+    if (id === null) throw new Error('请先新建对话并选择工作文件夹。')
+    this.store.conversation(id)
+    const existing = this.sessions.get(id)
     const runtime = existing || this.create()
     try {
       const snapshot = runtime.session.send({ ...input, conversationId: id }, config)
-      this.sessions.set(id || snapshot.activeConversationId!, runtime)
+      this.sessions.set(id, runtime)
       return snapshot
     } catch (error) {
       if (!existing) runtime.dispose()

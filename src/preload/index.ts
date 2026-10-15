@@ -22,6 +22,8 @@ const api: DCodeAPI = {
   refreshModels: () => ipcRenderer.invoke(channels.refreshModels),
   /** 将用户、会话或主题 Action 交给主进程的 StateService.apply。 */
   action: (action) => ipcRenderer.invoke(channels.action, action),
+  /** 由主进程选择或复用已保存的工作目录，再创建空会话。 */
+  createConversation: (sourceId) => ipcRenderer.invoke(channels.createConversation, sourceId),
   /** 请求主进程的 AgentSessions.send 开始或重试生成，返回初始快照。 */
   send: (input) => ipcRenderer.invoke(channels.send, input),
   /** 由主进程打开系统选择器并读取已选择的文本，不提供通用文件系统权限。 */

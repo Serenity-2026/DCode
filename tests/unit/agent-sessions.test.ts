@@ -20,7 +20,7 @@ afterEach(async () => {
 
 /** 使用真实 Agent/工具/存储，以可控制的模型端口观察两个同时运行的任务。 */
 async function fixture() {
-  const base = await create()
+  const base = await create(config, false)
   const pending = new Map<string, { controller: AbortController; delta: (delta: LlmDelta) => void; finish: () => void; messages: LlmMessage[] }>()
   const events: StreamEvent[] = []
   const agents: Agent[] = []
@@ -55,7 +55,8 @@ async function fixture() {
   }
   const send = async (name: string) => {
     const attachments = (await readAttachments([join(base.directory, name)], 'folder')).attachments
-    return sessions.send({ content: `question-${name}`, conversationId: null, attachments }, { ...config, model: name }).activeConversationId!
+    const conversation = base.store.createConversation(join(base.directory, name))
+    return sessions.send({ content: `question-${name}`, conversationId: conversation.id, attachments }, { ...config, model: name }).activeConversationId!
   }
   return { ...base, sessions, pending, agents, events, send }
 }
@@ -172,8 +173,9 @@ it('attempts cleanup of every conversation and reports resource cleanup failures
     dispose: disposers.shift()!
   }))
   managers.push(sessions)
-  sessions.send({ content: 'first', conversationId: null }, config)
-  sessions.send({ content: 'second', conversationId: null }, config)
+  sessions.send({ content: 'first' }, config)
+  store.createConversation(store.state.conversations[0].directory)
+  sessions.send({ content: 'second' }, config)
   await sessions.stopAll()
   expect(() => sessions.dispose()).toThrow('清理失败')
   expect(first).toHaveBeenCalledOnce()

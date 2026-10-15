@@ -8,7 +8,7 @@ export type MessageStatus = 'streaming' | 'complete' | 'stopped' | 'error'
 /** Models 从服务元数据确认的推理档位，StateService 保存账号选择，streamModel 发送实际参数。 */
 export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra'
 
-/** 系统选择器读取的文本快照；目录另存绝对路径，AgentSession 为本轮工具恢复 cwd。 */
+/** 系统选择器读取的文本快照，目录路径仅为附件来源，不改变会话 cwd。 */
 export interface Attachment { id: string; name: string; kind: 'file' | 'folder'; fileCount: number; content: string; path?: string }
 
 /** 附件选择结果，提示被跳过的文件，不静默把非文本文件当成已添加。 */
@@ -37,6 +37,7 @@ export interface Message {
 export interface Conversation {
   id: string
   userId: string
+  directory: string
   title: string
   model: string
   createdAt: string
@@ -121,9 +122,11 @@ export interface DCodeAPI {
   refreshModels(): Promise<Result<ModelRefresh>>
   /** 修改当前账号的资料、会话、模型选择或主题。 */
   action(action: Action): Promise<Result<Snapshot>>
+  /** 选择工作目录创建会话；传入已有会话 ID 时复用其目录。 */
+  createConversation(sourceId?: string): Promise<Result<Snapshot>>
   /** 使用当前账号选中的模型生成回复。 */
   send(input: SendInput): Promise<Result<Snapshot>>
-  /** 打开系统选择器，读取文本快照并记录所选文件夹的工具工作目录。 */
+  /** 打开系统选择器，读取文件或文件夹的附件文本快照。 */
   selectAttachments(kind: 'file' | 'folder'): Promise<Result<AttachmentSelection>>
   /** 停止指定会话的任务并等待结果保存，不影响其他会话。 */
   stop(conversationId: string): Promise<Result<Snapshot>>

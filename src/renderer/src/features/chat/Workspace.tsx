@@ -28,6 +28,7 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
   const [draft, setDraft] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [search, setSearch] = useState('')
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
   const [pending, setPending] = useState(false)
   const [stopping, setStopping] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -44,7 +45,7 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
   const user = snapshot.users.find(u => u.id === snapshot.activeUserId)!
   const active = snapshot.conversations.find(c => c.id === snapshot.activeConversationId)
   const previewTool = active?.messages.find(message => message.id === previewSelection?.messageId)?.toolExecutions?.find(tool => tool.id === previewSelection?.toolId)
-  const selectedFolder = attachments.find(item => item.kind === 'folder')
+  const folderName = active?.directory.split(/[\\/]/).filter(Boolean).at(-1) || active?.directory
   const generating = Boolean(active?.messages.some(m => m.status === 'streaming'))
   const interacting = pending || stopping || modelsLoading
   const busy = generating || interacting
@@ -142,7 +143,23 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
     finally { inFlight.current = false; setPending(false) }
   }, [installSnapshot, toast])
 
-  /** 打开 preload 选择器并校验文本快照；文件夹替换原目录并保留独立文件，取消或失败不影响草稿。 */
+  /** 新建时选择目录，文件夹菜单则复用已有会话目录；后台任务继续运行。 */
+  const createConversation = useCallback(async (sourceId?: string): Promise<void> => {
+    if (inFlight.current) return
+    inFlight.current = true; setPending(true)
+    try {
+      const result = await window.dcode.createConversation(sourceId)
+      if (!result.ok) { void toast.error(result.error); return }
+      installSnapshot(result.value)
+      const directory = result.value.conversations.find(c => c.id === result.value.activeConversationId)!.directory
+      setCollapsedFolders(previous => { const next = new Set(previous); next.delete(directory); return next })
+      setDraft(''); setAttachments([]); setSearch(''); setPreviewSelection(null)
+      follow.current = true; jumping.current = false
+    } catch { void toast.error('新建对话失败，请重试。') }
+    finally { inFlight.current = false; setPending(false); composer.current?.focus() }
+  }, [installSnapshot, toast])
+
+  /** 打开 preload 选择器并校验附件快照，附件不改变会话工作目录。 */
   async function addAttachments(kind: 'file' | 'folder'): Promise<void> {
     if (busy || inFlight.current) return
     inFlight.current = true; setPending(true)
@@ -162,12 +179,12 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
     const handler = (event: KeyboardEvent): void => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'n') {
         event.preventDefault()
-        if (!interacting) void act({ type: 'conversation:select', id: null }).then(() => composer.current?.focus())
+        if (!interacting) void createConversation()
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [act, interacting])
+  }, [createConversation, interacting])
 
   /**
    * 发送草稿或重新生成最后一条回复，依赖 window.dcode.send 调用主进程 AgentSession。
@@ -180,7 +197,14 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
     follow.current = true
     jumping.current = false
     try {
-      const result = await window.dcode.send({ content: draft.trim(), retry, conversationId: active?.id ?? null, ...(retry ? {} : { attachments }) })
+      let conversationId = active?.id
+      if (!conversationId) {
+        const created = await window.dcode.createConversation()
+        if (!created.ok) { void toast.error(created.error); return }
+        installSnapshot(created.value)
+        conversationId = created.value.activeConversationId!
+      }
+      const result = await window.dcode.send({ content: draft.trim(), retry, conversationId, ...(retry ? {} : { attachments }) })
       if (result.ok) { installSnapshot(result.value); if (!retry) { setDraft(''); setAttachments([]) } }
       else void toast.error(result.error)
     } catch { void toast.error('发送失败，请重试。') }
@@ -243,7 +267,8 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
     </div>
   }
 
-  const conversations = snapshot.conversations.filter(c => `${c.title} ${c.messages.map(m => m.content).join(' ')}`.toLowerCase().includes(search.toLowerCase())).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+  const conversations = snapshot.conversations.filter(c => `${c.directory} ${c.title} ${c.messages.map(m => m.content).join(' ')}`.toLowerCase().includes(search.toLowerCase())).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+  const folders = [...new Set(conversations.map(c => c.directory))].map(directory => ({ directory, name: directory.split(/[\\/]/).filter(Boolean).at(-1) || directory, conversations: conversations.filter(c => c.directory === directory) }))
   const modelName = snapshot.config.model
   const usedTokens = estimateContext(active, draft, attachments, generating)
   return <>
@@ -251,19 +276,31 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
     <aside className="sidebar">
       <div className="window-space" />
       <div className="brand"><span className="brand-mark"><BrandMark /></span><span className="brand-name">DCode</span><span className="brand-version">0.1</span></div>
-      <Button className="new-chat" icon={<PlusOutlined />} aria-label="新对话" disabled={interacting} onClick={() => void act({ type: 'conversation:select', id: null }).then(() => composer.current?.focus())}>新对话 <kbd className="shortcut">⌘ N</kbd></Button>
+      <Button className="new-chat" icon={<PlusOutlined />} aria-label="新对话" disabled={interacting} onClick={() => void createConversation()}>新对话 <kbd className="shortcut">⌘ N</kbd></Button>
       <Input className="search" prefix={<SearchOutlined />} placeholder="搜索对话" aria-label="搜索对话" variant="borderless" allowClear value={search} onChange={e => setSearch(e.target.value)} />
-      <div className="section-label"><span>最近对话</span><span>{snapshot.conversations.length ? snapshot.conversations.length : ''}</span></div>
+      <div className="section-label"><span>文件夹</span><span>{snapshot.conversations.length ? snapshot.conversations.length : ''}</span></div>
       <nav className="history" aria-label="会话列表">
         {!conversations.length && <div className="history-empty">{search ? '没有找到对话' : '暂无对话'}</div>}
-        {conversations.map(c => <div className={`history-item${c.id === active?.id ? ' selected' : ''}`} key={c.id}>
+        {folders.map(folder => <section className="folder-group" key={folder.directory} data-directory={folder.directory}>
+          <Dropdown disabled={interacting} trigger={['contextMenu']} menu={{ items: [{ key: 'new', label: '在此文件夹下新建对话', icon: <PlusOutlined /> }], onClick: () => void createConversation(folder.conversations[0].id) }}>
+            <Button className="folder-header" type="text" disabled={interacting} title={folder.directory} aria-label={`文件夹 ${folder.directory}`} aria-expanded={Boolean(search) || !collapsedFolders.has(folder.directory)} onClick={() => setCollapsedFolders(previous => {
+              const next = new Set(previous)
+              if (next.has(folder.directory)) next.delete(folder.directory)
+              else next.add(folder.directory)
+              return next
+            })}>
+              {!search && collapsedFolders.has(folder.directory) ? <RightOutlined /> : <DownOutlined />}<FolderOpenOutlined /><span className="folder-name">{folder.name}</span><span className="folder-count">{folder.conversations.length}</span>
+            </Button>
+          </Dropdown>
+          {(search || !collapsedFolders.has(folder.directory)) && <div className="folder-conversations">{folder.conversations.map(c => <div className={`history-item${c.id === active?.id ? ' selected' : ''}`} key={c.id}>
           <Button type="text" className="history-button" icon={c.messages.some(m => m.status === 'streaming') ? <LoadingOutlined spin /> : <MessageOutlined />} aria-label={c.title} disabled={interacting} title={c.title} onClick={() => void act({ type: 'conversation:select', id: c.id })}><span className="history-title">{c.title}</span></Button>
           <Dropdown disabled={interacting} trigger={['click']} menu={{ items: [
             { key: 'rename', label: '重命名', icon: <EditOutlined /> }, { key: 'delete', label: '删除', danger: true, disabled: c.messages.some(m => m.status === 'streaming'), icon: <DeleteOutlined /> }
           ], onClick: ({ key }) => key === 'rename' ? setEdit({ type: 'conversation', id: c.id, value: c.title }) : confirmDelete(c.id, c.title) }}>
             <Button type="text" size="small" className="history-menu" icon={<MoreOutlined />} disabled={interacting} aria-label={`管理对话 ${c.title}`} />
           </Dropdown>
-        </div>)}
+        </div>)}</div>}
+        </section>)}
       </nav>
       <div className="sidebar-bottom">
         <Dropdown disabled={interacting} trigger={['click']} menu={{ items: [
@@ -284,11 +321,9 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
         const el = scroll.current
         if (el) follow.current = !jumping.current && el.scrollHeight - el.scrollTop - el.clientHeight < 100
       }}>
-        {!active ? <section className="welcome"><div className="welcome-inner">
+        {!active?.messages.length ? <section className="welcome"><div className="welcome-inner">
           <WelcomeCloud />
-          <h1>{selectedFolder ? <>今天想在 <Dropdown disabled={busy} trigger={['click']} placement="bottomLeft" menu={{ items: [{ key: 'folder', label: '选择文件夹…', icon: <FolderOpenOutlined /> }], onClick: () => void addAttachments('folder') }}>
-            <Button className="welcome-folder" type="text" disabled={busy} aria-label="选择工作文件夹">{selectedFolder.name}</Button>
-          </Dropdown> 中写点什么？</> : '今天想写点什么？'}</h1>
+          <h1>{folderName ? <>今天想在 <span className="welcome-folder" title={active?.directory}>{folderName}</span> 中写点什么？</> : '今天想写点什么？'}</h1>
           <div className="suggestions">
             {[
               { title: '实现一个功能', icon: <CodeOutlined />, prompt: '我想实现一个新功能，请先帮我梳理需求和实现步骤。' },

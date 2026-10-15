@@ -1,5 +1,5 @@
 import type { SendInput, Snapshot, StreamEvent } from '../../shared/types'
-import { contextMessages, conversationDirectory, isFilePreview } from '../../shared/context'
+import { contextMessages, isFilePreview } from '../../shared/context'
 import type { AgentEvent } from '../domain/agent'
 import { toLlmMessages, type LlmMessage, type ToolWorkspace } from '../domain/llm'
 import type { ModelConfig } from '../domain/model-config'
@@ -29,7 +29,7 @@ export class AgentSession {
     const { conversation, message } = this.store.begin(input.content, Boolean(input.retry), config.model, input.attachments, input.conversationId)
     const target = this.target = { conversationId: conversation.id, messageId: message.id, lastSave: Date.now(), lastEmit: 0 }
     try {
-      this.workspace?.setDirectory(conversationDirectory(conversation))
+      this.workspace?.setDirectory(conversation.directory)
       const context = toLlmMessages(contextMessages(conversation))
       const prompt = context.pop() as Extract<LlmMessage, { role: 'user' }>
       this.agent.replaceMessages(context)

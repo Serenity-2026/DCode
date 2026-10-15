@@ -8,6 +8,8 @@ export interface SecretCodec {
 
 /** DesktopService 使用的系统能力，生产由 ElectronDesktop 实现，使业务规则不依赖 Electron。 */
 export interface DesktopAccess {
+  selectDirectory(): Promise<string>
+  checkDirectory(directory: string): Promise<void>
   selectAttachments(kind: 'file' | 'folder'): Promise<AttachmentSelection>
   copyText(text: string): void
   openLink(url: string): Promise<void>

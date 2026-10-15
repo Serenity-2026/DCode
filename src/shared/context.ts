@@ -59,23 +59,12 @@ export function messageContent(content: string, attachments: Attachment[] = []):
   return [content, ...attachments.map(item => `\n<attachment name=${JSON.stringify(item.name)}>\n${item.content}\n</attachment>`)].filter(Boolean).join('\n')
 }
 
-/** 当前会话最近一次目录选择；旧附件缺少路径时不沿用此前目录。 */
-export function conversationDirectory(conversation: Pick<Conversation, 'messages'>): string | undefined {
-  for (const message of [...conversation.messages].reverse()) {
-    if (message.role !== 'user') continue
-    const folder = message.attachments?.find(item => item.kind === 'folder')
-    if (folder) return folder.path
-  }
-  return undefined
-}
-
 /** 构建真实请求上下文；只保留成功历史轮次和需要回答的问题，排除失败历史与推理文本。 */
-export function contextMessages(conversation: Pick<Conversation, 'messages'>, includePending = true, draftAttachments: Attachment[] = []): { role: 'system' | 'user' | 'assistant'; content: string }[] {
+export function contextMessages(conversation: Pick<Conversation, 'messages' | 'directory'>, includePending = true): { role: 'system' | 'user' | 'assistant'; content: string }[] {
   const result: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
     { role: 'system', content: '你是 DCode，一位严谨、简洁的编程助手。使用用户的语言回答，代码使用带语言标记的 Markdown 代码块。只有工具结果明确证明操作成功时，才可声称已经执行代码或访问文件。' }
   ]
-  const draftFolder = draftAttachments.find(item => item.kind === 'folder')
-  const directory = draftFolder ? draftFolder.path : conversationDirectory(conversation)
+  const directory = conversation.directory
   result[0].content += directory ? `\n当前工作目录：${JSON.stringify(directory)}。read 用于检查文件，edit 用于局部替换，write 用于新建或完整覆盖，bash 用于执行命令。操作前检查目录中的 AGENTS.md。附件是选择时的快照，磁盘当前内容以工具结果为准。` : '\n尚未选择工作目录；需要文件或命令操作时，请用户先选择文件夹。'
   for (let i = 0; i < conversation.messages.length; i += 2) {
     const user = conversation.messages[i]
@@ -90,7 +79,7 @@ export function contextMessages(conversation: Pick<Conversation, 'messages'>, in
 
 /** 预估下一次输入 token：与请求共用上下文，加入草稿和附件，数值明确为近似值。 */
 export function estimateContext(conversation: Conversation | undefined, draft: string, attachments: Attachment[], generating = false): number {
-  const messages = contextMessages(conversation || { messages: [] }, generating, generating ? [] : attachments)
+  const messages = contextMessages(conversation || { messages: [], directory: '' }, generating)
   if (!generating && (draft.trim() || attachments.length)) messages.push({ role: 'user', content: messageContent(draft.trim(), attachments) })
   return messages.reduce((total, message) => total + Math.ceil(new TextEncoder().encode(message.content).length / 3) + 4, 3)
 }

@@ -39,7 +39,7 @@ describe('account-owned conversations', () => {
     expect(restored.state.conversations[0].messages[1].toolExecutions).toEqual([{ id: 'read-1', name: 'read', status: 'complete' }, { id: 'write-1', name: 'write', status: 'stopped' }])
     expect(restored.state.activeConversationId).toBe(store.state.activeConversationId)
     expect(restored.snapshot().conversations).toEqual([])
-    expect(JSON.parse(readFileSync(path, 'utf8')).schemaVersion).toBe(3)
+    expect(JSON.parse(readFileSync(path, 'utf8')).schemaVersion).toBe(4)
   })
 
   it('isolates accounts and rejects direct user switching or cross-account access', async () => {
@@ -101,7 +101,7 @@ describe('account-owned conversations', () => {
     const original: StoredState = JSON.parse(readFileSync(path, 'utf8'))
     const invalidStates = [
       '{broken',
-      ...['3', 1, 2].map(schemaVersion => JSON.stringify({ ...original, schemaVersion })),
+      ...['4', 1, 2, 3].map(schemaVersion => JSON.stringify({ ...original, schemaVersion })),
       JSON.stringify({ ...original, users: original.users.map(({ passwordHash: _hash, ...user }) => user) })
     ]
     for (const broken of invalidStates) {

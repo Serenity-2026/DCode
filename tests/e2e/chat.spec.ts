@@ -1,6 +1,6 @@
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test'
 import { createServer, type Server } from 'node:http'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { AddressInfo } from 'node:net'
@@ -23,6 +23,12 @@ async function launch(live = false): Promise<void> {
     ...(live ? {} : { BASE_URL: baseUrl, API_KEY: 'e2e-local-key' })
   } })
   page = await application.firstWindow()
+  const documents = join(directory, 'documents')
+  mkdirSync(documents, { recursive: true })
+  await application.evaluate(({ app, dialog }, documents) => {
+    app.setPath('documents', documents)
+    dialog.showOpenDialog = async () => ({ canceled: true, filePaths: [] })
+  }, documents)
 }
 
 /** 从账号界面注册或登录，验证 AuthScreen 与 preload 的认证调用链。 */
@@ -153,7 +159,7 @@ test.beforeAll(async () => {
   baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
 })
 
-test.beforeEach(() => { failDiscovery = false; discoveries.length = 0; requests.length = 0; nativeRequests.length = 0; directory = mkdtempSync(join(tmpdir(), 'dcode-e2e-')) })
+test.beforeEach(() => { failDiscovery = false; discoveries.length = 0; requests.length = 0; nativeRequests.length = 0; directory = realpathSync(mkdtempSync(join(tmpdir(), 'dcode-e2e-'))) })
 test.afterEach(async () => {
   await application?.close().catch(() => undefined)
   rmSync(directory, { recursive: true, force: true })
@@ -210,6 +216,8 @@ test('shows the running tool across conversation navigation and clears it on com
   const project = join(directory, 'tool-project')
   mkdirSync(project)
   await application.evaluate(({ dialog }, project) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [project] }) }, project)
+  await page.getByRole('button', { name: '新对话', exact: true }).click()
+  await expect(page.getByRole('heading', { level: 1 })).toContainText(project.split('/').at(-1)!)
   await page.getByRole('button', { name: '添加附件', exact: true }).click()
   await page.getByRole('menuitem', { name: /添加文件夹/ }).click()
   const input = page.getByRole('textbox', { name: '消息', exact: true })
@@ -259,6 +267,8 @@ test('retains fast read and write records after continuing a file, navigation an
   mkdirSync(project)
   writeFileSync(join(project, 'story.txt'), '故事开头')
   await application.evaluate(({ dialog }, project) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [project] }) }, project)
+  await page.getByRole('button', { name: '新对话', exact: true }).click()
+  await expect(page.getByRole('heading', { level: 1 })).toContainText(project.split('/').at(-1)!)
   await page.getByRole('button', { name: '添加附件', exact: true }).click()
   await page.getByRole('menuitem', { name: /添加文件夹/ }).click()
   await page.getByRole('textbox', { name: '消息', exact: true }).fill('快速读取续写验证')
@@ -307,6 +317,8 @@ test('production read/bash/edit/write use the selected folder and recover it aft
   const project = join(directory, 'tool-project')
   mkdirSync(project)
   await application.evaluate(({ dialog }, project) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [project] }) }, project)
+  await page.getByRole('button', { name: '新对话', exact: true }).click()
+  await expect(page.getByRole('heading', { level: 1 })).toContainText(project.split('/').at(-1)!)
   await page.getByRole('button', { name: '添加附件', exact: true }).click()
   await page.getByRole('menuitem', { name: /添加文件夹/ }).click()
   const input = page.getByRole('textbox', { name: '消息', exact: true })
@@ -683,7 +695,7 @@ test('composer attachments, context meter, reasoning strength and responsive too
   await expect(resumedInput).toHaveValue('取消后保留的草稿')
 })
 
-test('welcome cloud animation and unrestricted folder selection, replacement and sending', async () => {
+test('welcome animation, folder groups, context creation, default directory and restart', async () => {
   await launch()
   await authenticate('workspace', true)
   const cloud = page.getByRole('button', { name: '旋转云朵', exact: true })
@@ -714,57 +726,48 @@ test('welcome cloud animation and unrestricted folder selection, replacement and
   await page.emulateMedia({ reducedMotion: 'no-preference' })
 
   const project = join(directory, 'sample-project')
-  const replacement = join(directory, '另一个工作目录')
-  const empty = join(directory, '空目录')
-  const source = join(directory, 'standalone.ts')
-  for (const folder of [project, replacement, empty]) mkdirSync(folder)
-  for (let index = 0; index < 60; index++) writeFileSync(join(project, `file-${index}.ts`), `export const value${index} = ${index}`)
-  writeFileSync(join(project, 'large.txt'), 'a'.repeat(600 * 1024) + 'full-folder-end')
-  writeFileSync(join(replacement, 'code.ts'), 'replacement-content')
-  writeFileSync(source, 'standalone-content')
-  await application.evaluate(({ dialog }, paths) => {
-    let index = 0
-    dialog.showOpenDialog = async (...args: unknown[]) => {
-      const options = args.at(-1) as Electron.OpenDialogOptions
-      if (!options.properties?.includes('openDirectory')) return { canceled: false, filePaths: [paths.source] }
-      const path = [paths.project, null, paths.replacement, paths.empty, paths.project][index++]
-      return { canceled: path === null, filePaths: path ? [path] : [] }
-    }
-  }, { project, replacement, empty, source })
-  await input.fill('保留输入并读取目录')
-  const add = page.getByRole('button', { name: '添加附件', exact: true })
-  await add.click(); await page.getByRole('menuitem', { name: /添加文件$/ }).click()
-  await add.click(); await page.getByRole('menuitem', { name: /添加文件夹/ }).click()
-  await expect(heading).toContainText('今天想在 sample-project 中写点什么？')
-  await expect(page.getByText('sample-project · 61 个文件', { exact: true })).toBeVisible()
-  const folderName = page.getByRole('button', { name: '选择工作文件夹', exact: true })
-  await expect(folderName).toHaveCSS('text-decoration-line', 'underline')
-  /** 从标题菜单更换目录，依赖上方主进程选择器 mock；首次取消必须保留草稿。 */
-  async function chooseFolder(): Promise<void> {
-    await folderName.click()
-    await page.getByRole('menuitem', { name: /选择文件夹…$/ }).click()
-    await expect(add).toBeEnabled()
-  }
-  await chooseFolder()
-  await expect(folderName).toHaveText('sample-project')
-  await chooseFolder()
-  await expect(folderName).toHaveText('另一个工作目录')
-  await expect(page.getByRole('button', { name: '移除附件 sample-project', exact: true })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: '移除附件 standalone.ts', exact: true })).toBeVisible()
-  await expect(input).toHaveValue('保留输入并读取目录')
-  await chooseFolder()
-  await expect(folderName).toHaveText('空目录')
-  await expect(page.getByText('空目录 · 0 个文件', { exact: true })).toBeVisible()
-  await page.getByRole('button', { name: '移除附件 空目录', exact: true }).click()
-  await expect(heading).toHaveText('今天想写点什么？')
-  await add.click(); await page.getByRole('menuitem', { name: /添加文件夹/ }).click()
-  await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(820, 620))
-  expect(await page.evaluate(() => document.documentElement.scrollWidth === innerWidth)).toBe(true)
+  const other = join(directory, 'other', 'sample-project')
+  mkdirSync(project)
+  mkdirSync(other, { recursive: true })
+  await application.evaluate(({ dialog }, project) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [project] }) }, project)
+  await page.locator('.new-chat').click()
+  await expect(heading).toHaveText('今天想在 sample-project 中写点什么？')
+  const group = page.locator('.folder-group').filter({ has: page.getByRole('button', { name: `文件夹 ${project}`, exact: true }) })
+  const folder = group.getByRole('button', { name: `文件夹 ${project}`, exact: true })
+  await expect(group.locator('.history-item')).toHaveCount(1)
+  expect(requests).toHaveLength(0)
+  await folder.click({ button: 'right' })
+  await page.getByRole('menuitem', { name: /在此文件夹下新建对话/ }).click()
+  await expect(group.locator('.history-item')).toHaveCount(2)
+  await input.fill('文件夹内的新问题')
   await page.getByRole('button', { name: '发送消息', exact: true }).click()
-  await expect(page.locator('article[data-role="assistant"][data-status="complete"]')).toHaveCount(1)
-  expect(requests.at(-1)?.messages.at(-1)?.content).toContain('full-folder-end')
-  expect(requests.at(-1)?.messages.at(-1)?.content).toContain('value59')
-  expect(requests.at(-1)?.messages.at(-1)?.content).toContain('standalone-content')
+  await expect(page.getByRole('button', { name: '重新生成', exact: true })).toBeVisible()
+  expect(requests.at(-1)!.messages[0].content).toContain(project)
+  await folder.click()
+  await expect(group.locator('.history-item')).toHaveCount(0)
+  await folder.click()
+  await expect(group.locator('.history-item')).toHaveCount(2)
+  await application.evaluate(({ dialog }, other) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [other] }) }, other)
+  await page.locator('.new-chat').click()
+  await expect(page.locator('.folder-group')).toHaveCount(2)
+  await expect(page.getByRole('button', { name: `文件夹 ${other}`, exact: true })).toBeVisible()
+  await application.evaluate(({ dialog }) => { dialog.showOpenDialog = async () => ({ canceled: true, filePaths: [] }) })
+  await input.press('Meta+n')
+  await expect(page.locator('.folder-group')).toHaveCount(3)
+  const saved = await page.evaluate(() => window.dcode.getState())
+  if (!saved.ok) throw new Error(saved.error)
+  const defaultDirectory = saved.value.conversations.find(c => c.id === saved.value.activeConversationId)!.directory
+  expect(defaultDirectory).toMatch(/\/documents\/DCode\/dcode-\d{8}-\d{12}$/)
+  expect(realpathSync(defaultDirectory)).toBe(defaultDirectory)
+  await application.close()
+  await launch()
+  await expect(page.locator('.folder-group')).toHaveCount(3)
+  await expect(page.getByRole('heading', { level: 1 })).toContainText(defaultDirectory.split('/').at(-1)!)
+  await page.getByRole('textbox', { name: '搜索对话', exact: true }).fill('sample-project')
+  await expect(page.locator('.folder-group')).toHaveCount(2)
+  await page.getByRole('textbox', { name: '搜索对话', exact: true }).fill('文件夹内的新问题')
+  await expect(page.locator('.folder-group')).toHaveCount(1)
+  await expect(page.getByRole('button', { name: '文件夹内的新问题', exact: true })).toBeVisible()
 })
 
 test('sidebar resize limits, collapse, toolbar restore and draft preservation', async () => {
@@ -850,6 +853,11 @@ test('message navigation previews, scroll tracking and streaming history reading
     await expect(page.getByRole('button', { name: '重新生成', exact: true })).toBeVisible()
   }
   await expect(navigation.getByRole('button')).toHaveCount(11)
+  await expect.poll(async () => {
+    const rail = (await navigation.boundingBox())!
+    const area = (await page.locator('.conversation-body').boundingBox())!
+    return Math.abs(rail.y + rail.height / 2 - area.y - area.height / 2)
+  }).toBeLessThan(2)
   const last = navigation.getByRole('button', { name: '跳转到第 11 轮对话', exact: true })
   await expect(last).toHaveAttribute('aria-current', 'step')
   await expect.poll(async () => {

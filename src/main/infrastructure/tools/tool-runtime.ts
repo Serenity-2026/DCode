@@ -28,7 +28,7 @@ export class ToolRuntime implements ToolWorkspace {
     return { name: tool.name, description: tool.description, parameters: structuredClone(tool.parameters), executionMode: tool.executionMode, execute: async (args, signal) => {
       signal.throwIfAborted()
       const cwd = this.directory
-      if (!cwd || !isAbsolute(cwd)) throw new ToolExecutionError('请先选择工作文件夹。旧附件没有目录路径时需要重新选择。')
+      if (!cwd || !isAbsolute(cwd)) throw new ToolExecutionError('请先选择工作文件夹。')
       try { return await tool.execute(args, signal, { cwd, readFileState: this.readFileState, temporaryDirectories: this.temporaryDirectories }) }
       catch (error) {
         signal.throwIfAborted()

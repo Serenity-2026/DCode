@@ -8,6 +8,7 @@ export const channels = {
   refreshModels: 'dcode:refresh-models',
   selectAttachments: 'dcode:select-attachments',
   action: 'dcode:action',
+  createConversation: 'dcode:create-conversation',
   send: 'dcode:send',
   stop: 'dcode:stop',
   stream: 'dcode:stream',

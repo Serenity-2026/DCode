@@ -1,4 +1,4 @@
-import type { AttachmentSelection } from '../../shared/types'
+import type { AttachmentSelection, Snapshot } from '../../shared/types'
 import type { DesktopAccess } from '../domain/ports'
 import { StateService } from './state-service'
 
@@ -6,6 +6,16 @@ import { StateService } from './state-service'
 export class DesktopService {
   /** 注入系统适配与当前账号状态，控制器仅调用这些受限业务方法。 */
   constructor(private store: StateService, private desktop: DesktopAccess) {}
+
+  /** 只接受系统选择器或当前账号已有会话的目录，不允许页面提交任意路径。 */
+  async createConversation(sourceId?: string): Promise<Snapshot> {
+    const userId = this.store.requireUser().id
+    const directory = sourceId === undefined ? await this.desktop.selectDirectory() : this.store.conversation(sourceId).directory
+    await this.desktop.checkDirectory(directory)
+    if (this.store.requireUser().id !== userId) throw new Error('登录状态已变化，请重试。')
+    this.store.createConversation(directory)
+    return this.store.snapshot()
+  }
 
   /** 验证登录和附件类型，再由系统适配打开选择器并读取所选文本。 */
   selectAttachments(kind: 'file' | 'folder'): Promise<AttachmentSelection> {

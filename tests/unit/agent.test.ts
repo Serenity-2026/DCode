@@ -279,5 +279,5 @@ it('keeps the existing session lifecycle and text persistence when tools are use
   expect((await done).message).toMatchObject({ status: 'complete', content: '最终正文' })
   expect(session.busy).toBe(false)
   expect(new StateRepository(path).state.conversations[0].messages[1].content).toBe('最终正文')
-  expect(store.state.schemaVersion).toBe(3)
+  expect(store.state.schemaVersion).toBe(4)
 })

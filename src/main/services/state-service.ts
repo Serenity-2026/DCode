@@ -94,6 +94,19 @@ export class StateService {
     return c
   }
 
+  /** 保存已由桌面服务确认的工作目录；空会话也参与侧栏分组与重启恢复。 */
+  createConversation(directory: string): Conversation {
+    const user = this.requireUser()
+    if (typeof directory !== 'string' || !directory.trim() || directory.includes('\0')) throw new Error('工作文件夹无效。')
+    return this.transaction(() => {
+      const now = new Date().toISOString()
+      const conversation: Conversation = { id: randomUUID(), userId: user.id, directory, title: '新对话', model: user.selectedModel || '', createdAt: now, updatedAt: now, messages: [] }
+      this.state.conversations.push(conversation)
+      this.state.activeConversationId = conversation.id
+      return conversation
+    })
+  }
+
   /**
    * 处理 IPC 的 Action：当前账号改名、会话管理、模型切换与账号主题修改。
    * 依赖 transaction 保证失败回滚，textInput 校验文本，conversation 检查会话归属。
@@ -145,32 +158,28 @@ export class StateService {
   }
 
   /**
-   * 为 AgentSession.send 准备一次生成：校验附件快照，必要时新建会话，保存问题并添加 streaming 回复占位。
+   * 为 AgentSession.send 准备一次生成：校验附件快照，在已选目录的会话中保存问题和 streaming 回复占位。
    * 重试时只替换最后的 assistant 消息；返回本次会话与消息；AgentSession 随后保存目标 ID，每次事件定位当前仓库对象。
    */
   begin(content: unknown, retry: boolean, model: string, inputAttachments?: Attachment[], conversationId: string | null = this.state.activeConversationId): { conversation: Conversation; message: Message } {
-    const user = this.requireUser()
+    this.requireUser()
     const attachments = retry ? [] : validateAttachments(inputAttachments)
     return this.transaction(() => {
-      let c = conversationId !== null ? this.conversation(conversationId) : undefined
+      if (conversationId === null) throw new Error('请先新建对话并选择工作文件夹。')
+      const c = this.conversation(conversationId)
       if (retry) {
-        if (!c || c.messages.at(-1)?.role !== 'assistant' || c.messages.at(-2)?.role !== 'user') throw new Error('没有可重新生成的回复。')
+        if (c.messages.at(-1)?.role !== 'assistant' || c.messages.at(-2)?.role !== 'user') throw new Error('没有可重新生成的回复。')
         c.messages.pop()
       } else {
         const text = attachments.length && content === '' ? '' : textInput(content, 32_000)
-        if (!c) {
-          const now = new Date().toISOString()
-          c = { id: randomUUID(), userId: user.id, title: (text || attachments[0].name).replace(/\s+/g, ' ').slice(0, 32), model, createdAt: now, updatedAt: now, messages: [] }
-          this.state.conversations.push(c)
-          this.state.activeConversationId = c.id
-        }
+        if (!c.messages.length && c.title === '新对话') c.title = (text || attachments[0].name).replace(/\s+/g, ' ').slice(0, 32)
         c.messages.push({ id: randomUUID(), role: 'user', content: text, reasoning: '', status: 'complete', createdAt: new Date().toISOString(), ...(attachments.length ? { attachments: structuredClone(attachments) } : {}) })
       }
-      c!.model = model
-      c!.updatedAt = new Date().toISOString()
+      c.model = model
+      c.updatedAt = new Date().toISOString()
       const message: Message = { id: randomUUID(), role: 'assistant', content: '', reasoning: '', status: 'streaming', createdAt: new Date().toISOString() }
-      c!.messages.push(message)
-      return { conversation: c!, message }
+      c.messages.push(message)
+      return { conversation: c, message }
     })
   }
 }

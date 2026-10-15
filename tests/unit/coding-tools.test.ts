@@ -496,34 +496,36 @@ it.each<ModelApi>(['openai-completions', 'anthropic-messages'])('returns unread 
   expect(readFileSync(join(directory, 'edit'), 'utf8')).toBe('changed')
 })
 
-it('recovers selected directories for followups/retries and clears them on conversation/account changes', async () => {
+it('keeps conversation directories across followups/retries and ignores folder attachments', async () => {
   const { directory, runtime, tools } = fixture()
-  const { store, auth, path } = await create()
+  const { store, auth, path } = await create(config, false)
+  const conversation = store.createConversation(directory)
   const agent = createAgent(tools)
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(openAIResponse('已回复')))
   const session = new AgentSession(store, () => {}, agent, unexpectedTaskError, runtime)
-  const attachment = (await readAttachments([directory], 'folder')).attachments[0]
-  session.send({ content: '第一问', attachments: [attachment] }, config)
-  const id = store.state.activeConversationId!
+  session.send({ content: '第一问' }, config)
   await agent.waitForIdle()
-  expect(JSON.parse(readFileSync(path, 'utf8')).conversations[0].messages[0].attachments[0].path).toBe(directory)
+  expect(JSON.parse(readFileSync(path, 'utf8')).conversations[0].directory).toBe(directory)
   session.send({ content: '跟进' }, config); await agent.waitForIdle()
   expect(agent.state.messages[0]).toMatchObject({ role: 'system', content: expect.stringContaining(directory) })
   session.send({ content: '', retry: true }, config); await agent.waitForIdle()
   expect(agent.state.messages[0]).toMatchObject({ content: expect.stringContaining(directory) })
-  store.apply({ type: 'conversation:select', id: null })
+  const other = fixture()
+  store.createConversation(other.directory)
   session.send({ content: '新会话' }, config); await agent.waitForIdle()
-  await expect(tools[0].execute({ path: 'picture' }, new AbortController().signal)).rejects.toThrow('选择工作文件夹')
-  store.apply({ type: 'conversation:select', id })
-  session.send({ content: '旧附件', attachments: [{ ...attachment, id: 'old', path: undefined }] }, config); await agent.waitForIdle()
-  await expect(tools[0].execute({ path: 'picture' }, new AbortController().signal)).rejects.toThrow('选择工作文件夹')
-  await auth.logout()
+  expect(agent.state.messages[0]).toMatchObject({ content: expect.stringContaining(other.directory) })
+  store.apply({ type: 'conversation:select', id: conversation.id })
+  session.send({ content: '附加目录', attachments: (await readAttachments([other.directory], 'folder')).attachments }, config); await agent.waitForIdle()
+  expect(agent.state.messages[0]).toMatchObject({ content: expect.stringContaining(directory) })
+  expect(agent.state.messages[0]).toMatchObject({ content: expect.not.stringContaining(other.directory) })
+  auth.logout()
   await auth.register({ username: 'another', password: 'another-password' })
+  store.createConversation(other.directory)
   session.send({ content: '其他账号' }, config); await agent.waitForIdle()
   expect(agent.state.messages[0]).toMatchObject({ content: expect.not.stringContaining(directory) })
 })
 
-it('includes the newly selected draft directory in the same token estimate as the real request', async () => {
+it('estimates the fixed conversation directory even when attaching another folder', async () => {
   const { directory } = fixture()
   const { store } = await create()
   const attachment = (await readAttachments([directory], 'folder')).attachments[0]
@@ -538,7 +540,8 @@ it('includes the newly selected draft directory in the same token estimate as th
 
 it('stops real bash through AgentSession and never starts later tool calls', async () => {
   const { directory, runtime, tools } = fixture()
-  const { store } = await create()
+  const { store } = await create(config, false)
+  store.createConversation(directory)
   const agent = createAgent(tools)
   const fetchMock = vi.fn().mockResolvedValue(openAIResponse('', [
     { id: 'long', name: 'bash', arguments: '{"command":"touch ready; sleep 30"}' },

@@ -99,7 +99,7 @@ it('requires credentials before creating a conversation', async () => {
   const { store } = await create()
   const session = new AgentSession(store, () => {}, createAgent(), unexpectedTaskError)
   expect(() => session.send({ content: 'hi' }, { ...config, apiKey: '' })).toThrow('API 密钥')
-  expect(store.state.conversations).toHaveLength(0)
+  expect(store.state.conversations[0].messages).toHaveLength(0)
 })
 
 it('reloads the selected conversation without replaying tool context from another run', async () => {
@@ -112,7 +112,7 @@ it('reloads the selected conversation without replaying tool context from anothe
   session.send({ content: '第一问' }, config)
   const firstId = store.state.activeConversationId!
   await agent.waitForIdle()
-  store.apply({ type: 'conversation:select', id: null })
+  store.createConversation(store.state.conversations[0].directory)
   session.send({ content: '另一会话' }, config)
   await agent.waitForIdle()
   const other = JSON.parse(fetchMock.mock.calls[2][1].body).messages

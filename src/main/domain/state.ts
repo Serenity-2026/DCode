@@ -14,9 +14,9 @@ export interface StoredUser extends User {
 /** 保持登录的令牌只以 OS 加密密文保存，Auth 在启动时解密并核对哈希。 */
 export interface RememberedSession { userId: string; tokenHash: string; encryptedToken: string }
 
-/** schema 3 的磁盘格式，不能直接通过 IPC 返回给界面。 */
+/** schema 4 的磁盘格式，不能直接通过 IPC 返回给界面。 */
 export interface StoredState {
-  schemaVersion: 3
+  schemaVersion: 4
   users: StoredUser[]
   activeUserId: string | null
   activeConversationId: string | null

@@ -1,5 +1,5 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { dirname, isAbsolute } from 'node:path'
 import type { StoredState } from '../domain/state'
 import { isFilePreview, reasoningEfforts, validateAttachments } from '../../shared/context'
 import { modelApis } from '../../shared/model-api'
@@ -8,7 +8,7 @@ import { modelApis } from '../../shared/model-api'
 function validState(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false
   const state = value as StoredState
-  if (state.schemaVersion !== 3 || !Array.isArray(state.users) || !Array.isArray(state.conversations)) return false
+  if (state.schemaVersion !== 4 || !Array.isArray(state.users) || !Array.isArray(state.conversations)) return false
   const ids = new Set<string>()
   const usernames = new Set<string>()
   for (const u of state.users) {
@@ -31,6 +31,7 @@ function validState(value: unknown): boolean {
   }
   const conversationIds = new Set<string>()
   for (const c of state.conversations) {
+    if (!c || typeof c.directory !== 'string' || !isAbsolute(c.directory) || c.directory.includes('\0')) return false
     if (!c || typeof c.id !== 'string' || conversationIds.has(c.id) || !ids.has(c.userId) || typeof c.title !== 'string' || typeof c.model !== 'string' || typeof c.createdAt !== 'string' || typeof c.updatedAt !== 'string' || !Array.isArray(c.messages)) return false
     conversationIds.add(c.id)
     if (c.messages.some(m => !m || typeof m.id !== 'string' || !['user', 'assistant'].includes(m.role) || typeof m.content !== 'string' || typeof m.reasoning !== 'string' || !['complete', 'streaming', 'stopped', 'error'].includes(m.status) || typeof m.createdAt !== 'string' || (m.error !== undefined && typeof m.error !== 'string'))) return false
@@ -58,7 +59,7 @@ function validState(value: unknown): boolean {
 export class StateRepository {
   state: StoredState
 
-  /** 从 schema 3 文件读取数据，缺失时使用空状态；损坏时拒绝覆盖，由 StateService 完成启动业务恢复。 */
+  /** 从 schema 4 文件读取数据，缺失时使用空状态；损坏时拒绝覆盖，由 StateService 完成启动业务恢复。 */
   constructor(private readonly path: string) {
     try {
       const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'))
@@ -66,7 +67,7 @@ export class StateRepository {
       this.state = parsed as StoredState
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error('无法读取本地数据，请备份数据文件后检查格式。')
-      this.state = { schemaVersion: 3, users: [], activeUserId: null, activeConversationId: null, conversations: [], session: null }
+      this.state = { schemaVersion: 4, users: [], activeUserId: null, activeConversationId: null, conversations: [], session: null }
     }
   }
 
