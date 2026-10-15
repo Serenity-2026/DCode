@@ -217,6 +217,10 @@ test('shows the running tool across conversation navigation and clears it on com
   await input.fill('工具状态验证')
   await page.getByRole('button', { name: '发送消息', exact: true }).click()
   await expect(activity).toHaveText('正在调用bash工具sleep 3')
+  await expect(activity.locator('pre > code')).toHaveText('sleep 3')
+  const header = (await activity.locator('.tool-call-header').boundingBox())!
+  const command = (await activity.locator('pre').boundingBox())!
+  expect(command.y).toBeGreaterThanOrEqual(header.y + header.height)
   await expect(activity.locator('.tool-call-dot')).toHaveCSS('background-color', 'rgb(212, 167, 44)')
   await expect(activity.locator('.tool-call-icon')).toHaveCSS('border-width', '0px')
   await expect(page.locator('article[data-role="assistant"]')).toContainText('准备执行命令')
@@ -265,6 +269,8 @@ test('retains fast read and write records after continuing a file, navigation an
   const write = reply.locator('[data-tool-id="quick_write"]')
   await expect(read).toHaveAttribute('data-tool-status', 'complete')
   await expect(write).toHaveAttribute('data-tool-status', 'complete')
+  await expect(read).toHaveText('story.txt')
+  await expect(write).toHaveText('story.txt')
   await expect(read.getByRole('link').getByRole('img')).toHaveCount(0)
   expect(await reply.locator('.assistant-timeline').evaluate(element => [...element.children].map(child => child.getAttribute('data-tool-id') || child.textContent))).toEqual(['先读取文件。', 'quick_read', '接下来写入文件。', 'quick_write', '续写完成'])
   await read.getByRole('link', { name: '预览文件 story.txt', exact: true }).click()

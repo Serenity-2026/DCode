@@ -14,6 +14,7 @@ export function AssistantTimeline({ message, selectedToolId, onPreview }: {
     const text = message.content.slice(cursor, offset)
     cursor = offset
     const running = tool.status === 'running'
+    const fileTool = ['read', 'write', 'edit'].includes(tool.name)
     const name = tool.path?.split(/[\\/]/).at(-1) || tool.path
     const icon = tool.name === 'read' ? <FileTextOutlined />
       : tool.name === 'write' ? <FileAddOutlined /> : tool.name === 'edit' ? <EditOutlined /> : <CodeOutlined />
@@ -22,15 +23,19 @@ export function AssistantTimeline({ message, selectedToolId, onPreview }: {
       {text && <Markdown content={text} />}
       <div className="tool-call" data-tool-id={tool.id} data-tool-status={tool.status}
         role={running ? 'status' : 'group'} aria-label={running ? '工具执行状态' : '工具调用记录'}>
-        <span className="tool-call-dot" role="img" aria-label={status} title={status} />
-        <span className="tool-call-icon" aria-hidden="true">{icon}</span>
-        {running && <span>正在调用</span>}
-        <code className="tool-call-name">{tool.name}</code>
-        {running && <span>工具</span>}
-        {tool.command !== undefined && <code className="tool-call-command">{tool.command}</code>}
-        {tool.path && <Button className="tool-file-link" type="link" href="#file-preview"
-          title={tool.path} aria-label={`预览文件 ${name}`} aria-controls="file-preview" aria-expanded={selectedToolId === tool.id}
-          onClick={event => { event.preventDefault(); onPreview(tool) }}>{name}</Button>}
+        <div className="tool-call-header">
+          <span className="tool-call-dot" role="img" aria-label={status} title={status} />
+          <span className="tool-call-icon" aria-hidden="true" title={tool.name}>{icon}</span>
+          {(!fileTool || !tool.path) && <>
+            {running && <span>正在调用</span>}
+            <code className="tool-call-name">{tool.name}</code>
+            {running && <span>工具</span>}
+          </>}
+          {tool.path && <Button className="tool-file-link" type="link" href="#file-preview"
+            title={tool.path} aria-label={`预览文件 ${name}`} aria-controls="file-preview" aria-expanded={selectedToolId === tool.id}
+            onClick={event => { event.preventDefault(); onPreview(tool) }}>{name}</Button>}
+        </div>
+        {tool.name === 'bash' && tool.command !== undefined && <pre className="tool-call-command"><code>{tool.command}</code></pre>}
       </div>
     </Fragment>
   })
