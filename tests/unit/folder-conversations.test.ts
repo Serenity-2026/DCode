@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { existsSync, mkdirSync, readdirSync, realpathSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { DesktopService } from '../../src/main/services/desktop-service'
 import { ElectronDesktop } from '../../src/main/infrastructure/electron-desktop'
@@ -65,4 +65,39 @@ it('requires a directory-backed conversation before sending and rolls back a fai
   expect(() => store.createConversation('/workspace')).toThrow('保存失败')
   expect(store.state.activeConversationId).toBeNull()
   expect(store.state.conversations).toHaveLength(0)
+})
+
+it('deletes every conversation in an owned folder while keeping files and other accounts or paths', async () => {
+  const { store, auth, directory, path } = await create(config, false)
+  const project = join(directory, 'project')
+  mkdirSync(project)
+  const file = join(project, 'keep.txt')
+  writeFileSync(file, '保留用户文件')
+  const first = store.createConversation(project)
+  store.createConversation(project)
+  const other = store.createConversation(join(directory, 'other', 'project'))
+  auth.logout()
+  await auth.register({ username: 'another', password: 'another-password' })
+  const privateConversation = store.createConversation(project)
+  expect(() => store.apply({ type: 'folder:delete', id: first.id })).toThrow('会话不存在')
+  auth.logout()
+  await auth.login({ username: 'developer', password: 'test-password' })
+  store.apply({ type: 'conversation:select', id: first.id })
+  store.apply({ type: 'folder:delete', id: first.id })
+  expect(store.snapshot().activeConversationId).toBeNull()
+  expect(store.snapshot().conversations.map(c => c.id)).toEqual([other.id])
+  expect(new StateRepository(path).state.conversations.map(c => c.id)).toEqual([other.id, privateConversation.id])
+  expect(readFileSync(file, 'utf8')).toBe('保留用户文件')
+})
+
+it('rolls back an entire folder deletion when saving fails', async () => {
+  const { store, directory, path } = await create(config, false)
+  const first = store.createConversation(directory)
+  store.createConversation(directory)
+  const before = store.snapshot()
+  const bytes = readFileSync(path, 'utf8')
+  vi.spyOn(StateRepository.prototype, 'save').mockImplementationOnce(() => { throw new Error('保存失败') })
+  expect(() => store.apply({ type: 'folder:delete', id: first.id })).toThrow('保存失败')
+  expect(store.snapshot()).toEqual(before)
+  expect(readFileSync(path, 'utf8')).toBe(bytes)
 })

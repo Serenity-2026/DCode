@@ -9,6 +9,7 @@ export function registerStateController(router: IpcRouter, state: StateService, 
   router.handle(channels.state, () => state.snapshot())
   router.handle<Action>(channels.action, input => router.exclusive(() => {
     if (input?.type === 'conversation:delete') sessions.remove(input.id)
+    if (input?.type === 'folder:delete') sessions.removeFolder(input.id)
     state.apply(input)
     return state.snapshot()
   }))

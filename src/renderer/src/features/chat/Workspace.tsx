@@ -4,7 +4,7 @@ import {
   ArrowUpOutlined, PlusOutlined, SearchOutlined, MessageOutlined, MoreOutlined,
   SettingOutlined, CodeOutlined, BugOutlined, BranchesOutlined, CopyOutlined,
   ReloadOutlined, StopOutlined, DeleteOutlined, EditOutlined, LogoutOutlined,
-  DownOutlined, RightOutlined, FolderOpenOutlined, LoadingOutlined
+  DownOutlined, RightOutlined, LoadingOutlined
 } from '@ant-design/icons'
 import type { Action, Attachment, Message, ModelRefresh, Result, Snapshot, StreamEvent } from '../../../../shared/types'
 import { estimateContext, validateAttachments } from '../../../../shared/context'
@@ -134,14 +134,14 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
       const result = await window.dcode.action(action)
       if (!result.ok) { void toast.error(result.error); return false }
       installSnapshot(result.value)
-      if (['conversation:select', 'conversation:delete'].includes(action.type)) {
+      if (['conversation:select', 'conversation:delete'].includes(action.type) || action.type === 'folder:delete' && result.value.activeConversationId !== snapshot.activeConversationId) {
         setDraft(''); setAttachments([]); follow.current = true; jumping.current = false
         setPreviewSelection(null)
       }
       return true
     } catch { void toast.error('操作失败，请重试。'); return false }
     finally { inFlight.current = false; setPending(false) }
-  }, [installSnapshot, toast])
+  }, [installSnapshot, toast, snapshot.activeConversationId])
 
   /** 新建时选择目录，文件夹菜单则复用已有会话目录；后台任务继续运行。 */
   const createConversation = useCallback(async (sourceId?: string): Promise<void> => {
@@ -244,6 +244,15 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
     })
   }
 
+  /** 删除应用内分组和其全部会话，确认时说明范围；磁盘文件不参与删除。 */
+  function confirmDeleteFolder(id: string, name: string, count: number): void {
+    modal.confirm({
+      title: '删除此文件夹？', content: `将删除“${name}”及其 ${count} 段对话，保留磁盘文件。`,
+      okText: '删除', cancelText: '取消', okButtonProps: { danger: true },
+      onOk: async () => { if (!await act({ type: 'folder:delete', id })) throw new Error('删除失败') }
+    })
+  }
+
   /**
    * 将 assistant 的 Message 渲染为 Markdown、推理内容、生成状态及复制/重试操作。
    * 依赖 Markdown 组件与 Ant Design；复制走 window.dcode.copyText，最后一条回复可调用 send 重试。
@@ -268,7 +277,10 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
   }
 
   const conversations = snapshot.conversations.filter(c => `${c.directory} ${c.title} ${c.messages.map(m => m.content).join(' ')}`.toLowerCase().includes(search.toLowerCase())).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-  const folders = [...new Set(conversations.map(c => c.directory))].map(directory => ({ directory, name: directory.split(/[\\/]/).filter(Boolean).at(-1) || directory, conversations: conversations.filter(c => c.directory === directory) }))
+  const folders = [...new Set(conversations.map(c => c.directory))].map(directory => {
+    const all = snapshot.conversations.filter(c => c.directory === directory)
+    return { directory, name: directory.split(/[\\/]/).filter(Boolean).at(-1) || directory, conversations: conversations.filter(c => c.directory === directory), count: all.length, running: all.some(c => c.messages.some(m => m.status === 'streaming')) }
+  })
   const modelName = snapshot.config.model
   const usedTokens = estimateContext(active, draft, attachments, generating)
   return <>
@@ -278,18 +290,25 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
       <div className="brand"><span className="brand-mark"><BrandMark /></span><span className="brand-name">DCode</span><span className="brand-version">0.1</span></div>
       <Button className="new-chat" icon={<PlusOutlined />} aria-label="新对话" disabled={interacting} onClick={() => void createConversation()}>新对话 <kbd className="shortcut">⌘ N</kbd></Button>
       <Input className="search" prefix={<SearchOutlined />} placeholder="搜索对话" aria-label="搜索对话" variant="borderless" allowClear value={search} onChange={e => setSearch(e.target.value)} />
-      <div className="section-label"><span>文件夹</span><span>{snapshot.conversations.length ? snapshot.conversations.length : ''}</span></div>
+      <div className="section-label">文件夹</div>
       <nav className="history" aria-label="会话列表">
         {!conversations.length && <div className="history-empty">{search ? '没有找到对话' : '暂无对话'}</div>}
         {folders.map(folder => <section className="folder-group" key={folder.directory} data-directory={folder.directory}>
-          <Dropdown disabled={interacting} trigger={['contextMenu']} menu={{ items: [{ key: 'new', label: '在此文件夹下新建对话', icon: <PlusOutlined /> }], onClick: () => void createConversation(folder.conversations[0].id) }}>
+          <Dropdown disabled={interacting} trigger={['contextMenu']} menu={{ items: [
+            { key: 'new', label: '在此文件夹下新建对话', icon: <PlusOutlined /> },
+            { key: 'delete', label: '删除文件夹', icon: <DeleteOutlined />, danger: true, disabled: folder.running }
+          ], onClick: ({ key }) => key === 'new' ? void createConversation(folder.conversations[0].id) : confirmDeleteFolder(folder.conversations[0].id, folder.name, folder.count) }}>
             <Button className="folder-header" type="text" disabled={interacting} title={folder.directory} aria-label={`文件夹 ${folder.directory}`} aria-expanded={Boolean(search) || !collapsedFolders.has(folder.directory)} onClick={() => setCollapsedFolders(previous => {
               const next = new Set(previous)
               if (next.has(folder.directory)) next.delete(folder.directory)
               else next.add(folder.directory)
               return next
             })}>
-              {!search && collapsedFolders.has(folder.directory) ? <RightOutlined /> : <DownOutlined />}<FolderOpenOutlined /><span className="folder-name">{folder.name}</span><span className="folder-count">{folder.conversations.length}</span>
+              <svg className="folder-icon" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+                <path d={!search && collapsedFolders.has(folder.directory)
+                  ? 'M2 9h20M20 20H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5l2 2h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2Z'
+                  : 'M2 17V6a2 2 0 0 1 2-2h5l2 2h8a2 2 0 0 1 2 2v2M2 20h16l4-10H6L2 20Z'} />
+              </svg><span className="folder-name">{folder.name}</span>
             </Button>
           </Dropdown>
           {(search || !collapsedFolders.has(folder.directory)) && <div className="folder-conversations">{folder.conversations.map(c => <div className={`history-item${c.id === active?.id ? ' selected' : ''}`} key={c.id}>

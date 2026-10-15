@@ -69,6 +69,13 @@ export class AgentSessions {
     this.sessions.delete(id)
   }
 
+  /** 整个文件夹空闲后才清理运行资源，避免部分删除或中断后台任务。 */
+  removeFolder(id: string): void {
+    const conversations = this.store.folderConversations(id)
+    if (conversations.some(c => this.isBusy(c.id))) throw new Error('请先停止该文件夹中的任务，再删除。')
+    for (const conversation of conversations) this.remove(conversation.id)
+  }
+
   /** 应用退出时逐个清理独立运行资源，单个失败不阻止其他会话清理。 */
   dispose(): void {
     const errors: string[] = []

@@ -81,6 +81,7 @@ export type Action =
   | { type: 'conversation:select'; id: string | null }
   | { type: 'conversation:rename'; id: string; title: string }
   | { type: 'conversation:delete'; id: string }
+  | { type: 'folder:delete'; id: string }
   | { type: 'model:select'; providerId: string; model: string }
   | { type: 'fast-mode'; enabled: boolean }
   | { type: 'reasoning-effort'; effort: ReasoningEffort | null }

@@ -105,6 +105,25 @@ it('rejects overlapping sends and deletion in one conversation while another can
   expect(sessions.isBusy(b)).toBe(true)
 })
 
+it('checks the entire folder before cleanup and preserves tasks in other folders', async () => {
+  const { sessions, pending, send, store, directory } = await fixture()
+  const idle = store.createConversation(join(directory, 'A'))
+  const a = await send('A')
+  const b = await send('B')
+  await vi.waitFor(() => expect(pending.size).toBe(2))
+  const remove = vi.spyOn(sessions, 'remove')
+  try {
+    expect(() => sessions.removeFolder(idle.id)).toThrow('先停止该文件夹')
+    expect(remove).not.toHaveBeenCalled()
+    await sessions.stop(a)
+    sessions.removeFolder(idle.id)
+    expect(remove.mock.calls.map(([id]) => id)).toEqual([idle.id, a])
+    store.apply({ type: 'folder:delete', id: idle.id })
+    expect(store.state.conversations.map(c => c.id)).toEqual([b])
+    expect(sessions.isBusy(b)).toBe(true)
+  } finally { remove.mockRestore() }
+})
+
 it('keeps both stream targets attached to current repository objects after an unrelated transaction rollback', async () => {
   const { sessions, pending, send, store, path } = await fixture()
   const a = await send('A')

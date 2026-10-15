@@ -94,6 +94,12 @@ export class StateService {
     return c
   }
 
+  /** 通过已有会话定位当前账号的整个文件夹分组，不接受页面提交任意磁盘路径。 */
+  folderConversations(id: unknown): Conversation[] {
+    const source = this.conversation(id)
+    return this.state.conversations.filter(c => c.userId === source.userId && c.directory === source.directory)
+  }
+
   /** 保存已由桌面服务确认的工作目录；空会话也参与侧栏分组与重启恢复。 */
   createConversation(directory: string): Conversation {
     const user = this.requireUser()
@@ -148,6 +154,12 @@ export class StateService {
           this.state.conversations = this.state.conversations.filter(c => c.id !== action.id)
           if (this.state.activeConversationId === action.id) this.state.activeConversationId = null
           break
+        case 'folder:delete': {
+          const ids = new Set(this.folderConversations(action.id).map(c => c.id))
+          this.state.conversations = this.state.conversations.filter(c => !ids.has(c.id))
+          if (this.state.activeConversationId && ids.has(this.state.activeConversationId)) this.state.activeConversationId = null
+          break
+        }
         case 'theme':
           if (!['light', 'dark'].includes(action.theme)) throw new Error('无效主题。')
           currentUser.theme = action.theme
