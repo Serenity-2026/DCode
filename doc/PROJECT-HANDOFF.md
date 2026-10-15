@@ -7,7 +7,7 @@
 - 项目根目录：`/Users/a1/Documents/open-source/DCode`。
 - DCode 是 Electron 桌面 Coding Harness。目前完成本机账号、模型配置、流式对话和桌面交互框架。
 - 技术栈：TypeScript 5.9、Electron 44、React 19、Ant Design 6；electron-vite 构建，electron-builder 打包；Vitest 单元测试、Playwright Electron E2E。
-- 当前能与模型对话、把用户主动选择的文本文件/目录作为上下文，已接入 function call / agent loop、OpenAI/Anthropic 统一消息层及 read、bash、edit、write 生产工具。会话创建时选择工作目录，取消则在 Electron 动态获取的 userData/workspaces 下创建默认目录；会话按文件夹分类。尚未实现云端账号同步。
+- 当前能与模型对话、把用户主动选择的文本文件/目录作为上下文，已接入 function call / agent loop、OpenAI/Anthropic 统一消息层及 read、bash、edit、write 生产工具。会话创建时选择工作目录，取消不创建目录或会话，保留草稿及附件；会话按文件夹分类，项目行右侧图标可直接在项目内新建对话。尚未实现云端账号同步。
 - Agent 基本框架、四个本机编码工具和多会话并行任务已经完成；本轮没有待完成的功能需求。下一步功能由用户在新窗口指定，开发时继续沿用当前分层，逐步增加能力。
 - 用户是 Java 程序员，了解部分 TS 语法；交流用中文。每个类和核心方法前写中文注释，说明职责与依赖。
 
@@ -69,7 +69,7 @@ Agent 框架参照 pi v1.0.4 的职责划分，自行实现最小子集，没有
 | `services/agent-session.ts` · `send/stop` | 准备当前应用会话历史，创建回复占位，订阅 Agent，保存并推送聊天消息 | 不直接请求模型、执行工具或创建取消控制器 |
 | `infrastructure/model-client.ts` 与 `llm/` | HTTP、协议选择、SSE 解码，以及 OpenAI/Anthropic 双向消息转换 | 供应商字段不进入循环或应用会话逻辑 |
 
-`domain/agent.ts` 定义状态、上下文和生命周期事件；`domain/llm.ts` 定义统一消息、模型端口与工具契约。`bootstrap.ts` 手动装配各层，显式导入 ReadTool/BashTool/EditTool/WriteTool 类，在会话工厂中创建工具实例，通过 `toolRuntime.bind(tool)` 转为 AgentTool 后注入 Agent；`infrastructure/tools/tool-runtime.ts` 只管理目录、取消、预期错误和临时资源，不导入具体工具。AgentSession 通过 ToolWorkspace 契约在每次发送前配置目录。应用主进程创建一个 AgentSessions 和无状态 AgentLoop；每个会话第一次发送时，通过 app 注入的工厂创建独立 AgentSession、Agent 和 ToolRuntime，之后复用该会话实例。每次发送替换对应 Agent 的历史，每次 prompt 创建独立取消控制器与运行 Promise。不同会话可以同时生成，同一会话仍拒绝重复运行；当前页面选择不会改变后台任务的模型、目录或取消状态。目录直接保存在 Conversation.directory，侧栏按完整路径分组，目录行支持右键新建，详见 `SPEC-folder-conversations.md`。
+`domain/agent.ts` 定义状态、上下文和生命周期事件；`domain/llm.ts` 定义统一消息、模型端口与工具契约。`bootstrap.ts` 手动装配各层，显式导入 ReadTool/BashTool/EditTool/WriteTool 类，在会话工厂中创建工具实例，通过 `toolRuntime.bind(tool)` 转为 AgentTool 后注入 Agent；`infrastructure/tools/tool-runtime.ts` 只管理目录、取消、预期错误和临时资源，不导入具体工具。AgentSession 通过 ToolWorkspace 契约在每次发送前配置目录。应用主进程创建一个 AgentSessions 和无状态 AgentLoop；每个会话第一次发送时，通过 app 注入的工厂创建独立 AgentSession、Agent 和 ToolRuntime，之后复用该会话实例。每次发送替换对应 Agent 的历史，每次 prompt 创建独立取消控制器与运行 Promise。不同会话可以同时生成，同一会话仍拒绝重复运行；当前页面选择不会改变后台任务的模型、目录或取消状态。目录直接保存在 Conversation.directory，侧栏按完整路径分组，目录行支持右侧图标及右键新建，详见 `SPEC-folder-conversations.md`。
 
 事件方向为 `Loop.emit → Agent.publish → 订阅者 → AgentSession.onEvent → StreamEvent → 窗口`。AgentSession 构造时登记同步订阅；AgentEvent 不含应用会话 ID，Session 用目标会话/消息 ID 从当前仓库定位回复；其他操作事务回滚后也不会写入旧对象引用。对外状态快照、事件副本和推送消息均复制，工具 handler 与 API Key 不进入公开状态。
 

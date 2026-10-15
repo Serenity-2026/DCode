@@ -9,23 +9,43 @@ import { create, cleanup, config } from './helpers'
 
 const native = vi.hoisted(() => ({ getPath: vi.fn(), choose: vi.fn() }))
 vi.mock('electron', () => ({ app: { getPath: native.getPath }, dialog: { showOpenDialog: native.choose } }))
-afterEach(() => { vi.restoreAllMocks(); cleanup() })
+afterEach(() => { vi.restoreAllMocks(); vi.clearAllMocks(); cleanup() })
 
-it('selects a folder without reading its contents and creates unique default directories on cancellation', async () => {
+it('selects a folder without reading its contents and leaves the filesystem unchanged on cancellation', async () => {
   const { directory } = await create(config, false)
   native.getPath.mockReturnValue(directory)
   const desktop = new ElectronDesktop(() => null)
   native.choose.mockResolvedValueOnce({ canceled: false, filePaths: [directory] })
   expect(await desktop.selectDirectory()).toBe(realpathSync(directory))
   expect(existsSync(join(directory, 'workspaces'))).toBe(false)
+  const before = readdirSync(directory)
   native.choose.mockResolvedValue({ canceled: true, filePaths: [] })
-  const first = await desktop.selectDirectory()
-  const second = await desktop.selectDirectory()
-  expect(first).not.toBe(second)
-  expect(native.getPath).toHaveBeenCalledWith('userData')
-  expect(readdirSync(join(directory, 'workspaces'))).toHaveLength(2)
-  expect(first.split('/').at(-1)).toMatch(/^dcode-\d{8}-\d{12}$/)
-  await expect(desktop.checkDirectory(first)).resolves.toBeUndefined()
+  expect(await desktop.selectDirectory()).toBeNull()
+  native.choose.mockResolvedValue({ canceled: false, filePaths: [] })
+  expect(await desktop.selectDirectory()).toBeNull()
+  native.choose.mockResolvedValue({ canceled: true, filePaths: [directory] })
+  expect(await desktop.selectDirectory()).toBeNull()
+  expect(native.getPath).not.toHaveBeenCalled()
+  expect(readdirSync(directory)).toEqual(before)
+})
+
+it('does not save a conversation or change the active conversation when the chooser is cancelled', async () => {
+  const { store, path, directory } = await create(config, false)
+  const desktop = new DesktopService(store, new ElectronDesktop(() => null))
+  native.choose.mockResolvedValue({ canceled: true, filePaths: [] })
+  const save = vi.spyOn(StateRepository.prototype, 'save')
+  const check = vi.spyOn(ElectronDesktop.prototype, 'checkDirectory')
+  for (const active of [false, true]) {
+    if (active) store.createConversation(directory)
+    save.mockClear()
+    const before = store.snapshot()
+    const saved = readFileSync(path, 'utf8')
+    expect(await desktop.createConversation()).toBeNull()
+    expect(store.snapshot()).toEqual(before)
+    expect(readFileSync(path, 'utf8')).toBe(saved)
+    expect(save).not.toHaveBeenCalled()
+    expect(check).not.toHaveBeenCalled()
+  }
 })
 
 it('persists empty conversations, reuses their folder and checks account ownership and missing directories', async () => {
@@ -35,11 +55,13 @@ it('persists empty conversations, reuses their folder and checks account ownersh
   native.choose.mockResolvedValue({ canceled: false, filePaths: [selected] })
   const desktop = new DesktopService(store, new ElectronDesktop(() => null))
   const first = await desktop.createConversation()
+  if (!first) throw new Error('应创建会话')
   const id = first.activeConversationId!
   expect(first.conversations[0]).toMatchObject({ directory: realpathSync(selected), title: '新对话', messages: [] })
   expect(new StateRepository(path).state.conversations[0]).toEqual(first.conversations[0])
   native.choose.mockClear()
   const second = await desktop.createConversation(id)
+  if (!second) throw new Error('应复用目录创建会话')
   expect(native.choose).not.toHaveBeenCalled()
   expect(second.conversations).toHaveLength(2)
   expect(new Set(second.conversations.map(c => c.directory)).size).toBe(1)

@@ -9,10 +9,11 @@ export class DesktopService {
   /** 注入系统适配与当前账号状态，控制器仅调用这些受限业务方法。 */
   constructor(private store: StateService, private desktop: DesktopAccess) {}
 
-  /** 只接受系统选择器或当前账号已有会话的目录，不允许页面提交任意路径。 */
-  async createConversation(sourceId?: string): Promise<Snapshot> {
+  /** 只接受系统选择器或当前账号已有会话的目录；取消时不保存会话。 */
+  async createConversation(sourceId?: string): Promise<Snapshot | null> {
     const userId = this.store.requireUser().id
     const directory = sourceId === undefined ? await this.desktop.selectDirectory() : this.store.conversation(sourceId).directory
+    if (directory === null) return null
     await this.desktop.checkDirectory(directory)
     if (this.store.requireUser().id !== userId) throw new Error('登录状态已变化，请重试。')
     this.store.createConversation(directory)

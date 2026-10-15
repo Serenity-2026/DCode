@@ -4,7 +4,7 @@
 
 2026-10-07 核对 pi 最新发布为 [v1.0.4](https://github.com/earendil-works/pi/releases/tag/v1.0.4)，提交 `7c10bd4337495ee613f2224843ecdf349b80d1df`。参考该版本 [read](https://github.com/earendil-works/pi/blob/v1.0.4/packages/coding-agent/src/core/tools/read.ts)、[bash](https://github.com/earendil-works/pi/blob/v1.0.4/packages/coding-agent/src/core/tools/bash.ts)、[edit](https://github.com/earendil-works/pi/blob/v1.0.4/packages/coding-agent/src/core/tools/edit.ts)、[write](https://github.com/earendil-works/pi/blob/v1.0.4/packages/coding-agent/src/core/tools/write.ts) 的参数、截断与取消规则，自行实现本机工具，不引入 pi 运行时。
 
-生产 Agent 注册 read、bash、edit、write。会话创建时选择绝对工作目录，取消选择则创建默认目录；AgentSession 每次发送使用 Conversation.directory，重试和重启继续沿用。文件夹附件只提供快照，不改变工作目录。选择目录不自动读取其内容；详见 `SPEC-folder-conversations.md`。
+生产 Agent 注册 read、bash、edit、write。会话创建时选择绝对工作目录，取消选择则终止创建并保留当前会话；AgentSession 每次发送使用 Conversation.directory，重试和重启继续沿用。文件夹附件只提供快照，不改变工作目录。选择目录不自动读取其内容；详见 `SPEC-folder-conversations.md`。
 
 路径支持相对工作目录、绝对路径及 `~/`；与 pi 一样，这不是文件系统沙箱，bash 具有当前系统账号的命令权限。选择器仍会读取文本快照；本次不改变既有附件展示，不增加审批、终端面板、执行记录持久化或后台任务。
 

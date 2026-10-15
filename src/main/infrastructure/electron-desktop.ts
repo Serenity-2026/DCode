@@ -1,5 +1,4 @@
 import { app, clipboard, dialog, shell, type BrowserWindow } from 'electron'
-import { randomInt } from 'node:crypto'
 import { mkdir, realpath, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { AttachmentSelection } from '../../shared/types'
@@ -11,17 +10,10 @@ export class ElectronDesktop implements DesktopAccess {
   /** 每次操作获取当前窗口，兼容 macOS 关闭后重新创建窗口。 */
   constructor(private getWindow: () => BrowserWindow | null) {}
 
-  /** 新会话优先使用用户选择；取消时创建带应用名、当地日期和随机数的独立目录。 */
-  async selectDirectory(): Promise<string> {
+  /** 新会话使用用户实际选择的目录；取消时不产生目录。 */
+  async selectDirectory(): Promise<string | null> {
     const result = await dialog.showOpenDialog(this.getWindow()!, { title: '选择工作文件夹', properties: ['openDirectory', 'createDirectory'] })
-    if (!result.canceled && result.filePaths[0]) return realpath(result.filePaths[0])
-    const root = join(app.getPath('userData'), 'workspaces')
-    await mkdir(root, { recursive: true })
-    const now = new Date()
-    const date = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`
-    const directory = join(root, `dcode-${date}-${randomInt(100000000000, 1000000000000)}`)
-    await mkdir(directory)
-    return realpath(directory)
+    return result.canceled || !result.filePaths[0] ? null : realpath(result.filePaths[0])
   }
 
   /** 选择项目父目录；取消不生成目录，也不影响当前会话。 */

@@ -47,7 +47,10 @@ button { -webkit-app-region: no-drag; }
 .history { flex: 1; min-height: 0; overflow-y: auto; margin: 0 -3px; padding: 0 3px; }
 .history-empty { padding: 15px 12px; font-size: 12px; color: var(--muted); }
 .folder-group { margin-bottom: 6px; }
-.folder-header { display: flex; align-items: center; justify-content: flex-start; gap: 12px; width: 100%; height: 40px; padding: 0 12px; border-radius: 8px; color: var(--text); font-size: 14px; font-weight: 400; }
+.folder-row { display: flex; align-items: center; border-radius: 8px; }
+.folder-row:hover, .folder-row:focus-within { background: var(--hover); }
+.folder-header { display: flex; align-items: center; justify-content: flex-start; gap: 12px; flex: 1; min-width: 0; height: 40px; padding: 0 12px; border-radius: 8px; background: transparent !important; color: var(--text); font-size: 14px; font-weight: 400; }
+.folder-new-chat { flex-shrink: 0; width: 30px; height: 30px; margin-right: 6px; padding: 6px; color: var(--muted); font-size: 17px; }
 .folder-icon { flex-shrink: 0; font-size: 18px; color: var(--text); }
 .folder-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .folder-motion { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 280ms cubic-bezier(.22, 1, .36, 1); }

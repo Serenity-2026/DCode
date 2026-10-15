@@ -4,7 +4,7 @@ import {
   ArrowUpOutlined, PlusOutlined, SearchOutlined, MessageOutlined, MoreOutlined,
   SettingOutlined, CodeOutlined, BugOutlined, BranchesOutlined, CopyOutlined,
   ReloadOutlined, StopOutlined, DeleteOutlined, EditOutlined, LogoutOutlined,
-  DownOutlined, RightOutlined, LoadingOutlined
+  DownOutlined, RightOutlined, LoadingOutlined, FormOutlined
 } from '@ant-design/icons'
 import type { Action, Attachment, Message, ModelRefresh, Result, Snapshot, StreamEvent } from '../../../../shared/types'
 import { estimateContext, validateAttachments } from '../../../../shared/context'
@@ -161,6 +161,7 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
     try {
       const result = await window.dcode.createConversation(sourceId)
       if (!result.ok) { void toast.error(result.error); return }
+      if (result.value === null) return
       enterConversation(result.value)
     } catch { void toast.error('新建对话失败，请重试。') }
     finally { inFlight.current = false; setPending(false); composer.current?.focus() }
@@ -208,6 +209,7 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
       if (!conversationId) {
         const created = await window.dcode.createConversation()
         if (!created.ok) { void toast.error(created.error); return }
+        if (created.value === null) return
         installSnapshot(created.value)
         conversationId = created.value.activeConversationId!
       }
@@ -309,6 +311,7 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
             { key: 'new', label: '在此文件夹下新建对话', icon: <PlusOutlined /> },
             { key: 'delete', label: '删除文件夹', icon: <DeleteOutlined />, danger: true, disabled: folder.running }
           ], onClick: ({ key }) => key === 'new' ? void createConversation(folder.conversations[0].id) : confirmDeleteFolder(folder.conversations[0].id, folder.name, folder.count) }}>
+            <div className="folder-row">
             <Button className="folder-header" type="text" disabled={interacting} title={folder.directory} aria-label={`文件夹 ${folder.directory}`} aria-expanded={!collapsedFolders.has(folder.directory)} onClick={() => setCollapsedFolders(previous => {
               const next = new Set(previous)
               if (next.has(folder.directory)) next.delete(folder.directory)
@@ -321,6 +324,8 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
                   : 'M2 17V6a2 2 0 0 1 2-2h5l2 2h8a2 2 0 0 1 2 2v2M2 20h16l4-10H6L2 20Z'} />
               </svg><span className="folder-name">{folder.name}</span>
             </Button>
+            <Button className="folder-new-chat" type="text" icon={<FormOutlined />} disabled={interacting} aria-label={`在 ${folder.name} 中新建对话`} title="新建对话" onClick={() => void createConversation(folder.conversations[0].id)} />
+            </div>
           </Dropdown>
           <div className="folder-motion" data-expanded={!collapsedFolders.has(folder.directory)} aria-hidden={collapsedFolders.has(folder.directory)} inert={collapsedFolders.has(folder.directory)}>
           <div className="folder-conversations">{folder.conversations.map((c, index) => <div className={`history-item${c.id === active?.id ? ' selected' : ''}`} key={c.id} style={{ transitionDelay: !collapsedFolders.has(folder.directory) ? `${Math.min(index, 6) * 25}ms` : '0ms' }}>

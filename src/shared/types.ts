@@ -126,8 +126,8 @@ export interface DCodeAPI {
   refreshModels(): Promise<Result<ModelRefresh>>
   /** 修改当前账号的资料、会话、模型选择或主题。 */
   action(action: Action): Promise<Result<Snapshot>>
-  /** 选择工作目录创建会话；传入已有会话 ID 时复用其目录。 */
-  createConversation(sourceId?: string): Promise<Result<Snapshot>>
+  /** 选择工作目录创建会话，取消返回 null；传入已有会话 ID 时复用其目录。 */
+  createConversation(sourceId?: string): Promise<Result<Snapshot | null>>
   /** 选择新项目的创建位置，取消时返回 null。 */
   selectProjectDirectory(): Promise<Result<string | null>>
   /** 在默认工作区或刚选择的位置创建同名目录和首段对话。 */
