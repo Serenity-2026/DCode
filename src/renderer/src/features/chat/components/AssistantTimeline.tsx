@@ -14,7 +14,7 @@ export function AssistantTimeline({ message, selectedToolId, onPreview }: {
     const text = message.content.slice(cursor, offset)
     cursor = offset
     const running = tool.status === 'running'
-    const fileTool = ['read', 'write', 'edit'].includes(tool.name)
+    const showRunningLabel = running && (!['read', 'write', 'edit'].includes(tool.name) || !tool.path)
     const name = tool.path?.split(/[\\/]/).at(-1) || tool.path
     const icon = tool.name === 'read' ? <FileTextOutlined />
       : tool.name === 'write' ? <FileAddOutlined /> : tool.name === 'edit' ? <EditOutlined /> : <CodeOutlined />
@@ -26,11 +26,9 @@ export function AssistantTimeline({ message, selectedToolId, onPreview }: {
         <div className="tool-call-header">
           <span className="tool-call-dot" role="img" aria-label={status} title={status} />
           <span className="tool-call-icon" aria-hidden="true" title={tool.name}>{icon}</span>
-          {(!fileTool || !tool.path) && <>
-            {running && <span>正在调用</span>}
-            <code className="tool-call-name">{tool.name}</code>
-            {running && <span>工具</span>}
-          </>}
+          {showRunningLabel && <span>正在调用</span>}
+          <code className="tool-call-name">{tool.name}</code>
+          {showRunningLabel && <span>工具</span>}
           {tool.path && <Button className="tool-file-link" type="link" href="#file-preview"
             title={tool.path} aria-label={`预览文件 ${name}`} aria-controls="file-preview" aria-expanded={selectedToolId === tool.id}
             onClick={event => { event.preventDefault(); onPreview(tool) }}>{name}</Button>}
