@@ -24,6 +24,10 @@ const api: DCodeAPI = {
   action: (action) => ipcRenderer.invoke(channels.action, action),
   /** 由主进程选择或复用已保存的工作目录，再创建空会话。 */
   createConversation: (sourceId) => ipcRenderer.invoke(channels.createConversation, sourceId),
+  /** 新项目位置只来自主进程的原生选择器。 */
+  selectProjectDirectory: () => ipcRenderer.invoke(channels.selectProjectDirectory),
+  /** 主进程创建项目目录和首段空会话，页面不直接写入文件系统。 */
+  createProject: (input) => ipcRenderer.invoke(channels.createProject, input),
   /** 请求主进程的 AgentSessions.send 开始或重试生成，返回初始快照。 */
   send: (input) => ipcRenderer.invoke(channels.send, input),
   /** 由主进程打开系统选择器并读取已选择的文本，不提供通用文件系统权限。 */

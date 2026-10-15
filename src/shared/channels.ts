@@ -9,6 +9,8 @@ export const channels = {
   selectAttachments: 'dcode:select-attachments',
   action: 'dcode:action',
   createConversation: 'dcode:create-conversation',
+  selectProjectDirectory: 'dcode:select-project-directory',
+  createProject: 'dcode:create-project',
   send: 'dcode:send',
   stop: 'dcode:stop',
   stream: 'dcode:stream',

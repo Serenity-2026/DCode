@@ -24,6 +24,25 @@ export class ElectronDesktop implements DesktopAccess {
     return realpath(directory)
   }
 
+  /** 选择项目父目录；取消不生成目录，也不影响当前会话。 */
+  async selectProjectDirectory(): Promise<string | null> {
+    const result = await dialog.showOpenDialog(this.getWindow()!, { title: '选择项目创建位置', properties: ['openDirectory', 'createDirectory'] })
+    return result.canceled || !result.filePaths[0] ? null : realpath(result.filePaths[0])
+  }
+
+  /** 在已授权位置独占创建同名项目，拒绝覆盖已有目录或文件。 */
+  async createProject(name: string, parentDirectory?: string): Promise<string> {
+    const root = parentDirectory || join(app.getPath('userData'), 'workspaces')
+    if (!parentDirectory) await mkdir(root, { recursive: true })
+    const directory = join(root, name)
+    try { await mkdir(directory) }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Error('同名项目已存在，请更换项目名。')
+      throw error
+    }
+    return realpath(directory)
+  }
+
   /** 复用目录前确认仍为有效文件夹，失败不创建会话。 */
   async checkDirectory(directory: string): Promise<void> {
     if (!await stat(directory).then(info => info.isDirectory()).catch(() => false)) throw new Error('工作文件夹不存在或无法访问，请重新选择。')

@@ -120,10 +120,12 @@ export function MessageNavigation({ messages, theme, containerRef, onNavigate }:
       mouseEnterDelay={0.15} mouseLeaveDelay={0.1} destroyOnHidden open={previewId === question.id}
       onOpenChange={open => setPreviewId(current => open ? question.id : current === question.id ? null : current)}
       styles={{ container: { padding: 0, borderRadius: 16, background: 'transparent' } }}
-      content={<div className="message-preview" data-theme={theme}>
-        <p className="message-preview-question">{question.content.slice(0, 900) || question.attachments?.map(item => item.name).join('、') || '附件'}</p>
-        <div className="message-preview-answer">{answer?.content ? <Markdown content={answer.content.slice(0, 900)} /> : answer?.error || (answer?.status === 'streaming' ? '正在生成…' : answer?.status === 'stopped' ? '已停止' : '暂无回复')}</div>
+      content={<div className="message-preview" data-theme={theme} onWheel={event => event.stopPropagation()}>
+        <div className="message-preview-scroll" tabIndex={0} role="region" aria-label="对话预览内容">
+        <p className="message-preview-question">{question.content || question.attachments?.map(item => item.name).join('、') || '附件'}</p>
+        <div className="message-preview-answer">{answer?.content ? <Markdown content={answer.content} /> : answer?.error || (answer?.status === 'streaming' ? '正在生成…' : answer?.status === 'stopped' ? '已停止' : '暂无回复')}</div>
         {Boolean(question.attachments?.length) && <div className="message-preview-attachments"><FileOutlined /><span>{question.attachments!.map(item => item.name).join('、')}</span></div>}
+        </div>
         <div className="message-preview-meta"><span>第 {index + 1} 轮</span><time>{new Date(question.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</time></div>
       </div>}>
       <Button className="message-navigation-entry" data-index={index} type="text" aria-label={`跳转到第 ${index + 1} 轮对话`} aria-current={question.id === currentId ? 'step' : undefined}

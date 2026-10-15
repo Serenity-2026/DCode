@@ -37,14 +37,24 @@ button { -webkit-app-region: no-drag; }
 .new-chat { display: flex; align-items: center; justify-content: space-between; padding: 0 13px; height: 40px; margin-bottom: 16px; }
 .shortcut { font-size: 11px; font-family: inherit; color: var(--muted); }
 .search { margin-bottom: 27px; }
-.section-label { display: flex; align-items: center; justify-content: space-between; padding: 0 11px 10px; color: var(--muted); font-size: 11px; letter-spacing: 1px; }
+.project-section { display: flex; align-items: center; justify-content: space-between; padding: 0 8px 8px; }
+.project-toggle { height: 26px; padding: 0 3px; color: var(--muted); font-size: 12px; letter-spacing: 1px; }
+.project-add { width: 26px; height: 26px; padding: 4px; color: var(--muted); }
+.project-form { display: grid; gap: 12px; padding: 16px 0 8px; }
+.project-form > label { font-size: 12px; }
+.project-location { display: flex; align-items: center; gap: 12px; }
+.project-location > span { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 12px; color: var(--muted, #878780); }
 .history { flex: 1; min-height: 0; overflow-y: auto; margin: 0 -3px; padding: 0 3px; }
 .history-empty { padding: 15px 12px; font-size: 12px; color: var(--muted); }
 .folder-group { margin-bottom: 6px; }
 .folder-header { display: flex; align-items: center; justify-content: flex-start; gap: 12px; width: 100%; height: 40px; padding: 0 12px; border-radius: 8px; color: var(--text); font-size: 14px; font-weight: 400; }
 .folder-icon { flex-shrink: 0; font-size: 18px; color: var(--text); }
 .folder-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.folder-conversations { padding-left: 12px; }
+.folder-motion { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 280ms cubic-bezier(.22, 1, .36, 1); }
+.folder-motion[data-expanded='true'] { grid-template-rows: 1fr; }
+.folder-conversations { min-height: 0; overflow: hidden; margin-left: 20px; padding-left: 6px; border-left: 1px solid var(--line); }
+.folder-motion .history-item { opacity: 0; transform: translateY(-6px); transition: opacity 180ms ease, transform 240ms cubic-bezier(.22, 1, .36, 1); }
+.folder-motion[data-expanded='true'] .history-item { opacity: 1; transform: translateY(0); }
 .history-item { display: flex; align-items: center; border-radius: 8px; margin: 3px 0; }
 .history-item:hover, .history-item.selected { background: var(--hover); }
 .history-button { flex: 1; min-width: 0; height: 38px; display: flex; justify-content: flex-start; gap: 10px; padding: 0 11px; }
@@ -76,8 +86,9 @@ button { -webkit-app-region: no-drag; }
 .message-navigation-entry:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .message-preview { --preview-bg: #fff; --preview-text: #30332e; --preview-muted: #737a70; --preview-line: #e8eae4; width: min(320px, calc(100vw - 84px)); padding: 16px; border: 1px solid var(--preview-line); border-radius: 16px; color: var(--preview-text); background: var(--preview-bg); overflow: hidden; }
 .message-preview[data-theme='dark'] { --preview-bg: #2c2d2b; --preview-text: #f0f0eb; --preview-muted: #adb1a6; --preview-line: #41433d; }
-.message-preview-question { margin: 0; font-size: 13px; line-height: 1.65; font-weight: 550; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
-.message-preview-answer { margin-top: 10px; max-height: 132px; overflow: hidden; color: var(--preview-muted); }
+.message-preview-scroll { max-height: min(360px, calc(100vh - 160px)); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--preview-muted) transparent; }
+.message-preview-question { margin: 0; font-size: 13px; line-height: 1.65; font-weight: 550; overflow-wrap: anywhere; white-space: pre-wrap; }
+.message-preview-answer { margin-top: 10px; color: var(--preview-muted); }
 .message-preview-answer .markdown { font-size: 12px; line-height: 1.7; }
 .message-preview-answer .markdown p { margin-bottom: 8px; }
 .message-preview-answer .markdown h1, .message-preview-answer .markdown h2, .message-preview-answer .markdown h3 { font-size: 12px; margin: 8px 0; }

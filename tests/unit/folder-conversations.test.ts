@@ -101,3 +101,40 @@ it('rolls back an entire folder deletion when saving fails', async () => {
   expect(store.snapshot()).toEqual(before)
   expect(readFileSync(path, 'utf8')).toBe(bytes)
 })
+
+it('creates named projects in the application workspace or a selected parent without overwriting existing files', async () => {
+  const { store, directory } = await create(config, false)
+  native.getPath.mockReturnValue(directory)
+  const desktop = new DesktopService(store, new ElectronDesktop(() => null))
+  const first = await desktop.createProject({ name: '默认项目' })
+  expect(first.conversations[0].directory).toBe(realpathSync(join(directory, 'workspaces', '默认项目')))
+  const parent = join(directory, 'chosen')
+  mkdirSync(parent)
+  native.choose.mockResolvedValue({ canceled: false, filePaths: [parent] })
+  expect(await desktop.selectProjectDirectory()).toBe(realpathSync(parent))
+  const second = await desktop.createProject({ name: '新项目', parentDirectory: realpathSync(parent) })
+  expect(second.conversations[1].directory).toBe(realpathSync(join(parent, '新项目')))
+  writeFileSync(join(parent, '新项目', 'keep.txt'), '已有内容')
+  await expect(desktop.createProject({ name: '新项目', parentDirectory: realpathSync(parent) })).rejects.toThrow('同名项目已存在')
+  expect(readFileSync(join(parent, '新项目', 'keep.txt'), 'utf8')).toBe('已有内容')
+  native.choose.mockResolvedValue({ canceled: true, filePaths: [] })
+  expect(await desktop.selectProjectDirectory()).toBeNull()
+  expect(store.snapshot().conversations).toHaveLength(2)
+})
+
+it('rejects invalid names and unselected or cross-account project locations before creating anything', async () => {
+  const { store, auth, directory } = await create(config, false)
+  native.getPath.mockReturnValue(directory)
+  const desktop = new DesktopService(store, new ElectronDesktop(() => null))
+  for (const name of ['', '../escape', '/absolute', 'path\\child', '..', 'NUL', 'COM1.txt', 'project.', 'a'.repeat(81)]) {
+    await expect(desktop.createProject({ name })).rejects.toThrow()
+  }
+  await expect(desktop.createProject({ name: '未授权', parentDirectory: directory })).rejects.toThrow('先选择项目创建位置')
+  native.choose.mockResolvedValue({ canceled: false, filePaths: [directory] })
+  const parentDirectory = (await desktop.selectProjectDirectory())!
+  auth.logout()
+  await auth.register({ username: 'another', password: 'another-password' })
+  await expect(desktop.createProject({ name: '其他账号', parentDirectory })).rejects.toThrow('先选择项目创建位置')
+  expect(store.snapshot().conversations).toEqual([])
+  expect(readdirSync(directory)).toEqual(['state.json'])
+})

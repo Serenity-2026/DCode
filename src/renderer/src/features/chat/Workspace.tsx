@@ -17,6 +17,7 @@ import { WorkspaceLayout } from '../../components/WorkspaceLayout'
 import { MessageNavigation } from './components/MessageNavigation'
 import { BrandMark } from '../../components/BrandMark'
 import { WelcomeCloud } from './components/WelcomeCloud'
+import { ProjectDialog } from './components/ProjectDialog'
 
 /**
  * 对话工作台组件，组织会话侧栏、输入框、用户管理和设置弹窗。
@@ -32,6 +33,7 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
   const [pending, setPending] = useState(false)
   const [stopping, setStopping] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [projectOpen, setProjectOpen] = useState(false)
   const [previewSelection, setPreviewSelection] = useState<{ messageId: string; toolId: string } | null>(null)
   const [modelsLoading, setModelsLoading] = useState(snapshot.providers.length > 0)
   const initialRefresh = useRef<Promise<Result<ModelRefresh>> | null>(null)
@@ -47,7 +49,7 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
   const previewTool = active?.messages.find(message => message.id === previewSelection?.messageId)?.toolExecutions?.find(tool => tool.id === previewSelection?.toolId)
   const folderName = active?.directory.split(/[\\/]/).filter(Boolean).at(-1) || active?.directory
   const generating = Boolean(active?.messages.some(m => m.status === 'streaming'))
-  const interacting = pending || stopping || modelsLoading
+  const interacting = pending || stopping || modelsLoading || projectOpen
   const busy = generating || interacting
 
   /** 合并 IPC 返回的 Snapshot 与已收到的 StreamEvent，避免较早的快照覆盖较新的流式文本。 */
@@ -55,6 +57,15 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
     for (const c of next.conversations) c.messages = c.messages.map(m => streamEvents.current.get(m.id)?.message || m)
     setSnapshot(next)
   }, [setSnapshot])
+
+  /** 新建项目和新建对话共用进入动作，展开目标分组并清空原草稿。 */
+  const enterConversation = useCallback((next: Snapshot): void => {
+    installSnapshot(next)
+    const directory = next.conversations.find(c => c.id === next.activeConversationId)!.directory
+    setCollapsedFolders(previous => { const expanded = new Set(previous); expanded.delete(directory); return expanded })
+    setDraft(''); setAttachments([]); setSearch(''); setPreviewSelection(null)
+    follow.current = true; jumping.current = false
+  }, [installSnapshot])
 
   // 登录后先用账号服务读取模型列表；共享同一次请求，避免 StrictMode 重复执行网络测试。
   useEffect(() => {
@@ -150,14 +161,10 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
     try {
       const result = await window.dcode.createConversation(sourceId)
       if (!result.ok) { void toast.error(result.error); return }
-      installSnapshot(result.value)
-      const directory = result.value.conversations.find(c => c.id === result.value.activeConversationId)!.directory
-      setCollapsedFolders(previous => { const next = new Set(previous); next.delete(directory); return next })
-      setDraft(''); setAttachments([]); setSearch(''); setPreviewSelection(null)
-      follow.current = true; jumping.current = false
+      enterConversation(result.value)
     } catch { void toast.error('新建对话失败，请重试。') }
     finally { inFlight.current = false; setPending(false); composer.current?.focus() }
-  }, [installSnapshot, toast])
+  }, [enterConversation, toast])
 
   /** 打开 preload 选择器并校验附件快照，附件不改变会话工作目录。 */
   async function addAttachments(kind: 'file' | 'folder'): Promise<void> {
@@ -281,6 +288,7 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
     const all = snapshot.conversations.filter(c => c.directory === directory)
     return { directory, name: directory.split(/[\\/]/).filter(Boolean).at(-1) || directory, conversations: conversations.filter(c => c.directory === directory), count: all.length, running: all.some(c => c.messages.some(m => m.status === 'streaming')) }
   })
+  const projectsCollapsed = !snapshot.conversations.length || snapshot.conversations.every(c => collapsedFolders.has(c.directory))
   const modelName = snapshot.config.model
   const usedTokens = estimateContext(active, draft, attachments, generating)
   return <>
@@ -289,8 +297,11 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
       <div className="window-space" />
       <div className="brand"><span className="brand-mark"><BrandMark /></span><span className="brand-name">DCode</span><span className="brand-version">0.1</span></div>
       <Button className="new-chat" icon={<PlusOutlined />} aria-label="新对话" disabled={interacting} onClick={() => void createConversation()}>新对话 <kbd className="shortcut">⌘ N</kbd></Button>
-      <Input className="search" prefix={<SearchOutlined />} placeholder="搜索对话" aria-label="搜索对话" variant="borderless" allowClear value={search} onChange={e => setSearch(e.target.value)} />
-      <div className="section-label">文件夹</div>
+      <Input className="search" prefix={<SearchOutlined />} placeholder="搜索对话" aria-label="搜索对话" variant="borderless" allowClear value={search} onChange={e => { setSearch(e.target.value); if (e.target.value) setCollapsedFolders(new Set()) }} />
+      <div className="project-section">
+        <Button className="project-toggle" type="text" disabled={interacting || !snapshot.conversations.length} aria-label="项目" aria-expanded={!projectsCollapsed} title={projectsCollapsed ? '展开全部项目' : '收起全部项目'} onClick={() => setCollapsedFolders(new Set(projectsCollapsed ? [] : snapshot.conversations.map(c => c.directory)))}>项目</Button>
+        <Button className="project-add" type="text" icon={<PlusOutlined />} disabled={interacting} aria-label="添加项目" onClick={() => setProjectOpen(true)} />
+      </div>
       <nav className="history" aria-label="会话列表">
         {!conversations.length && <div className="history-empty">{search ? '没有找到对话' : '暂无对话'}</div>}
         {folders.map(folder => <section className="folder-group" key={folder.directory} data-directory={folder.directory}>
@@ -298,27 +309,28 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
             { key: 'new', label: '在此文件夹下新建对话', icon: <PlusOutlined /> },
             { key: 'delete', label: '删除文件夹', icon: <DeleteOutlined />, danger: true, disabled: folder.running }
           ], onClick: ({ key }) => key === 'new' ? void createConversation(folder.conversations[0].id) : confirmDeleteFolder(folder.conversations[0].id, folder.name, folder.count) }}>
-            <Button className="folder-header" type="text" disabled={interacting} title={folder.directory} aria-label={`文件夹 ${folder.directory}`} aria-expanded={Boolean(search) || !collapsedFolders.has(folder.directory)} onClick={() => setCollapsedFolders(previous => {
+            <Button className="folder-header" type="text" disabled={interacting} title={folder.directory} aria-label={`文件夹 ${folder.directory}`} aria-expanded={!collapsedFolders.has(folder.directory)} onClick={() => setCollapsedFolders(previous => {
               const next = new Set(previous)
               if (next.has(folder.directory)) next.delete(folder.directory)
               else next.add(folder.directory)
               return next
             })}>
               <svg className="folder-icon" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
-                <path d={!search && collapsedFolders.has(folder.directory)
+                <path d={collapsedFolders.has(folder.directory)
                   ? 'M2 9h20M20 20H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5l2 2h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2Z'
                   : 'M2 17V6a2 2 0 0 1 2-2h5l2 2h8a2 2 0 0 1 2 2v2M2 20h16l4-10H6L2 20Z'} />
               </svg><span className="folder-name">{folder.name}</span>
             </Button>
           </Dropdown>
-          {(search || !collapsedFolders.has(folder.directory)) && <div className="folder-conversations">{folder.conversations.map(c => <div className={`history-item${c.id === active?.id ? ' selected' : ''}`} key={c.id}>
+          <div className="folder-motion" data-expanded={!collapsedFolders.has(folder.directory)} aria-hidden={collapsedFolders.has(folder.directory)} inert={collapsedFolders.has(folder.directory)}>
+          <div className="folder-conversations">{folder.conversations.map((c, index) => <div className={`history-item${c.id === active?.id ? ' selected' : ''}`} key={c.id} style={{ transitionDelay: !collapsedFolders.has(folder.directory) ? `${Math.min(index, 6) * 25}ms` : '0ms' }}>
           <Button type="text" className="history-button" icon={c.messages.some(m => m.status === 'streaming') ? <LoadingOutlined spin /> : <MessageOutlined />} aria-label={c.title} disabled={interacting} title={c.title} onClick={() => void act({ type: 'conversation:select', id: c.id })}><span className="history-title">{c.title}</span></Button>
           <Dropdown disabled={interacting} trigger={['click']} menu={{ items: [
             { key: 'rename', label: '重命名', icon: <EditOutlined /> }, { key: 'delete', label: '删除', danger: true, disabled: c.messages.some(m => m.status === 'streaming'), icon: <DeleteOutlined /> }
           ], onClick: ({ key }) => key === 'rename' ? setEdit({ type: 'conversation', id: c.id, value: c.title }) : confirmDelete(c.id, c.title) }}>
             <Button type="text" size="small" className="history-menu" icon={<MoreOutlined />} disabled={interacting} aria-label={`管理对话 ${c.title}`} />
           </Dropdown>
-        </div>)}</div>}
+        </div>)}</div></div>
         </section>)}
       </nav>
       <div className="sidebar-bottom">
@@ -371,6 +383,7 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
       </div><div className="footer-note"><span>{active ? `${active.messages.filter(m => m.role === 'user').length} 条提问` : 'Shift + Enter 换行'}</span><span>DCode / {active?.model || modelName}</span></div></div>
     </WorkspaceLayout>
     {settingsOpen && <ModelSettings snapshot={snapshot} busy={busy} onClose={() => setSettingsOpen(false)} onSaved={installSnapshot} onTheme={value => void act({ type: 'theme', theme: value })} />}
+    {projectOpen && <ProjectDialog onClose={() => setProjectOpen(false)} onCreated={next => { enterConversation(next); setProjectOpen(false) }} />}
     <Modal title={edit?.type === 'user' ? '编辑用户名称' : '重命名对话'} open={Boolean(edit)} onCancel={() => setEdit(null)} okText="保存" cancelText="取消" okButtonProps={{ disabled: busy || !edit?.value.trim() }} confirmLoading={pending} onOk={async () => {
       if (!edit) return
       const ok = await act(edit.type === 'user' ? { type: 'user:rename', id: edit.id, name: edit.value } : { type: 'conversation:rename', id: edit.id, title: edit.value })

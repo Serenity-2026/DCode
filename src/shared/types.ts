@@ -17,6 +17,9 @@ export interface AttachmentSelection { attachments: Attachment[]; skipped: numbe
 /** AgentSession 的发送输入，重试复用已保存的附件，不能通过此接口要求读取本机路径。 */
 export interface SendInput { content: string; retry?: boolean; attachments?: Attachment[]; conversationId?: string | null }
 
+/** 项目名称与用户通过原生选择器确认的父目录；不选位置时使用应用工作区。 */
+export interface ProjectDraft { name: string; parentDirectory?: string }
+
 /** 公开账号信息，不包含密码哈希、会话令牌或模型密钥。 */
 export interface User { id: string; name: string; username: string; createdAt: string }
 
@@ -125,6 +128,10 @@ export interface DCodeAPI {
   action(action: Action): Promise<Result<Snapshot>>
   /** 选择工作目录创建会话；传入已有会话 ID 时复用其目录。 */
   createConversation(sourceId?: string): Promise<Result<Snapshot>>
+  /** 选择新项目的创建位置，取消时返回 null。 */
+  selectProjectDirectory(): Promise<Result<string | null>>
+  /** 在默认工作区或刚选择的位置创建同名目录和首段对话。 */
+  createProject(input: ProjectDraft): Promise<Result<Snapshot>>
   /** 使用当前账号选中的模型生成回复。 */
   send(input: SendInput): Promise<Result<Snapshot>>
   /** 打开系统选择器，读取文件或文件夹的附件文本快照。 */
