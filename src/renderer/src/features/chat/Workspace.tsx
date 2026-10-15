@@ -4,7 +4,7 @@ import {
   ArrowUpOutlined, PlusOutlined, SearchOutlined, MessageOutlined, MoreOutlined,
   SettingOutlined, CodeOutlined, BugOutlined, BranchesOutlined, CopyOutlined,
   ReloadOutlined, StopOutlined, DeleteOutlined, EditOutlined, LogoutOutlined,
-  DownOutlined, RightOutlined, LoadingOutlined, FormOutlined
+  DownOutlined, RightOutlined, LoadingOutlined
 } from '@ant-design/icons'
 import type { Action, Attachment, Message, ModelRefresh, Result, Snapshot, StreamEvent } from '../../../../shared/types'
 import { estimateContext, validateAttachments } from '../../../../shared/context'
@@ -324,7 +324,9 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
                   : 'M2 17V6a2 2 0 0 1 2-2h5l2 2h8a2 2 0 0 1 2 2v2M2 20h16l4-10H6L2 20Z'} />
               </svg><span className="folder-name">{folder.name}</span>
             </Button>
-            <Button className="folder-new-chat" type="text" icon={<FormOutlined />} disabled={interacting} aria-label={`在 ${folder.name} 中新建对话`} title="新建对话" onClick={() => void createConversation(folder.conversations[0].id)} />
+            <Button className="folder-new-chat" type="text" icon={<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+              <path d="M12 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6M16 4l4 4M9 15l4-1 8-8a2.12 2.12 0 0 0-3-3l-8 8-1 4Z" />
+            </svg>} disabled={interacting} aria-label={`在 ${folder.name} 中新建对话`} title="新建对话" onClick={() => void createConversation(folder.conversations[0].id)} />
             </div>
           </Dropdown>
           <div className="folder-motion" data-expanded={!collapsedFolders.has(folder.directory)} aria-hidden={collapsedFolders.has(folder.directory)} inert={collapsedFolders.has(folder.directory)}>
