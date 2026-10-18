@@ -1,5 +1,5 @@
-import type { AgentLoopEvent, RegisteredTool, ToolResultMessage } from '../domain/agent'
-import { ToolExecutionError, waitForTool, type AgentToolResult, type LlmContent } from '../domain/llm'
+import type { AgentLoopEvent, RegisteredTool, ToolResultMessage } from '../../domain/agent'
+import { ToolExecutionError, waitForTool, type AgentToolResult, type LlmContent } from '../../domain/llm'
 
 type ToolCall = Extract<LlmContent, { type: 'toolCall' }>
 interface Invocation { call: ToolCall; registered?: RegisteredTool }

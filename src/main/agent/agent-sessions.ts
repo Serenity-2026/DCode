@@ -1,7 +1,7 @@
 import type { SendInput, Snapshot } from '../../shared/types'
 import type { ModelConfig } from '../domain/model-config'
 import { AgentSession } from './agent-session'
-import { StateService } from './state-service'
+import { StateService } from '../services/state-service'
 
 /** app 提供完整会话运行实例；管理器不负责装配模型、工具或系统资源。 */
 export interface SessionRuntime { session: AgentSession; dispose(): void }

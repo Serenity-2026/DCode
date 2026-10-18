@@ -4,7 +4,7 @@ import type { FileChangeTurn } from '../domain/llm'
 import { ToolExecutionError } from '../domain/llm'
 import type { StoredFileChange } from '../domain/state'
 import { describeChange, displayFilePath, fileBytes, fileVersion, restoreFile, withFileChanges } from '../infrastructure/file-history'
-import { StateService } from './state-service'
+import { StateService } from '../services/state-service'
 
 /** 按用户提问记录文件净变化及完整恢复副本；依赖状态仓库持久化，系统适配负责读写。 */
 export class FileChanges {

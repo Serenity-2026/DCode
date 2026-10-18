@@ -1,8 +1,8 @@
 import { channels } from '../../shared/channels'
 import type { UndoFilesInput } from '../../shared/types'
 import { IpcRouter } from '../ipc/ipc-router'
-import { AgentSessions } from '../services/agent-sessions'
-import { FileChanges } from '../services/file-changes'
+import { AgentSessions } from '../agent/agent-sessions'
+import { FileChanges } from '../file/file-changes'
 
 /** 撤销只接受已保存的变更 ID；生成结束后短暂互斥，避免恢复过程中启动新任务。 */
 export function registerFileChangeController(router: IpcRouter, changes: FileChanges, sessions: AgentSessions): void {

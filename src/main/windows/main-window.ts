@@ -1,7 +1,7 @@
 import { BrowserWindow } from 'electron'
 import { channels } from '../../shared/channels'
 import type { StreamEvent } from '../../shared/types'
-import { AgentSessions } from '../services/agent-sessions'
+import { AgentSessions } from '../agent/agent-sessions'
 
 /** 主窗口生命周期，依赖 AgentSessions 安全停止全部任务，资源路径由启动装配提供；不注册业务 IPC。 */
 export class MainWindow {

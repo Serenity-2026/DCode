@@ -1,7 +1,7 @@
 import type { ModelStream } from '../domain/llm'
 import type { AgentContext, AgentLoopEvent, ToolResultMessage } from '../domain/agent'
 import type { ModelConfig } from '../domain/model-config'
-import { ToolExecutor } from './tool-executor'
+import { ToolExecutor } from '../infrastructure/tools/tool-executor'
 
 /** 底层模型/工具循环；仅使用单次上下文与事件出口，不拥有会话或运行状态。 */
 export class AgentLoop {

@@ -2,7 +2,7 @@ import { expect, it, vi } from 'vitest'
 import type { AgentLoopEvent, RegisteredTool } from '../../src/main/domain/agent'
 import { ToolExecutionError, type AgentTool, type AgentToolResult, type LlmContent, type ToolExecutionMode } from '../../src/main/domain/llm'
 import { toolValidator } from '../../src/main/infrastructure/tool-schema'
-import { ToolExecutor } from '../../src/main/services/tool-executor'
+import { ToolExecutor } from '../../src/main/infrastructure/tools/tool-executor'
 
 /** 用明确的开始/结束信号验证调度，不依赖固定等待时间。 */
 function gate() {

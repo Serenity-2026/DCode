@@ -1,7 +1,7 @@
 import { channels } from '../../shared/channels'
 import { IpcRouter } from '../ipc/ipc-router'
 import type { SendInput } from '../../shared/types'
-import { AgentSessions } from '../services/agent-sessions'
+import { AgentSessions } from '../agent/agent-sessions'
 import { Models } from '../services/model-service'
 import { StateService } from '../services/state-service'
 

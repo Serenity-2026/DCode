@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { MainWindow } from '../../src/main/windows/main-window'
 import { reportError } from '../../src/main/app/report-error'
-import type { AgentSessions } from '../../src/main/services/agent-sessions'
+import type { AgentSessions } from '../../src/main/agent/agent-sessions'
 
 const electron = vi.hoisted(() => ({ create: vi.fn(), showError: vi.fn() }))
 vi.mock('electron', () => ({ BrowserWindow: electron.create, dialog: { showErrorBox: electron.showError } }))

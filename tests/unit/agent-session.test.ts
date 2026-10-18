@@ -1,6 +1,6 @@
 import { StateRepository } from '../../src/main/repositories/state-repository'
 import { afterEach, expect, it, vi } from 'vitest'
-import { AgentSession } from '../../src/main/services/agent-session'
+import { AgentSession } from '../../src/main/agent/agent-session'
 import { StateService } from '../../src/main/services/state-service'
 import type { StreamEvent } from '../../src/shared/types'
 import { create, cleanup, config, createAgent, unexpectedTaskError } from './helpers'

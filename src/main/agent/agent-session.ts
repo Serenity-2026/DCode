@@ -4,7 +4,7 @@ import type { AgentEvent } from '../domain/agent'
 import { toLlmMessages, type LlmMessage, type ToolWorkspace } from '../domain/llm'
 import type { ModelConfig } from '../domain/model-config'
 import { Agent } from './agent'
-import { StateService } from './state-service'
+import { StateService } from '../services/state-service'
 import { isTokenCount, localDay } from '../../shared/usage'
 
 /** 应用会话层：准备上下文、保存正文和推送界面；运行控制由独立 Agent 负责。 */
