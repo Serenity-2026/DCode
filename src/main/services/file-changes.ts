@@ -114,18 +114,38 @@ export class FileChanges {
     }
   }
 
-  /** 只使用当前账号已保存的变更 ID；先核对整批，再按文件恢复并保存进度，失败可以重试。 */
+  /** 只使用当前账号已保存的变更 ID；先核对整批，再按文件恢复并保存进度，失败可以重试。
+   *输入:  conversationId: string
+   *      messageId: string
+   *      changeId?: string,如果不传 changeId表示撤销这条回复对应的全部剩余修改。
+   * */
   async undo(input: UndoFilesInput): Promise<Snapshot> {
-    if (!input || typeof input.conversationId !== 'string' || typeof input.messageId !== 'string' || (input.changeId !== undefined && typeof input.changeId !== 'string')) throw new Error('撤销请求无效。')
+    if (!input || typeof input.conversationId !== 'string' ||
+        typeof input.messageId !== 'string' ||
+        (input.changeId !== undefined && typeof input.changeId !== 'string'))
+      throw new Error('撤销请求无效。')
     const conversation = this.store.conversation(input.conversationId)
-    if (!conversation.messages.some(message => message.id === input.messageId && message.role === 'assistant')) throw new Error('回复不存在。')
-    const changes = (this.store.state.fileChanges || []).filter(change => change.userId === conversation.userId && change.conversationId === conversation.id && change.messageId === input.messageId && (input.changeId === undefined || change.id === input.changeId))
+    if (!conversation.messages.
+    some(message => message.id === input.messageId && message.role === 'assistant'))
+      throw new Error('回复不存在。')
+    const changes =
+        (this.store.state.fileChanges || []).
+        filter(change =>
+            change.userId === conversation.userId &&
+            change.conversationId === conversation.id &&
+            change.messageId === input.messageId &&
+            (input.changeId === undefined || change.id === input.changeId))
     if (!changes.length) throw new Error('没有可撤销的文件修改。')
-    const pending = changes.filter(change => change.status !== 'reverted' && change.before !== change.after)
+    //找到需要处理的撤销记录
+    const pending = changes.filter(change =>
+        change.status !== 'reverted' && change.before !== change.after)
+    //withFileChanges作用:在这批文件恢复期间，其他使用同一套队列的应用内写入不能交错进入,防止锁死
     return withFileChanges(pending.map(change => change.absolutePath), async () => {
+      //先检查文件是否已被修改
       for (const change of pending) {
         const current = await fileVersion(change.absolutePath, change.parentDirectory)
-        if (current.content !== change.after && current.content !== change.before) throw new Error(`文件已被后续修改，无法撤销：${change.path}`)
+        if (current.content !== change.after && current.content !== change.before)
+          throw new Error(`文件已被后续修改，无法撤销：${change.path}`)
       }
       try {
         for (const change of pending) {
@@ -134,7 +154,11 @@ export class FileChanges {
           this.store.state.fileChanges!.find(entry => entry.id === change.id)!.status = 'reverted'
           this.store.save()
         }
-      } finally { this.publish(input) }
+      }
+      finally
+      {
+        this.publish(input)
+      }
       this.store.save()
       return this.store.snapshot()
     })

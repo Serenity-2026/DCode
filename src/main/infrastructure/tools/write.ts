@@ -25,21 +25,31 @@ export class WriteTool implements WorkspaceTool<WriteToolDetails> {
       signal.throwIfAborted()
       await mkdir(dirname(path), { recursive: true })
       const current = await stat(path).catch(error => {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT')
+          return undefined
         throw error
       })
       if (current) {
         const timestamp = readFileState.get(path)
-        if (timestamp === undefined) throw new ToolExecutionError('请先使用 read 读取该文件，再使用 write 覆盖。')
-        if (current.mtimeMs !== timestamp) throw new ToolExecutionError('文件修改时间已变化，请重新使用 read 读取后再覆盖。')
+        if (timestamp === undefined)
+          throw new ToolExecutionError('请先使用 read 读取该文件，再使用 write 覆盖。')
+        if (current.mtimeMs !== timestamp)
+          throw new ToolExecutionError('文件修改时间已变化，请重新使用 read 读取后再覆盖。')
       }
       const before = current ? decodeText(await readFile(path, { signal })) : ''
-      if (current && (await stat(path)).mtimeMs !== current.mtimeMs) throw new ToolExecutionError('文件修改时间已变化，请重新使用 read 读取后再覆盖。')
+      if (current && (await stat(path)).mtimeMs !== current.mtimeMs)
+        throw new ToolExecutionError('文件修改时间已变化，请重新使用 read 读取后再覆盖。')
       signal.throwIfAborted()
       readFileState.delete(path)
-      const write = async (): Promise<void> => { signal.throwIfAborted(); await writeFile(path, args.content as string, { encoding: 'utf8', flag: current ? 'w' : 'wx' }) }
+      const write =
+          async (): Promise<void> => {
+        signal.throwIfAborted();
+        await writeFile(path, args.content as string,
+            { encoding: 'utf8', flag: current ? 'w' : 'wx' })
+      }
       try {
-        if (change) await change(path, current ? before : null, args.content as string, write)
+        if (change)
+          await change(path, current ? before : null, args.content as string, write)
         else await write()
       }
       catch (error) {
@@ -48,10 +58,13 @@ export class WriteTool implements WorkspaceTool<WriteToolDetails> {
       }
       const updatedTimestamp = current ? (await stat(path)).mtimeMs : undefined
       signal.throwIfAborted()
-      if (updatedTimestamp !== undefined) readFileState.set(path, updatedTimestamp)
+      if (updatedTimestamp !== undefined)
+        readFileState.set(path, updatedTimestamp)
       const content = args.content as string
       const diff = createTwoFilesPatch(args.path as string, args.path as string, before, content, undefined, undefined, { context: 3 })
-      return { content: [{ type: 'text', text: `已写入：${args.path}` }], details: { preview: createFilePreview(content, diff) } }
+      return {
+        content: [{ type: 'text', text: `已写入：${args.path}` }],
+        details: { preview: createFilePreview(content, diff) } }
     })
   }
 }

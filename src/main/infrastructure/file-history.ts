@@ -52,23 +52,47 @@ export function displayFilePath(path: string, directory: string): string {
   return name && name !== '..' && !name.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) ? name : path
 }
 
-/** 按固定顺序取得整批路径队列，避免整轮恢复与其他应用内写入交错或死锁。 */
+/** 按固定顺序取得整批路径队列，避免整轮恢复与其他应用内写入交错或死锁。
+ * paths：文件路径
+ * operation：撤销步骤
+ * lock是一个递归函数：
+ * 还有文件没有处理，就先进入当前文件的操作队列。
+ * 轮到当前操作后，再继续处理下一个文件。
+ * 所有文件都已经取得执行机会，才调用真正的 operation()。
+ * */
 export function withFileChanges<T>(paths: string[], operation: () => Promise<T>): Promise<T> {
   const ordered = [...new Set(paths)].sort()
-  const lock = (index: number): Promise<T> => index === ordered.length ? operation() : mutateFile(ordered[index], () => lock(index + 1))
+  const lock = (index: number):
+      Promise<T> => index === ordered.length ?
+      operation() :
+      mutateFile(ordered[index], () => lock(index + 1))
   return lock(0)
 }
 
-/** 原子替换已有文本，或删除本轮新建文件；落盘前再次检查当前内容及父目录。 */
+/** 原子替换已有文本，或删除本轮新建文件；落盘前再次检查当前内容及父目录。
+ * 把 before 从 Base64 解码
+ *     ↓
+ * 写入同目录的临时文件
+ *     ↓
+ * 再次核对目标文件内容
+ *     ↓
+ * rename 临时文件，替换目标文件.使用完整副本恢复，不是根据 diff 反向修改。
+ *
+ * */
 export async function restoreFile(path: string, parent: string, before: string | null, after: string | null): Promise<void> {
   const current = await fileVersion(path, parent)
   if (current.content === before) return
   if (current.content !== after) throw new Error(`文件已被后续修改，无法撤销：${path}`)
-  if (before === null) { await unlink(path); return }
+  if (before === null) {
+    await unlink(path);
+    return
+  }
   const temporary = join(dirname(path), `.${basename(path)}.${randomUUID()}.undo`)
   try {
     await writeFile(temporary, Buffer.from(before, 'base64'), { flag: 'wx', mode: current.mode })
     if ((await fileVersion(path, parent)).content !== after) throw new Error(`文件已被后续修改，无法撤销：${path}`)
     await rename(temporary, path)
-  } finally { await unlink(temporary).catch(error => { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }) }
+  } finally {
+    await unlink(temporary).catch(error => { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }) }
 }

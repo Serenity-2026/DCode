@@ -25,9 +25,11 @@ export class EditTool implements WorkspaceTool<EditToolDetails> {
     return mutateFile(path, async () => {
       signal.throwIfAborted()
       const timestamp = readFileState.get(path)
-      if (timestamp === undefined) throw new ToolExecutionError('请先使用 read 读取该文件，再使用 edit 编辑。')
+      if (timestamp === undefined)
+        throw new ToolExecutionError('请先使用 read 读取该文件，再使用 edit 编辑。')
       const ensureUnchanged = async (): Promise<void> => {
-        if ((await stat(path)).mtimeMs !== timestamp) throw new ToolExecutionError('文件修改时间已变化，请重新使用 read 读取后再编辑。')
+        if ((await stat(path)).mtimeMs !== timestamp)
+          throw new ToolExecutionError('文件修改时间已变化，请重新使用 read 读取后再编辑。')
       }
       await ensureUnchanged()
       const data = await readFile(path, { signal })
@@ -37,9 +39,13 @@ export class EditTool implements WorkspaceTool<EditToolDetails> {
       await ensureUnchanged()
       signal.throwIfAborted()
       readFileState.delete(path)
-      const write = async (): Promise<void> => { signal.throwIfAborted(); await writeFile(path, changed.content, 'utf8') }
-      if (change) await change(path, before, changed.content, write)
-      else await write()
+      const write = async ():
+          Promise<void> => {
+        signal.throwIfAborted(); await writeFile(path, changed.content, 'utf8') }
+      if (change)
+        await change(path, before, changed.content, write)
+      else
+        await write()
       const updatedTimestamp = (await stat(path)).mtimeMs
       signal.throwIfAborted()
       readFileState.set(path, updatedTimestamp)
