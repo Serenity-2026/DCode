@@ -3,9 +3,11 @@ import { channels } from '../shared/channels'
 import type { DCodeAPI, StreamEvent } from '../shared/types'
 
 /**
- * renderer 与主进程之间的白名单桥接对象，实现 shared/types 定义的 DCodeAPI。
- * 依赖 Electron ipcRenderer 和共享 channels；contextBridge 只暴露这些业务方法，
- * 不把原始 IPC 对象、Node API 或模型密钥交给界面。
+ * 窗口通过webPreferences: { preload: this.paths.preload }加载,给window提供额外可调用的api
+ * 执行后，React 页面里就能使用：
+ * window.dcode.getState()
+ * window.dcode.send(...)
+ * 执行contextBridge.exposeInMainWorld后，React 页面里就能使用：window.dcode.getState()然后被ipcrouter捕捉
  */
 const api: DCodeAPI = {
   /** 向主进程请求 StateService.snapshot，用于首次加载界面。 */
@@ -48,5 +50,10 @@ const api: DCodeAPI = {
     return () => { ipcRenderer.removeListener(channels.stream, listener) }
   }
 }
-
+/**
+ * contextBridge	Electron 提供的跨 JavaScript 上下文桥接工具
+ * exposeInMainWorld	把指定接口提供给页面自己的 JavaScript 环境
+ * 'dcode'	页面访问这个接口时使用的名字
+ * api	要提供给页面的对象和方法
+ */
 contextBridge.exposeInMainWorld('dcode', api)

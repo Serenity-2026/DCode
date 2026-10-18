@@ -42,8 +42,13 @@ export class StateService {
   /** 由仓库回滚数据，服务同时回滚认证身份，保证账号与会话修改在同一事务内。 */
   transaction<T>(update: () => T): T {
     const previousAuth = this.authenticatedUserId
-    try { return this.repository.transaction(update) }
-    catch (error) { this.authenticatedUserId = previousAuth; throw error }
+    try {
+      return this.repository.transaction(update)
+    }
+    catch (error) {
+      this.authenticatedUserId = previousAuth;
+      throw error
+    }
   }
 
   /** Auth 完成密码/会话验证后调用，保持相同账号的最后会话选择。 */
@@ -88,6 +93,7 @@ export class StateService {
 
   /** 给公开消息附加本轮文件摘要；恢复副本和内部磁盘位置不进入 renderer。 */
   publicMessage(message: Message, conversationId: string): Message {
+    //取出message对象属性，...表示把没有被前面取走的属性，收集到 publicMessage 对象里。
     const { fileChanges: _ignored, ...publicMessage } = message
     const changes = (this.state.fileChanges || []).filter(change => change.conversationId === conversationId && change.messageId === message.id && (change.before !== change.after || change.status === 'reverted'))
       .map(({ id, path, additions, deletions, status, preview }) => ({ id, path, additions, deletions, status, preview }))

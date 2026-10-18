@@ -87,6 +87,7 @@ export async function startApplication(): Promise<void> {
       icon, preload: join(here, '../preload/index.cjs'), renderer: join(here, '../renderer/index.html')
     }, reportError)
     windows = mainWindow
+    //ElectronDesktop 负责“具体怎么操作系统”，DesktopService 负责“业务上应该怎么做”,就像java上的service层和mapper层，MainWindow是窗口实现类
     const desktop = new DesktopService(state, new ElectronDesktop(() => mainWindow.current))
     const router = new IpcRouter(() => mainWindow.current)
     registerAuthController(router, auth, generation)

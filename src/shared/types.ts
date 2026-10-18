@@ -26,6 +26,11 @@ export interface FileChange {
   path: string
   additions: number
   deletions: number
+  /*
+  * pending:已保存修改前内容和预期修改后内容，但写入结果尚未完成记录
+  * applied:已完成写后记录，可以根据保存的内容检查、撤销这次变化
+  * reverted:已完成撤销，或者恢复检查确认文件已经处于修改前的内容
+  * */
   status: 'pending' | 'applied' | 'reverted'
   preview: FilePreview
 }

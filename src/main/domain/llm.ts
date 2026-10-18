@@ -69,7 +69,7 @@ export interface ToolWorkspace {
   waitForChanges?(): Promise<void>
 }
 
-/** 文件工具把实际写操作交给应用记录，运行层不依赖会话服务或仓库。 */
+/** 对文件的修改发生在哪轮conversation和哪轮messageId */
 export interface FileChangeTurn { conversationId: string; messageId: string }
 export type RecordFileChange = (turn: FileChangeTurn, path: string, before: string | null, after: string, write: () => Promise<void>) => Promise<void>
 

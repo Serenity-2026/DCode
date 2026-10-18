@@ -3,7 +3,9 @@ import type { DesktopAccess } from '../domain/ports'
 import { textInput } from '../domain/validation'
 import { StateService } from './state-service'
 
-/** 桌面操作的业务入口，依赖 StateService 校验登录及 DesktopAccess 执行原生能力，不直接使用 Electron。 */
+/** 桌面操作的业务入口，依赖 StateService 校验登录及 DesktopAccess 执行原生能力，不直接使用 Electron。
+ * 相当于Java项目中的service层
+ * */
 export class DesktopService {
   private projectParent?: { userId: string; directory: string }
   /** 注入系统适配与当前账号状态，控制器仅调用这些受限业务方法。 */

@@ -37,6 +37,7 @@ export class MainWindow {
     })
     this.window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     this.window.webContents.on('will-navigate', event => event.preventDefault())
+    //todo:当前版本没有使用这些权限的功能，因此默认拒绝；后续增加功能时，应配套增加权限申请与授权规则。
     this.window.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
     this.window.once('ready-to-show', () => this.window?.show())
     // 关闭前停止并保存全部任务；空闲会话也重试此前失败的保存。

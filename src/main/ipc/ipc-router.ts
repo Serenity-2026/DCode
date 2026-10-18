@@ -8,7 +8,10 @@ export class IpcRouter {
   /** 装配层提供当前窗口，不在 Router 中持有业务服务或仓库。 */
   constructor(private getWindow: () => BrowserWindow | null) {}
 
-  /** 注册一个请求接口，只接受当前窗口主 frame；业务异常统一转换为 Result。 */
+  /** 注册一个请求接口，只接受当前窗口主 frame；业务异常统一转换为 Result。 *
+   * channel：要监听的请求通道
+   * handler：收到请求以后执行的业务函数
+   */
   handle<T = void>(channel: string, handler: (input: T) => unknown): void {
     ipcMain.handle(channel, async (event, input): Promise<Result<unknown>> => {
       try {
@@ -21,7 +24,7 @@ export class IpcRouter {
     })
   }
 
-  /** 请求准备与状态修改保持短暂互斥；任务是否忙碌由会话服务检查，Router 不依赖生成状态。 */
+  /**相当于锁，保护不能被中断 覆盖的操作 */
   async exclusive<T>(operation: () => T | Promise<T>): Promise<T> {
     if (this.operationBusy) throw new Error('请等待当前操作完成。')
     this.operationBusy = true

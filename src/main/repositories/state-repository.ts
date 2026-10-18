@@ -97,7 +97,9 @@ export class StateRepository {
     }
   }
 
-  /** 保存一次原子修改；业务回调或磁盘保存失败时恢复原数据，由 Service 恢复其运行时身份。 */
+  /** 防止内存写入成功，磁盘写入失败导致未更新。只要报错就会回复内存状态
+   * 使磁盘和内存保持状一致
+   * */
   transaction<T>(update: () => T): T {
     const previous = structuredClone(this.state)
     try {

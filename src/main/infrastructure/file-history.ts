@@ -9,7 +9,11 @@ import { mutateFile } from './tools/file-operations'
 /** 文本转为完整字节副本；空文本与不存在的文件保持不同。 */
 export function fileBytes(text: string | null): string | null { return text === null ? null : Buffer.from(text, 'utf8').toString('base64') }
 
-/** 捕获真实父目录和普通文件内容，拒绝链接与特殊文件，供记录和恢复共用。 */
+/** {
+ content: '当前文件内容的 Base64 编码',
+ parentDirectory: '真实父目录路径',
+ mode: 文件权限
+ } */
 export async function fileVersion(path: string, expectedParent?: string): Promise<{ content: string | null; parentDirectory: string; mode?: number }> {
   const parentDirectory = await realpath(dirname(path))
   if (expectedParent && parentDirectory !== expectedParent) throw new Error('文件所在目录已变化，无法撤销。')
@@ -25,7 +29,11 @@ export async function fileVersion(path: string, expectedParent?: string): Promis
   return { content, parentDirectory, mode: info.mode & 0o777 }
 }
 
-/** 使用文件首次修改前和最后修改后的全文计算净增删；仅预览被截断，恢复副本不截断。 */
+/**
+ * additions: 增加的行数,
+ * deletions: 删除的行数,
+ * preview: 内容和差异预览
+  */
 export function describeChange(path: string, before: string | null, after: string | null): Pick<FileChange, 'additions' | 'deletions' | 'preview'> {
   const oldText = before === null ? '' : Buffer.from(before, 'base64').toString('utf8')
   const newText = after === null ? '' : Buffer.from(after, 'base64').toString('utf8')

@@ -19,7 +19,7 @@ export class AgentLoop {
     // 只发送模型声明；handler 与 executionMode 留在本地执行层。
     const definitions = context.tools.map(({ tool: { name, description, parameters } }) => ({ name, description, parameters }))
     const ids = new Set<string>()
-    for (let turn = 0; turn < 8; turn++) {
+    for (let turn = 0; ; turn++) {
       controller.signal.throwIfAborted()
       emit({ type: 'turn_start' })
       //本轮模型回复即将开始，请建立一个空的 assistant 草稿，准备接收后面的文本增量。

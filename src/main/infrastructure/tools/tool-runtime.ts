@@ -24,7 +24,9 @@ export class ToolRuntime implements ToolWorkspace {
   private turn?: FileChangeTurn
   private readonly changes = new Set<Promise<void>>()
 
-  /** 应用注入持久化回调；独立使用工具时仍可不启用变更记录。 */
+  /**
+   * 外部传入如何记录文件change,现在是(turn, path, before, after, write) => changes.record(turn, path, before, after, write)
+   * */
   constructor(private readonly recordChange?: RecordFileChange) {}
 
   /** 模型取消后，实际文件写入和恢复副本保存仍可能尚未结束。 */
@@ -42,19 +44,47 @@ export class ToolRuntime implements ToolWorkspace {
     this.directory = directory
   }
 
-  /** 绑定任意本机工具，执行时捕获 cwd，并统一检查取消和转换系统错误。 */
+  /** 把一个需要“工作目录等额外信息”的文件工具，包装成 Agent 可以直接调用的工具。
+   * Agent在执行工具时,会执行被包装后的execute()，structuredClone为深拷贝
+   * */
   bind(tool: WorkspaceTool): AgentTool {
     return { name: tool.name, description: tool.description, parameters: structuredClone(tool.parameters), executionMode: tool.executionMode, execute: async (args, signal) => {
       signal.throwIfAborted()
       const cwd = this.directory
       if (!cwd || !isAbsolute(cwd)) throw new ToolExecutionError('请先选择工作文件夹。')
       const turn = this.turn
-      const change: ToolExecutionContext['change'] = this.recordChange && turn ? async (path, before, after, write) => {
-        const pending = this.recordChange!(turn, path, before, after, write)
-        this.changes.add(pending)
-        try { await pending } finally { this.changes.delete(pending) }
-      } : undefined
-      try { return await tool.execute(args, signal, { cwd, readFileState: this.readFileState, temporaryDirectories: this.temporaryDirectories, change }) }
+      const change: ToolExecutionContext['change'] =
+          //有记录文件修改的能力、知道本次修改属于哪一轮才开启文件记录功能，为工具执行上下文的change属性赋值
+          this.recordChange && turn ?
+              /*
+                turn	conversationId: string; messageId: string
+                path	修改的文件路径
+                before	修改前内容
+                after	计划写入的内容
+                write	真正写文件的函数
+                */
+                async (path, before, after, write) => {
+                //这个集合存的是“还没完成的文件修改任务”，不是文件版本内容。 真正的版本内容由 FileChanges 保存。!是非空断言,ts不回去检查其是否为null
+                const pending = this.recordChange!(turn, path, before, after, write)
+                this.changes.add(pending)
+                try {
+                  await pending
+                }
+                finally {
+                  this.changes.delete(pending)
+                }} : undefined;
+                //上面就是在准备上下文,准备好后再执行工具
+                try {
+                  /*cwd	解析相对文件路径
+                    readFileState	检查文件是否读过、修改时间是否变化
+                    temporaryDirectories	登记以后需要清理的临时目录
+                    change	写文件前保存恢复记录，再执行写入
+                    因此不是每次执行工具都必然记录修改：读取工具不需要写文件，也就不需要调用 change()，只是我们会把recordChange这个函数
+                    提供给所有工具使用
+                  * */
+                  return await tool.execute(args, signal,
+            { cwd, readFileState: this.readFileState, temporaryDirectories: this.temporaryDirectories, change }
+        ) }
       catch (error) {
         signal.throwIfAborted()
         const code = (error as NodeJS.ErrnoException)?.code
