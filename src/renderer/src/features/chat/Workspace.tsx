@@ -279,6 +279,7 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
   /** 使用 Ant Design modal 确认删除会话，再交给 act 与主进程 StateService 检查账号归属。 */
   function confirmDelete(id: string, name: string): void {
     modal.confirm({
+      centered: true,
       title: '删除这段对话？', content: name,
       okText: '删除', cancelText: '取消', okButtonProps: { danger: true },
       onOk: async () => { if (!await act({ type: 'conversation:delete', id })) throw new Error('删除失败') }
@@ -288,6 +289,7 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
   /** 删除应用内分组和其全部会话，确认时说明范围；磁盘文件不参与删除。 */
   function confirmDeleteFolder(id: string, name: string, count: number): void {
     modal.confirm({
+      centered: true,
       title: '删除此文件夹？', content: `将删除“${name}”及其 ${count} 段对话，保留磁盘文件。`,
       okText: '删除', cancelText: '取消', okButtonProps: { danger: true },
       onOk: async () => { if (!await act({ type: 'folder:delete', id })) throw new Error('删除失败') }
