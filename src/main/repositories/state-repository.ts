@@ -3,6 +3,7 @@ import { dirname, isAbsolute } from 'node:path'
 import type { StoredState } from '../domain/state'
 import { isFilePreview, reasoningEfforts, validateAttachments } from '../../shared/context'
 import { modelApis } from '../../shared/model-api'
+import { isTypography } from '../../shared/appearance'
 
 /** 校验当前磁盘结构、唯一性及账号/会话归属，不转换其他版本的数据。 */
 function validState(value: unknown): boolean {
@@ -15,6 +16,7 @@ function validState(value: unknown): boolean {
     if (!u || typeof u.id !== 'string' || ids.has(u.id) || typeof u.name !== 'string' || !u.name.trim() || typeof u.createdAt !== 'string') return false
     ids.add(u.id)
     if (!['light', 'dark'].includes(u.theme)) return false
+    if (u.typography !== undefined && !isTypography(u.typography)) return false
     if (typeof u.username !== 'string' || typeof u.passwordHash !== 'string' || typeof u.passwordSalt !== 'string' || usernames.has(u.username)) return false
     usernames.add(u.username)
     if (!Array.isArray(u.providers) || typeof u.fastMode !== 'boolean') return false

@@ -1,7 +1,7 @@
 @import url('antd/dist/reset.css');
 
 :root {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif;
+  font-family: var(--app-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif);
   color: #292925;
   background: #fcfcfa;
   font-synthesis: none;
@@ -140,7 +140,7 @@ button { -webkit-app-region: no-drag; }
 .message-label .brand-mark { width: 23px; height: 23px; }
 .message-label .avatar { width: 23px; height: 23px; font-size: 10px; }
 .message-time { color: var(--muted); font-size: 10px; font-weight: 400; margin-left: auto; }
-.user-content { margin-left: 32px; line-height: 1.85; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.user-content { margin-left: 32px; line-height: 1.85; font-size: var(--app-font-size, 14px); white-space: pre-wrap; overflow-wrap: anywhere; }
 .assistant-content { margin-left: 32px; }
 .assistant-timeline { min-width: 0; }
 .file-changes-card { margin-top: 20px; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--panel); }
@@ -209,7 +209,7 @@ button { -webkit-app-region: no-drag; }
 .shell[data-theme="dark"] .file-code-line[data-kind="addition"] { color: #8ecb9f; }
 .shell[data-theme="dark"] .file-code-line[data-kind="deletion"] { color: #df9a9a; }
 .file-preview-footer { display: flex; align-items: center; gap: 12px; flex-shrink: 0; padding: 9px 15px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; }
-.markdown { font-size: 14px; line-height: 1.85; overflow-wrap: anywhere; }
+.markdown { font-size: var(--app-font-size, 14px); line-height: 1.85; overflow-wrap: anywhere; }
 .markdown p { margin: 0 0 14px; }
 .markdown h1, .markdown h2, .markdown h3 { font-size: 18px; margin: 22px 0 12px; font-weight: 600; }
 .markdown ul, .markdown ol { padding-left: 24px; margin-bottom: 14px; }
@@ -234,7 +234,7 @@ button { -webkit-app-region: no-drag; }
 .composer-area { padding: 10px 38px 25px; flex-shrink: 0; }
 .composer { max-width: 730px; margin: 0 auto; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); padding: 15px 16px 12px; box-shadow: 0 5px 20px #00000004, 0 1px 3px #00000003; }
 .composer:focus-within { border-color: #a5b5a8; box-shadow: 0 5px 20px #00000006; }
-.composer textarea { padding: 0 2px; color: var(--text); font-size: 13px; line-height: 1.75; outline: none !important; box-shadow: none !important; }
+.composer textarea { padding: 0 2px; color: var(--text); font-size: var(--app-font-size, 14px); line-height: 1.75; outline: none !important; box-shadow: none !important; }
 .composer-input { position: relative; }
 .composer-input[data-generating='true'], .composer-input[data-generating='true'] textarea { cursor: none !important; }
 .generation-cursor { position: absolute; z-index: 1; left: var(--cursor-x, 50%); top: var(--cursor-y, 50%); width: 18px; height: 18px; transform: translate(-50%, -50%); opacity: 0; pointer-events: none; }
@@ -315,7 +315,20 @@ button { -webkit-app-region: no-drag; }
 .settings-sidebar .settings-nav-item[aria-current='page'] { background: var(--settings-hover); font-weight: 600; }
 .settings-nav-item .anticon { color: var(--settings-muted); font-size: 16px; }
 .settings-nav-item[aria-current='page'] .anticon { color: var(--settings-text); }
-.settings-signature { margin: auto 14px 0; padding-top: 28px; color: var(--settings-muted); font-size: 11px; letter-spacing: 1.5px; }
+.settings-nav-group { display: grid; gap: 3px; }
+.settings-nav-group + .settings-nav-group { margin-top: 18px; }
+.settings-nav-group h3 { margin: 0 14px 7px; color: var(--settings-muted); font-size: 11px; font-weight: 500; }
+.settings-account { margin-top: auto; padding-top: 20px; color: var(--settings-text); }
+.settings-account .user-button { color: var(--settings-text); }
+.settings-account .user-caption { color: var(--settings-muted); }
+.settings-font-select { width: 180px; max-width: 60%; }
+.settings-font-preview { margin-top: 24px; padding: 22px; border: 1px solid var(--settings-line); border-radius: 16px; overflow-wrap: anywhere; }
+.settings-font-preview > span { color: var(--settings-muted); font-size: 12px; }
+.settings-font-preview p { margin: 12px 0 0; }
+.provider-address-option { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
+.provider-address-option > span:last-child { min-width: 0; }
+.provider-address-option strong { display: block; font-weight: 500; }
+.provider-address-option small { display: block; opacity: .7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .settings-content { min-width: 0; overflow-y: auto; padding: 34px 40px 36px; scrollbar-gutter: stable; }
 .settings-sidebar, .settings-content { scrollbar-width: thin; scrollbar-color: var(--settings-line) transparent; }
 .settings-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-right: 12px; min-height: 32px; }

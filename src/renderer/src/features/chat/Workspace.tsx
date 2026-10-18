@@ -3,8 +3,8 @@ import { Alert, App as AntApp, Button, Dropdown, Input, Modal } from 'antd'
 import {
   ArrowUpOutlined, PlusOutlined, SearchOutlined, MessageOutlined, MoreOutlined,
   SettingOutlined, CodeOutlined, BugOutlined, BranchesOutlined, CopyOutlined,
-  ReloadOutlined, StopOutlined, DeleteOutlined, EditOutlined, LogoutOutlined,
-  DownOutlined, RightOutlined, LoadingOutlined
+  ReloadOutlined, StopOutlined, DeleteOutlined, EditOutlined,
+  RightOutlined, LoadingOutlined
 } from '@ant-design/icons'
 import type { Action, Attachment, Message, ModelRefresh, Result, Snapshot, StreamEvent, ToolExecution } from '../../../../shared/types'
 import { estimateContext, validateAttachments } from '../../../../shared/context'
@@ -379,12 +379,6 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
         </section>)}
       </nav>
       <div className="sidebar-bottom">
-        <Dropdown disabled={interacting} trigger={['click']} menu={{ items: [
-          { key: 'rename', label: '编辑名称', icon: <EditOutlined /> },
-          { key: 'logout', label: '退出登录', icon: <LogoutOutlined /> }
-        ], onClick: ({ key }) => key === 'logout' ? void logout() : setEdit({ type: 'user', id: user.id, value: user.name }) }}>
-          <Button type="text" className="user-button" disabled={interacting} aria-label="账号菜单"><span className="avatar">{user.name.slice(0, 1)}</span><span className="user-info"><span className="user-name">{user.name}</span><span className="user-caption">{user.username}</span></span><DownOutlined /></Button>
-        </Dropdown>
         <Button type="text" className="settings-button" icon={<SettingOutlined />} aria-label="设置" disabled={busy} onClick={() => setSettingsOpen(true)}>设置</Button>
       </div>
     </aside>} header={<><span className="titlebar-label">工作台</span><span className="titlebar-divider" /><span className="titlebar-title">{active?.title || '新对话'}</span><span className="connection"><i className={`status-dot${snapshot.config.configured ? '' : ' missing'}`} />{snapshot.config.configured ? new URL(snapshot.config.baseUrl).hostname : '未配置模型'}</span></>}>
@@ -427,7 +421,7 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
         <ComposerTools snapshot={snapshot} busy={busy} modelsLoading={modelsLoading} usedTokens={usedTokens} onAdd={kind => void addAttachments(kind)} onModel={(providerId, model) => void act({ type: 'model:select', providerId, model })} onRefresh={() => void refreshModels()} onSettings={() => setSettingsOpen(true)} onFastMode={() => void act({ type: 'fast-mode', enabled: !snapshot.fastMode })} onEffort={effort => act({ type: 'reasoning-effort', effort })} sendButton={generating ? <Button className="send-button" type="primary" icon={<StopOutlined />} loading={stopping} aria-label="停止生成" onClick={() => void stop()} /> : <Button className="send-button" type="primary" icon={<ArrowUpOutlined />} disabled={busy || (!draft.trim() && !attachments.length) || !snapshot.config.configured} loading={pending} aria-label="发送消息" onClick={() => void send()} />} />
       </div><div className="footer-note"><span>{active ? `${active.messages.filter(m => m.role === 'user').length} 条提问` : 'Shift + Enter 换行'}</span><span>DCode / {active?.model || modelName}</span></div></div>
     </WorkspaceLayout>
-    {settingsOpen && <ModelSettings snapshot={snapshot} busy={busy} onClose={() => setSettingsOpen(false)} onSaved={installSnapshot} onTheme={value => void act({ type: 'theme', theme: value })} onModel={(providerId, model) => void act({ type: 'model:select', providerId, model })} />}
+    {settingsOpen && <ModelSettings snapshot={snapshot} busy={busy} onClose={() => setSettingsOpen(false)} onSaved={installSnapshot} onTypography={typography => void act({ type: 'typography', typography })} onRenameUser={() => { setSettingsOpen(false); setEdit({ type: 'user', id: user.id, value: user.name }) }} onLogout={() => void logout()} onTheme={value => void act({ type: 'theme', theme: value })} onModel={(providerId, model) => void act({ type: 'model:select', providerId, model })} />}
     {projectOpen && <ProjectDialog onClose={() => setProjectOpen(false)} onCreated={next => { enterConversation(next); setProjectOpen(false) }} />}
     <Modal title={edit?.type === 'user' ? '编辑用户名称' : '重命名聊天'} open={Boolean(edit && !edit.closing)} centered={edit?.type === 'conversation'} width={edit?.type === 'conversation' ? 480 : undefined}
       className={edit?.type === 'conversation' ? `rename-chat-modal rename-chat-${snapshot.theme}` : undefined}

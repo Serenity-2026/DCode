@@ -4,6 +4,7 @@ import { UpOutlined, DownOutlined, SafetyOutlined, PlusOutlined, FileOutlined, F
 import type { ReasoningEffort, Snapshot } from '../../../../../shared/types'
 import { EffortControl } from './EffortControl'
 import { ModelIcon } from '../../../components/ModelIcon'
+import { selectionTheme } from '../../../components/selection-theme'
 
 const permissions = [{ key: 'default', label: '默认权限' }, { key: 'readonly', label: '只读权限' }, { key: 'full', label: '完全访问权限' }]
 
@@ -20,7 +21,6 @@ export function ComposerTools({ snapshot, busy, modelsLoading, usedTokens, onAdd
   const contextWindow = detail?.contextWindow
   const percent = contextWindow ? Math.min(100, usedTokens / contextWindow * 100) : undefined
   const choices = snapshot.providers.flatMap(item => item.availableModels.map(model => ({ key: JSON.stringify([item.id, model]), providerId: item.id, model })))
-  const dark = snapshot.theme === 'dark'
 
   return <div className="composer-tools">
     <div className="composer-left">
@@ -29,12 +29,7 @@ export function ComposerTools({ snapshot, busy, modelsLoading, usedTokens, onAdd
     ] }], onClick: ({ key }) => { if (key === 'file' || key === 'folder') onAdd(key) } }}>
       <Button className="attachment-add" type="text" disabled={busy} icon={<PlusOutlined />} aria-label="添加附件" />
     </Dropdown>
-      <ConfigProvider theme={{ token: { motion: false }, components: { Dropdown: {
-        colorBgElevated: dark ? '#292c28' : '#ffffff', colorText: dark ? '#edf0eb' : '#292e2a',
-        colorTextDescription: dark ? '#abb5ab' : '#687268', colorPrimary: dark ? '#e1eee4' : '#303b33',
-        controlItemBgHover: dark ? '#353b35' : '#f4f6f3', controlItemBgActive: dark ? '#3b4a3f' : '#eaf0e9',
-        controlItemBgActiveHover: dark ? '#435448' : '#dfe8de', borderRadiusLG: 14
-      } } }}>
+      <ConfigProvider theme={selectionTheme(snapshot.theme)}>
       <Dropdown disabled={busy} trigger={['click']} placement="topLeft" menu={{ selectedKeys: [permission], items: [{ key: 'permissions', type: 'group', label: '权限预览 · 尚未生效', children: permissions }], onClick: ({ key }) => setPermission(key) }}>
         <Button className="permission-selector" type="text" disabled={busy} aria-label="权限控制（仅预览）"><SafetyOutlined /><span>{permissions.find(item => item.key === permission)!.label}</span><span className="permission-preview">预览</span><DownOutlined /></Button>
       </Dropdown>

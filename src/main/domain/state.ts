@@ -1,4 +1,5 @@
 import type { Conversation, FileChange, ProviderProfile, Theme, User } from '../../shared/types'
+import type { Typography } from '../../shared/appearance'
 
 /** 主进程保存的完整字节快照，以 base64 保留 BOM、换行和空文件；null 表示文件不存在。 */
 export interface StoredFileChange extends FileChange {
@@ -16,6 +17,7 @@ export interface StoredUser extends User {
   passwordHash: string
   passwordSalt: string
   theme: Theme
+  typography?: Typography
   providers: (ProviderProfile & { encryptedApiKey: string })[]
   activeProviderId: string | null
   selectedModel: string | null

@@ -9,12 +9,14 @@ import doubao from '@lobehub/icons-static-svg/icons/doubao-color.svg'
 import kimi from '@lobehub/icons-static-svg/icons/kimi-color.svg'
 import mistral from '@lobehub/icons-static-svg/icons/mistral-color.svg'
 import grok from '@lobehub/icons-static-svg/icons/grok.svg'
+import mimo from '@lobehub/icons-static-svg/icons/xiaomimimo.svg'
 
 const brands = [
+  { name: 'mimo', pattern: /mimo|xiaomi|小米/i, src: mimo, color: '#ffeadb' },
   { name: 'claude', pattern: /claude|anthropic/i, src: claude, color: '#f8e9e2' },
   { name: 'deepseek', pattern: /deepseek/i, src: deepseek, color: '#e9efff' },
   { name: 'gemini', pattern: /gemini|google/i, src: gemini, color: '#edf2ff' },
-  { name: 'glm', pattern: /glm|zhipu|智谱|z\.ai/i, src: glm, color: '#e8efff' },
+  { name: 'glm', pattern: /glm|zhipu|bigmodel|智谱|z\.ai/i, src: glm, color: '#e8efff' },
   { name: 'qwen', pattern: /qwen|通义|千问|dashscope/i, src: qwen, color: '#f0eaff' },
   { name: 'doubao', pattern: /doubao|豆包|volcengine|火山/i, src: doubao, color: '#f7ecff' },
   { name: 'kimi', pattern: /kimi|moonshot|月之暗面/i, src: kimi, color: '#e9f6ee' },

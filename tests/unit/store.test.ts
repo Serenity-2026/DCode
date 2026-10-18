@@ -10,6 +10,30 @@ import type { Action } from '../../src/shared/types'
 afterEach(() => { vi.restoreAllMocks(); cleanup() })
 
 describe('account-owned conversations', () => {
+  it('persists typography per account and reads older state without typography', async () => {
+    const { store, auth, path } = await create()
+    expect(store.snapshot().typography).toEqual({ fontFamily: 'system', fontSize: 14 })
+    store.apply({ type: 'typography', typography: { fontFamily: 'serif', fontSize: 18 } })
+    const restored = new StateService(new StateRepository(path))
+    restored.authenticate(store.requireUser().id)
+    expect(restored.snapshot().typography).toEqual({ fontFamily: 'serif', fontSize: 18 })
+    expect(() => store.apply({ type: 'typography', typography: { fontFamily: 'system', fontSize: 999 } })).toThrow('无效字体或字号')
+    expect(() => store.apply({ type: 'typography', typography: { fontFamily: '__proto__', fontSize: 14 } } as unknown as Action)).toThrow('无效字体或字号')
+    expect(store.snapshot().typography).toEqual({ fontFamily: 'serif', fontSize: 18 })
+    auth.logout()
+    await auth.register({ username: 'font-user', password: 'font-user-password' })
+    expect(store.snapshot().typography).toEqual({ fontFamily: 'system', fontSize: 14 })
+    const disk = JSON.parse(readFileSync(path, 'utf8')) as StoredState
+    for (const user of disk.users) delete user.typography
+    writeFileSync(path, JSON.stringify(disk))
+    const legacy = new StateService(new StateRepository(path))
+    legacy.authenticate(disk.users[0].id)
+    expect(legacy.snapshot().typography).toEqual({ fontFamily: 'system', fontSize: 14 })
+    disk.users[0].typography = { fontFamily: 'system', fontSize: 999 }
+    writeFileSync(path, JSON.stringify(disk))
+    expect(() => new StateRepository(path)).toThrow('无法读取本地数据')
+  })
+
   it('rolls back both repository data and service authentication when persistence fails', async () => {
     const { store, path } = await create()
     const repository = new StateRepository(path)

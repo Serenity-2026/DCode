@@ -1,3 +1,5 @@
+import type { Typography } from './appearance'
+
 /** 账号保存的外观偏好，由 Root 映射到 Ant Design 主题。 */
 export type Theme = 'light' | 'dark'
 /** 服务使用的实际传输协议，与模型名称无关。 */
@@ -83,6 +85,7 @@ export interface Snapshot {
   activeConversationId: string | null
   conversations: Conversation[]
   theme: Theme
+  typography?: Typography
   providers: ProviderProfile[]
   activeProviderId: string | null
   selectedModel: string | null
@@ -108,6 +111,7 @@ export type Action =
   | { type: 'fast-mode'; enabled: boolean }
   | { type: 'reasoning-effort'; effort: ReasoningEffort | null }
   | { type: 'theme'; theme: Theme }
+  | { type: 'typography'; typography: Typography }
 
 /** 调用时的有界文本快照；修改工具另附统一差异，不从界面读取任意磁盘路径。 */
 export interface FilePreview { content: string; diff?: string; startLine?: number; totalLines?: number; truncated?: boolean }

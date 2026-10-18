@@ -4,6 +4,7 @@ import zhCN from 'antd/locale/zh_CN'
 import type { Snapshot } from '../../../shared/types'
 import { AuthScreen } from '../features/auth/AuthScreen'
 import { Workspace } from '../features/chat/Workspace'
+import { defaultTypography, fontFamilies } from '../../../shared/appearance'
 
 /**
  * 界面根组件：通过 preload 的 window.dcode 读取 Snapshot，并配置 Ant Design 主题与提示容器。
@@ -20,9 +21,15 @@ export default function Root(): ReactNode {
     }).catch(() => setError('无法连接桌面服务，请重启应用。'))
   }, [])
   const dark = snapshot?.theme === 'dark'
+  const typography = snapshot?.typography || defaultTypography
+  const fontFamily = fontFamilies[typography.fontFamily].value
+  useEffect(() => {
+    document.documentElement.style.setProperty('--app-font-family', fontFamily)
+    document.documentElement.style.setProperty('--app-font-size', `${typography.fontSize}px`)
+  }, [fontFamily, typography.fontSize])
   return <ConfigProvider locale={zhCN} button={{ autoInsertSpace: false }} theme={{
     algorithm: dark ? theme.darkAlgorithm : theme.defaultAlgorithm,
-    token: { colorPrimary: dark ? '#8ac8a3' : '#303b33', borderRadius: 8, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif' }
+    token: { colorPrimary: dark ? '#8ac8a3' : '#303b33', borderRadius: 8, fontFamily, fontSize: typography.fontSize }
   }}><AntApp>
     {snapshot ? snapshot.activeUserId ? <Workspace key={snapshot.activeUserId} snapshot={snapshot} setSnapshot={setSnapshot} /> : <AuthScreen onLogin={setSnapshot} /> : error ? <div className="load-error"><Alert title={error} type="error" showIcon /></div> : <div className="loading">正在打开工作台…</div>}
   </AntApp></ConfigProvider>

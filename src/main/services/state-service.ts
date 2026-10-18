@@ -4,6 +4,7 @@ import { modelEfforts, resolveEffort, selectedEffort, validateAttachments } from
 import type { StoredState, StoredUser } from '../domain/state'
 import { textInput } from '../domain/validation'
 import { StateRepository } from '../repositories/state-repository'
+import { defaultTypography, isTypography } from '../../shared/appearance'
 
 /** 管理认证身份、账号隔离、偏好、会话及公开快照；依赖 StateRepository 保存数据，Auth/Models/AgentSession 调用业务方法。 */
 export class StateService {
@@ -84,6 +85,7 @@ export class StateService {
       activeConversationId: user ? this.state.activeConversationId : null,
       conversations: user ? this.state.conversations.filter(c => c.userId === user.id).map(c => ({ ...c, messages: c.messages.map(message => this.publicMessage(message, c.id)) })) : [],
       theme: user?.theme || 'light',
+      typography: user?.typography || defaultTypography,
       providers: user?.providers.map(({ encryptedApiKey: _secret, ...profile }) => profile) || [],
       activeProviderId: user?.activeProviderId || null, selectedModel: user?.selectedModel || null, fastMode: user?.fastMode || false,
       reasoningEffort: selectedEffort(selected, user?.selectedModel || null),
@@ -177,6 +179,10 @@ export class StateService {
         case 'theme':
           if (!['light', 'dark'].includes(action.theme)) throw new Error('无效主题。')
           currentUser.theme = action.theme
+          break
+        case 'typography':
+          if (!isTypography(action.typography)) throw new Error('无效字体或字号。')
+          currentUser.typography = { fontFamily: action.typography.fontFamily, fontSize: action.typography.fontSize }
           break
         default: throw new Error('无效操作。')
       }
