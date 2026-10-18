@@ -39,6 +39,8 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
   const [modelsLoading, setModelsLoading] = useState(snapshot.providers.length > 0)
   const initialRefresh = useRef<Promise<Result<ModelRefresh>> | null>(null)
   const [edit, setEdit] = useState<{ type: 'user' | 'conversation'; id: string; value: string } | null>(null)
+  const [selectingConversation, setSelectingConversation] = useState<string | null>(null)
+  const nameInput = useRef<React.ComponentRef<typeof Input>>(null)
   const streamEvents = useRef(new Map<string, StreamEvent>())
   const scroll = useRef<HTMLDivElement>(null)
   const follow = useRef(true)
@@ -157,6 +159,13 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
     } catch { void toast.error('操作失败，请重试。'); return false }
     finally { inFlight.current = false; setPending(false) }
   }, [installSnapshot, toast, snapshot.activeConversationId])
+
+  async function saveName(): Promise<void> {
+    if (!edit || busy || !edit.value.trim()) return
+    const value = edit.value.trim()
+    const ok = await act(edit.type === 'user' ? { type: 'user:rename', id: edit.id, name: value } : { type: 'conversation:rename', id: edit.id, title: value })
+    if (ok) setEdit(null)
+  }
 
   /** 新建时选择目录，文件夹菜单则复用已有会话目录；后台任务继续运行。 */
   const createConversation = useCallback(async (sourceId?: string): Promise<void> => {
@@ -355,7 +364,12 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
           </Dropdown>
           <div className="folder-motion" data-expanded={!collapsedFolders.has(folder.directory)} aria-hidden={collapsedFolders.has(folder.directory)} inert={collapsedFolders.has(folder.directory)}>
           <div className="folder-conversations">{folder.conversations.map((c, index) => <div className={`history-item${c.id === active?.id ? ' selected' : ''}`} key={c.id} style={{ transitionDelay: !collapsedFolders.has(folder.directory) ? `${Math.min(index, 6) * 25}ms` : '0ms' }}>
-          <Button type="text" className="history-button" icon={c.messages.some(m => m.status === 'streaming') ? <LoadingOutlined spin /> : <MessageOutlined />} aria-label={c.title} disabled={interacting} title={c.title} onClick={() => void act({ type: 'conversation:select', id: c.id })}><span className="history-title">{c.title}</span></Button>
+          <Button type="text" className="history-button" icon={c.messages.some(m => m.status === 'streaming') ? <LoadingOutlined spin /> : <MessageOutlined />} aria-label={c.title} disabled={interacting && selectingConversation !== c.id} title={c.title} onClick={event => {
+            if (event.detail > 1 || interacting || c.id === active?.id) return
+            // 切换期间保留目标按钮的双击事件；第二次点击不重复提交选择请求。
+            setSelectingConversation(c.id)
+            void act({ type: 'conversation:select', id: c.id }).finally(() => setSelectingConversation(null))
+          }} onDoubleClick={() => setEdit({ type: 'conversation', id: c.id, value: c.title })}><span className="history-title">{c.title}</span></Button>
           <Dropdown disabled={interacting} trigger={['click']} menu={{ items: [
             { key: 'rename', label: '重命名', icon: <EditOutlined /> }, { key: 'delete', label: '删除', danger: true, disabled: c.messages.some(m => m.status === 'streaming'), icon: <DeleteOutlined /> }
           ], onClick: ({ key }) => key === 'rename' ? setEdit({ type: 'conversation', id: c.id, value: c.title }) : confirmDelete(c.id, c.title) }}>
@@ -415,10 +429,16 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
     </WorkspaceLayout>
     {settingsOpen && <ModelSettings snapshot={snapshot} busy={busy} onClose={() => setSettingsOpen(false)} onSaved={installSnapshot} onTheme={value => void act({ type: 'theme', theme: value })} onModel={(providerId, model) => void act({ type: 'model:select', providerId, model })} />}
     {projectOpen && <ProjectDialog onClose={() => setProjectOpen(false)} onCreated={next => { enterConversation(next); setProjectOpen(false) }} />}
-    <Modal title={edit?.type === 'user' ? '编辑用户名称' : '重命名对话'} open={Boolean(edit)} onCancel={() => setEdit(null)} okText="保存" cancelText="取消" okButtonProps={{ disabled: busy || !edit?.value.trim() }} confirmLoading={pending} onOk={async () => {
-      if (!edit) return
-      const ok = await act(edit.type === 'user' ? { type: 'user:rename', id: edit.id, name: edit.value } : { type: 'conversation:rename', id: edit.id, title: edit.value })
-      if (ok) setEdit(null)
-    }}><Input aria-label="名称" value={edit?.value || ''} maxLength={edit?.type === 'user' ? 40 : 80} onChange={e => setEdit(previous => previous ? { ...previous, value: e.target.value } : null)} /></Modal>
+    <Modal title={edit?.type === 'user' ? '编辑用户名称' : '重命名聊天'} open={Boolean(edit)} centered={edit?.type === 'conversation'} width={edit?.type === 'conversation' ? 480 : undefined}
+      className={edit?.type === 'conversation' ? `rename-chat-modal rename-chat-${snapshot.theme}` : undefined}
+      classNames={{ container: 'rename-chat-container', header: 'rename-chat-header', title: 'rename-chat-title', footer: 'rename-chat-footer' }}
+      onCancel={() => { if (!pending) setEdit(null) }} closable={!pending} keyboard={!pending} mask={{ closable: !pending }}
+      afterOpenChange={open => { if (open) nameInput.current?.focus({ cursor: 'all' }) }}
+      okText="保存" cancelText="取消" okButtonProps={{ disabled: busy || !edit?.value.trim(), className: 'rename-chat-save' }} cancelButtonProps={{ disabled: pending, className: 'rename-chat-cancel' }} confirmLoading={pending} onOk={() => void saveName()}>
+      {edit?.type === 'conversation' && <p className="rename-chat-description">保持简短且易于识别</p>}
+      <Input ref={nameInput} className="rename-chat-input" aria-label="名称" disabled={pending} value={edit?.value || ''} maxLength={edit?.type === 'user' ? 40 : 80} onChange={e => setEdit(previous => previous ? { ...previous, value: e.target.value } : null)} onKeyDown={event => {
+        if (event.key === 'Enter' && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void saveName() }
+      }} />
+    </Modal>
   </>
 }

@@ -65,6 +65,18 @@ button { -webkit-app-region: no-drag; }
 .history-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .history-menu { opacity: 0; margin-right: 3px; }
 .history-item:hover .history-menu, .history-item.selected .history-menu, .history-menu:focus-visible { opacity: 1; }
+.rename-chat-modal { --rename-bg: #fff; --rename-text: #292929; --rename-muted: #818181; --rename-line: #dedede; --rename-action-bg: #292929; --rename-action-text: #fff; }
+.rename-chat-dark { --rename-bg: #2b2b2b; --rename-text: #f5f5f5; --rename-muted: #929292; --rename-line: #444; --rename-action-bg: #fff; --rename-action-text: #292929; }
+.rename-chat-modal .rename-chat-container { background: var(--rename-bg); color: var(--rename-text); border: 1px solid var(--rename-line); border-radius: 22px; padding: 24px; }
+.rename-chat-modal .rename-chat-header { background: transparent; margin-bottom: 6px; }
+.rename-chat-modal .rename-chat-title { color: var(--rename-text); font-size: 22px; font-weight: 600; }
+.rename-chat-description { color: var(--rename-muted); margin: 0 0 18px; font-size: 14px; }
+.rename-chat-modal .rename-chat-input { height: 44px; padding: 8px 12px; color: var(--rename-text); background: transparent; border-color: var(--rename-line); border-radius: 10px; font-size: 16px; }
+.rename-chat-modal .rename-chat-input:focus { border-color: #548fff; box-shadow: 0 0 0 1px #548fff; }
+.rename-chat-modal .rename-chat-footer { margin-top: 16px; }
+.rename-chat-modal .rename-chat-cancel, .rename-chat-modal .rename-chat-save { min-width: 72px; height: 36px; border-radius: 10px; font-size: 14px; box-shadow: none; }
+.rename-chat-modal .rename-chat-cancel:not(:disabled) { color: var(--rename-text); border-color: var(--rename-line); background: transparent; }
+.rename-chat-modal .rename-chat-save:not(:disabled) { color: var(--rename-action-text); border-color: var(--rename-action-bg); background: var(--rename-action-bg); }
 .sidebar-bottom { border-top: 1px solid var(--line); padding: 16px 0; margin-top: 16px; }
 .user-button { width: 100%; display: flex; align-items: center; height: 49px; padding: 0 10px; justify-content: flex-start; gap: 10px; text-align: left; }
 .avatar { width: 29px; height: 29px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: #e1e8dd; color: #5b6b50; font-size: 12px; font-weight: 600; flex-shrink: 0; }
