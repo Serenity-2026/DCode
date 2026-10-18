@@ -438,7 +438,7 @@ test('accounts, model discovery/switch, fast mode, streaming and restart', async
   await verifyModelMenu('gpt-6-astra')
   await page.getByRole('menuitem', { name: /配置模型服务/ }).click()
   await page.locator('.settings-provider-card').getByRole('button', { name: /^配置 / }).first().click()
-  await expect(page.getByRole('textbox', { name: '模型 ID', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('combobox', { name: '模型 ID', exact: true })).toBeVisible()
   await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(820, 620))
   await expect.poll(() => page.getByRole('button', { name: '测试并保存', exact: true }).evaluate(element => element.getBoundingClientRect().bottom <= innerHeight)).toBe(true)
   await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1280, 820))
@@ -1382,7 +1382,8 @@ test('settings groups, account actions, typography and protocol-aware address pr
     ['DeepSeek', 'https://api.deepseek.com/v1', 'https://api.deepseek.com/anthropic'],
     ['Kimi', 'https://api.moonshot.cn/v1', 'https://api.moonshot.cn/anthropic'],
     ['GLM', 'https://open.bigmodel.cn/api/paas/v4', 'https://open.bigmodel.cn/api/anthropic'],
-    ['MiMo', 'https://api.xiaomimimo.com/v1', 'https://api.xiaomimimo.com/anthropic']
+    ['MiMo', 'https://api.xiaomimimo.com/v1', 'https://api.xiaomimimo.com/anthropic'],
+    ['Qwen', 'https://dashscope.aliyuncs.com/compatible-mode/v1', 'https://dashscope.aliyuncs.com/apps/anthropic']
   ]) {
     await address.click()
     await page.getByText(brand, { exact: true }).click()
@@ -1401,6 +1402,8 @@ test('settings groups, account actions, typography and protocol-aware address pr
   await expect(address).toHaveValue('https://custom.example/v2')
   await address.click()
   await expect(page.locator('.ant-select-item-option').filter({ hasText: 'OpenAI / ChatGPT' })).toHaveAttribute('aria-disabled', 'true')
+  await page.getByText('OpenAI / ChatGPT', { exact: true }).hover()
+  await page.mouse.wheel(0, 400)
   await page.getByText('Claude', { exact: true }).click()
   await expect(address).toHaveValue('https://api.anthropic.com')
   await protocol.click()
@@ -1448,6 +1451,43 @@ test('settings groups, account actions, typography and protocol-aware address pr
   expect(state.ok && state.value.typography).toEqual({ fontFamily: 'serif', fontSize: 18 })
   expect(state.ok && state.value.providers).toHaveLength(1)
   await logout()
+})
+
+test('manual model entry, catalog choice, actual chat request and restart', async ({}, testInfo) => {
+  await launch()
+  await authenticate('manual-model', true)
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByRole('button', { name: '配置 环境默认', exact: true }).click()
+  const models = page.getByRole('combobox', { name: '模型 ID', exact: true })
+  await models.click()
+  await page.locator('.ant-select-item-option').filter({ hasText: 'gpt-6-sol' }).click()
+  await models.fill('qwen-custom')
+  await models.press('Enter')
+  await models.press('Escape')
+  await expect(page.getByRole('button', { name: '保存配置', exact: true })).toBeVisible()
+  const discoveryCount = discoveries.length
+  await page.getByRole('button', { name: '保存配置', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText('配置已保存，尚未验证连接。')
+  expect(discoveries).toHaveLength(discoveryCount)
+  await page.screenshot({ path: testInfo.outputPath('manual-models.png'), animations: 'disabled' })
+  await page.getByRole('button', { name: '关闭', exact: true }).click()
+  await page.getByRole('button', { name: '切换模型', exact: true }).click()
+  await expect(page.getByRole('menuitem', { name: 'qwen-custom', exact: true }).locator('.model-brand-icon')).toHaveAttribute('data-brand', 'qwen')
+  await page.getByRole('menuitem', { name: 'qwen-custom', exact: true }).click()
+  await page.getByRole('textbox', { name: '消息', exact: true }).fill('手动模型验证')
+  await page.getByRole('button', { name: '发送消息', exact: true }).click()
+  await expect(page.locator('article[data-status="complete"][data-role="assistant"]')).toBeVisible()
+  expect(requests.at(-1)).toMatchObject({ model: 'qwen-custom', authorization: 'Bearer e2e-local-key' })
+  await application.close()
+  await launch()
+  await expect(page.getByRole('button', { name: '切换模型', exact: true })).toBeEnabled()
+  await expect(page.getByRole('button', { name: '切换模型', exact: true })).toContainText('qwen-custom')
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByRole('button', { name: '配置 环境默认', exact: true }).click()
+  const state = await page.evaluate(() => window.dcode.getState())
+  expect(state.ok && state.value.providers[0].manualModels).toEqual(['gpt-6-sol', 'qwen-custom'])
+  await expect(page.getByRole('button', { name: '保存配置', exact: true })).toBeVisible()
+  await expect(page.locator('.model-form')).toContainText('qwen-custom')
 })
 
 test('native protocol selection, safe tool failure loop and restart', async () => {

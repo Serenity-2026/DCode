@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { ModelRefresh, ProviderDraft, Snapshot } from '../../shared/types'
 import { selectedEffort } from '../../shared/context'
 import { resolveModelApi } from '../../shared/model-api'
-import { validateBaseUrl, type ModelConfig, type ProviderConfig } from '../domain/model-config'
+import { validateBaseUrl, validateManualModels, type ModelConfig, type ProviderConfig } from '../domain/model-config'
 import type { SecretCodec } from '../domain/ports'
 import type { StoredUser } from '../domain/state'
 import { textInput } from '../domain/validation'
@@ -20,7 +20,7 @@ export class Models {
     return { id: randomUUID(), name: '环境默认', baseUrl: this.initial.baseUrl, api: resolveModelApi(this.initial.baseUrl, this.initial.api), availableModels: [], encryptedApiKey: await this.secrets.encrypt(this.initial.apiKey) }
   }
 
-  /** 仅允许使用服务返回列表中的模型，解密当前服务密钥并为 AgentSession 组装单次请求配置。 */
+  /** 仅允许使用该服务目录或手动保存的模型，解密密钥并为 AgentSession 组装请求。 */
   async selected(): Promise<ModelConfig> {
     const user = this.store.requireUser()
     const provider = user.providers.find(p => p.id === user.activeProviderId)
@@ -40,7 +40,7 @@ export class Models {
     if (results.some(r => r.catalog)) this.store.transaction(() => {
       if (this.store.requireUser().id !== user.id) throw new Error('登录状态已变化，请重试。')
       for (const result of results) if (result.catalog) {
-        result.provider.availableModels = result.catalog.ids
+        result.provider.availableModels = [...new Set([...result.catalog.ids, ...(result.provider.manualModels || [])])]
         result.provider.modelDetails = Object.fromEntries(result.catalog.ids.map(id => [id, { ...result.provider.modelDetails?.[id], ...result.catalog!.details[id] }]))
         this.store.reconcileEfforts(result.provider)
       }
@@ -50,7 +50,7 @@ export class Models {
     return { snapshot: this.store.snapshot(), errors: results.filter(r => r.error).map(r => r.error) }
   }
 
-  /** 用准确的地址与密钥测试 /models，只有有效非空列表才加密保存服务，失败保持原配置。 */
+  /** 未填写模型时测试 /models；手动模式直接保存配置，不声称验证了密钥或模型可用性。 */
   async testAndSave(input: ProviderDraft): Promise<Snapshot> {
     const user = this.store.requireUser()
     if (!input || typeof input !== 'object') throw new Error('服务配置无效。')
@@ -59,17 +59,24 @@ export class Models {
     const name = textInput(input.name, 40)
     const baseUrl = validateBaseUrl(input.baseUrl)
     const api = resolveModelApi(baseUrl, input.api === undefined ? existing?.api : input.api)
+    const manualModels = validateManualModels(input.manualModels === undefined ? existing?.manualModels : input.manualModels)
     if (typeof input.apiKey !== 'string' || input.apiKey.length > 4096) throw new Error('API 密钥无效。')
     const apiKey = input.apiKey.trim() || (existing ? await this.secrets.decrypt(existing.encryptedApiKey) : '')
     if (!apiKey) throw new Error('请输入 API 密钥。')
     let catalog: Awaited<ReturnType<typeof listModels>>
-    try { catalog = await listModels({ baseUrl, apiKey, api }) }
+    try {
+      if (manualModels.length) {
+        const sameService = existing?.baseUrl === baseUrl && resolveModelApi(existing.baseUrl, existing.api) === api
+        const cached = sameService ? existing.availableModels.filter(id => !existing.manualModels?.includes(id) || Object.hasOwn(existing.modelDetails || {}, id)) : []
+        catalog = { ids: [...new Set([...cached, ...manualModels])], details: sameService ? Object.fromEntries(Object.entries(existing.modelDetails || {}).filter(([id]) => cached.includes(id) || manualModels.includes(id))) : {} }
+      } else catalog = await listModels({ baseUrl, apiKey, api })
+    }
     catch (error) {
       const detail = error instanceof Error ? error.message.split(apiKey).join('[密钥]') : '服务连接失败。'
       throw new Error(`连通测试未通过：${detail}`)
     }
     const { ids: availableModels, details: modelDetails } = catalog
-    const profile = { id: existing?.id || randomUUID(), name, baseUrl, api, availableModels, modelDetails, selectedEfforts: { ...existing?.selectedEfforts }, encryptedApiKey: await this.secrets.encrypt(apiKey) }
+    const profile = { id: existing?.id || randomUUID(), name, baseUrl, api, availableModels, manualModels, modelDetails, selectedEfforts: { ...existing?.selectedEfforts }, encryptedApiKey: await this.secrets.encrypt(apiKey) }
     this.store.reconcileEfforts(profile)
     this.store.transaction(() => {
       if (this.store.requireUser().id !== user.id) throw new Error('登录状态已变化，请重试。')

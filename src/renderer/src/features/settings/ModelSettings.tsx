@@ -75,7 +75,7 @@ export function ModelSettings({ snapshot, busy, onClose, onSaved, onTheme, onMod
   </Modal>
 }
 
-/** 保留原有连通测试与保存流程，失败时不覆盖已保存的配置。 */
+/** 可发现服务目录，也可直接保存手动模型 ID；失败时不覆盖已保存的配置。 */
 function ProviderEditor({ id, snapshot, busy, testing, onTesting, onSaved, onBack }: {
   id: string; snapshot: Snapshot; busy: boolean; testing: boolean; onTesting: (value: boolean) => void
   onSaved: (next: Snapshot) => void; onBack: () => void
@@ -86,6 +86,7 @@ function ProviderEditor({ id, snapshot, busy, testing, onTesting, onSaved, onBac
   const profile = snapshot.providers.find(provider => provider.id === editing)
   const api: ModelApi = Form.useWatch('api', form) || resolveModelApi(profile?.baseUrl || '', profile?.api)
   const baseUrl: string = Form.useWatch('baseUrl', form) || ''
+  const manualModels: string[] = Form.useWatch('manualModels', form) || []
   const preset = findProviderPreset(baseUrl)
   const addressOptions = providerPresets.map(item => ({
     value: item.urls[api] || item.name, disabled: !item.urls[api],
@@ -106,9 +107,9 @@ function ProviderEditor({ id, snapshot, busy, testing, onTesting, onSaved, onBac
         onSaved(result.value)
         setEditing(result.value.activeProviderId!)
         form.setFieldsValue({ apiKey: '' })
-        setStatus({ ok: true, text: '连通测试通过，配置已保存。' })
+        setStatus({ ok: true, text: values.manualModels?.length ? '配置已保存，尚未验证连接。' : '连通测试通过，配置已保存。' })
       } else setStatus({ ok: false, text: result.error })
-    } catch { setStatus({ ok: false, text: '连通测试失败，请重试。' }) }
+    } catch { setStatus({ ok: false, text: '保存失败，请重试。' }) }
     finally { onTesting(false) }
   }
 
@@ -116,7 +117,7 @@ function ProviderEditor({ id, snapshot, busy, testing, onTesting, onSaved, onBac
     <Button type="text" className="settings-back" aria-label="返回模型" icon={<ArrowLeftOutlined />} disabled={testing} onClick={onBack}>返回模型</Button>
     <header className="settings-heading"><h2>{profile ? '配置 Provider' : '添加 Provider'}</h2></header>
     <p className="settings-subtitle">{profile?.name || '连接一个 OpenAI 兼容或 Anthropic 模型服务'}</p>
-    <Form form={form} className="model-form" layout="vertical" initialValues={{ name: profile?.name || '', baseUrl: profile?.baseUrl || '', apiKey: '', api: resolveModelApi(profile?.baseUrl || '', profile?.api) }} disabled={testing || busy} onFinish={values => void save(values)} onValuesChange={() => setStatus(null)}>
+    <Form form={form} className="model-form" layout="vertical" initialValues={{ name: profile?.name || '', baseUrl: profile?.baseUrl || '', apiKey: '', api: resolveModelApi(profile?.baseUrl || '', profile?.api), manualModels: profile?.manualModels || [] }} disabled={testing || busy} onFinish={values => void save(values)} onValuesChange={() => setStatus(null)}>
       <div className="settings-form-row">
         <Form.Item name="name" label="配置名称" rules={[{ required: true, message: '请输入配置名称。' }]}><Input aria-label="配置名称" maxLength={40} placeholder="例如：我的模型服务" /></Form.Item>
         <Form.Item name="api" label="API 协议"><Select aria-label="API 协议" onChange={changeProtocol} options={[{ value: 'openai-completions', label: 'OpenAI 兼容' }, { value: 'anthropic-messages', label: 'Anthropic Messages' }]} /></Form.Item>
@@ -126,8 +127,9 @@ function ProviderEditor({ id, snapshot, busy, testing, onTesting, onSaved, onBac
         if (!form.getFieldValue('name') && selected) form.setFieldsValue({ name: selected.name })
       }}><Input aria-label="服务地址" prefix={<ModelIcon provider={preset?.name || baseUrl} />} suffix={<DownOutlined />} maxLength={2048} placeholder="选择供应商或输入服务地址" /></AutoComplete></Form.Item>
       <Form.Item name="apiKey" label="API Key" rules={[{ required: editing === 'new', message: '请输入 API Key。' }]}><Input.Password aria-label="API Key" maxLength={4096} autoComplete="off" placeholder={profile ? '已保存，留空保持不变' : 'API Key'} /></Form.Item>
+      <Form.Item name="manualModels" label="模型 ID" extra="留空自动获取；填写后直接保存，不测试连接。"><Select aria-label="模型 ID" mode="tags" maxCount={100} placeholder="选择已有模型，或输入模型 ID 后按回车" options={profile?.availableModels.map(model => ({ value: model, label: model }))} optionRender={option => <span className="model-option"><ModelIcon model={String(option.value)} provider={preset?.name || baseUrl} /><span>{option.label}</span></span>} onInputKeyDown={event => { if (event.key === 'Enter') event.preventDefault() }} /></Form.Item>
       {status && <Alert className="model-result" title={status.text} type={status.ok ? 'success' : 'error'} showIcon />}
-      <div className="settings-form-actions"><Button disabled={testing} onClick={onBack}>取消</Button><Button type="primary" htmlType="submit" aria-label="测试并保存" loading={testing} disabled={busy}>测试并保存</Button></div>
+      <div className="settings-form-actions"><Button disabled={testing} onClick={onBack}>取消</Button><Button type="primary" htmlType="submit" aria-label={manualModels.length ? '保存配置' : '测试并保存'} loading={testing} disabled={busy}>{manualModels.length ? '保存配置' : '测试并保存'}</Button></div>
     </Form>
   </>
 }

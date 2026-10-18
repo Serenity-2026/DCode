@@ -12,6 +12,64 @@ function response(ids = ['gpt-6-astra', 'gpt-6-sol', 'gpt-5.6-sol']): Response {
 }
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); cleanup() })
 
+it('saves manual model IDs without discovery and restores their selection after restart', async () => {
+  const { store, models, path, auth } = await create()
+  const fetchMock = vi.fn().mockRejectedValue(new Error('no catalog endpoint'))
+  vi.stubGlobal('fetch', fetchMock)
+  const snapshot = await models.testAndSave({ ...draft, manualModels: [' qwen-custom ', 'qwen-custom', 'vendor/custom-v2'] })
+  const providerId = snapshot.activeProviderId!
+  expect(fetchMock).not.toHaveBeenCalled()
+  expect(snapshot.providers[1]).toMatchObject({ availableModels: ['qwen-custom', 'vendor/custom-v2'], manualModels: ['qwen-custom', 'vendor/custom-v2'], modelDetails: {} })
+  store.apply({ type: 'model:select', providerId, model: 'vendor/custom-v2' })
+  expect(await models.selected()).toMatchObject({ model: 'vendor/custom-v2', apiKey: draft.apiKey, reasoningEffort: null })
+  const refreshed = await models.refresh()
+  expect(refreshed.errors).toHaveLength(2)
+  expect(refreshed.snapshot.selectedModel).toBe('vendor/custom-v2')
+  const restored = new StateService(new StateRepository(path))
+  restored.authenticate(store.requireUser().id)
+  expect(restored.snapshot().providers[1].manualModels).toEqual(['qwen-custom', 'vendor/custom-v2'])
+  expect(restored.snapshot().selectedModel).toBe('vendor/custom-v2')
+  auth.logout()
+  await auth.register({ username: 'manual-other', password: 'another-password' })
+  expect(() => store.apply({ type: 'model:select', providerId, model: 'vendor/custom-v2' })).toThrow('模型不存在')
+})
+
+it('merges manual models with refreshed catalogs and removes manual entries when cleared', async () => {
+  const { store, models } = await create()
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => response(['remote-model'])))
+  const id = (await models.testAndSave(draft)).activeProviderId!
+  await models.testAndSave({ ...draft, id, apiKey: '', manualModels: ['remote-model', 'qwen-custom'] })
+  await models.testAndSave({ ...draft, id, apiKey: '', manualModels: ['qwen-custom'] })
+  expect(store.snapshot().providers[1].availableModels).toEqual(['remote-model', 'qwen-custom'])
+  store.apply({ type: 'model:select', providerId: id, model: 'qwen-custom' })
+  await models.refresh()
+  expect(store.snapshot().selectedModel).toBe('qwen-custom')
+  expect(store.snapshot().providers[1].availableModels).toEqual(['remote-model', 'qwen-custom'])
+  await models.testAndSave({ ...draft, id, apiKey: '' })
+  expect(store.snapshot().providers[1].manualModels).toEqual(['qwen-custom'])
+  await models.testAndSave({ ...draft, id, apiKey: '', manualModels: [] })
+  expect(store.snapshot().providers[1].availableModels).toEqual(['remote-model'])
+  expect(store.snapshot().selectedModel).toBe('remote-model')
+  expect(store.snapshot().providers[1].manualModels).toEqual([])
+})
+
+it('does not carry cached model IDs or capabilities to a changed manual service', async () => {
+  const { store, models } = await create()
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => Response.json({ data: [{ id: 'old', context_window: 65536 }] })))
+  const id = (await models.testAndSave(draft)).activeProviderId!
+  await models.testAndSave({ ...draft, id, baseUrl: 'https://new.example.com', manualModels: ['custom'] })
+  expect(store.snapshot().providers[1]).toMatchObject({ availableModels: ['custom'], modelDetails: {}, manualModels: ['custom'] })
+})
+
+it('rejects malformed manual model IDs without changing saved state', async () => {
+  const { store, models } = await create()
+  const before = structuredClone(store.state)
+  for (const manualModels of [null, 'custom', [''], ['  '], ['two words'], ['a\u0000b'], [1], ['a'.repeat(257)], Array(101).fill('custom')]) {
+    await expect(models.testAndSave({ ...draft, manualModels: manualModels as never })).rejects.toThrow('模型 ID')
+    expect(store.state).toEqual(before)
+  }
+})
+
 it('imports no environment service unless both URL and key are configured', async () => {
   for (const initial of [{ baseUrl: '', apiKey: '' }, { baseUrl: '', apiKey: 'private-key' }, { baseUrl: 'https://example.com/v1', apiKey: '' }]) {
     const { store } = await create({ ...initial, model: 'test' })

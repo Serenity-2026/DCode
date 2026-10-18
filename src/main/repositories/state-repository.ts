@@ -4,6 +4,7 @@ import type { StoredState } from '../domain/state'
 import { isFilePreview, reasoningEfforts, validateAttachments } from '../../shared/context'
 import { modelApis } from '../../shared/model-api'
 import { isTypography } from '../../shared/appearance'
+import { validateManualModels } from '../domain/model-config'
 
 /** 校验当前磁盘结构、唯一性及账号/会话归属，不转换其他版本的数据。 */
 function validState(value: unknown): boolean {
@@ -21,6 +22,9 @@ function validState(value: unknown): boolean {
     usernames.add(u.username)
     if (!Array.isArray(u.providers) || typeof u.fastMode !== 'boolean') return false
     if (u.providers.some(p => !p || ['id', 'name', 'baseUrl', 'encryptedApiKey'].some(key => typeof p[key as keyof typeof p] !== 'string') || !Array.isArray(p.availableModels) || p.availableModels.some(id => typeof id !== 'string' || !id.trim()))) return false
+    try {
+      if (u.providers.some(p => validateManualModels(p.manualModels).some(id => !p.availableModels.includes(id)))) return false
+    } catch { return false }
     if (u.providers.some(p => p.selectedEfforts !== undefined && (!p.selectedEfforts || typeof p.selectedEfforts !== 'object' || Array.isArray(p.selectedEfforts) || Object.values(p.selectedEfforts).some(level => !reasoningEfforts.includes(level))))) return false
     if (new Set(u.providers.map(p => p.id)).size !== u.providers.length) return false
     if (u.providers.some(p => p.api !== undefined && !modelApis.includes(p.api))) return false

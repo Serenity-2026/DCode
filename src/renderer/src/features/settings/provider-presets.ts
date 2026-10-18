@@ -6,6 +6,7 @@ export const providerPresets: { name: string; urls: Partial<Record<ModelApi, str
   { name: 'Kimi', urls: { 'openai-completions': 'https://api.moonshot.cn/v1', 'anthropic-messages': 'https://api.moonshot.cn/anthropic' } },
   { name: 'GLM', urls: { 'openai-completions': 'https://open.bigmodel.cn/api/paas/v4', 'anthropic-messages': 'https://open.bigmodel.cn/api/anthropic' } },
   { name: 'MiMo', urls: { 'openai-completions': 'https://api.xiaomimimo.com/v1', 'anthropic-messages': 'https://api.xiaomimimo.com/anthropic' } },
+  { name: 'Qwen', urls: { 'openai-completions': 'https://dashscope.aliyuncs.com/compatible-mode/v1', 'anthropic-messages': 'https://dashscope.aliyuncs.com/apps/anthropic' } },
   { name: 'OpenAI / ChatGPT', urls: { 'openai-completions': 'https://api.openai.com/v1' } },
   { name: 'Claude', urls: { 'anthropic-messages': 'https://api.anthropic.com' } }
 ]
