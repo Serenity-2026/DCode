@@ -1,5 +1,8 @@
 /** 主进程和 preload 共用的 IPC 通道名称，保证 DCodeAPI 的请求与流事件使用同一套映射。 */
 export const channels = {
+  listMcpServers: 'dcode:mcp-list',
+  saveMcpServer: 'dcode:mcp-save',
+  mcpAction: 'dcode:mcp-action',
   state: 'dcode:state',
   register: 'dcode:register',
   login: 'dcode:login',

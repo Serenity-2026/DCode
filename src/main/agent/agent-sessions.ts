@@ -12,7 +12,7 @@ export class AgentSessions {
   private stopping?: Promise<Snapshot>
 
   /** 注入实例工厂，只有会话第一次发送时才创建运行对象。 */
-  constructor(private readonly store: StateService, private readonly create: () => SessionRuntime) {}
+  constructor(private readonly store: StateService, private readonly create: (id: string) => SessionRuntime, private readonly onStopAll?: () => Promise<void>) {}
 
   /** 汇总运行状态，供调用方判断是否仍有任务未结束。 */
   get busy(): boolean { return [...this.sessions.values()].some(runtime => runtime.session.busy) }
@@ -28,7 +28,7 @@ export class AgentSessions {
     if (id === null) throw new Error('请先新建对话并选择工作文件夹。')
     this.store.conversation(id)
     const existing = this.sessions.get(id)
-    const runtime = existing || this.create()
+    const runtime = existing || this.create(id)
     try {
       const snapshot = runtime.session.send({ ...input, conversationId: id }, config)
       this.sessions.set(id, runtime)
@@ -49,7 +49,8 @@ export class AgentSessions {
   /** 关闭或退出前同时取消所有任务，等待所有会话保存；期间拒绝启动新任务。 */
   stopAll(): Promise<Snapshot> {
     if (this.stopping) return this.stopping
-    const pending = Promise.allSettled([...this.sessions.values()].map(runtime => runtime.session.stop())).then(results => {
+    const pending = Promise.allSettled([...this.sessions.values()].map(runtime => runtime.session.stop())).then(async results => {
+      await this.onStopAll?.()
       const errors = results.flatMap(result => result.status === 'rejected' ? [result.reason instanceof Error ? result.reason.message : '任务停止失败。'] : [])
       if (errors.length) throw new Error(errors.join('\n'))
       return this.store.snapshot()

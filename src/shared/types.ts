@@ -1,5 +1,6 @@
 import type { Typography } from './appearance'
 import type { UsageRecord } from './usage'
+import type { McpAction, McpServerDraft, McpServerView } from './mcp'
 
 /** 账号保存的外观偏好，由 Root 映射到 Ant Design 主题。 */
 export type Theme = 'light' | 'dark'
@@ -139,6 +140,9 @@ export type Result<T> = { ok: true; value: T } | { ok: false; error: string }
 
 /** preload 的业务白名单；依赖主进程 Auth、Models、StateService 和 AgentSession，不暴露原始 IPC。 */
 export interface DCodeAPI {
+  listMcpServers(): Promise<Result<McpServerView[]>>
+  saveMcpServer(input: McpServerDraft): Promise<Result<McpServerView[]>>
+  mcpAction(input: McpAction): Promise<Result<McpServerView[]>>
   /** 获取当前登录状态及账号快照。 */
   getState(): Promise<Result<Snapshot>>
   /** 注册账号并保持登录。 */

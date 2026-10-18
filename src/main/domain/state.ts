@@ -1,6 +1,9 @@
 import type { Conversation, FileChange, ProviderProfile, Theme, User } from '../../shared/types'
 import type { Typography } from '../../shared/appearance'
 import type { UsageRecord } from '../../shared/usage'
+import type { McpServerConfig } from '../../shared/mcp'
+
+export interface StoredMcpServer extends McpServerConfig { encryptedSecrets?: string; encryptedOAuth?: string }
 
 /** 主进程保存的完整字节快照，以 base64 保留 BOM、换行和空文件；null 表示文件不存在。 */
 export interface StoredFileChange extends FileChange {
@@ -15,6 +18,7 @@ export interface StoredFileChange extends FileChange {
 
 /** 仅在主进程保存的账号记录；Auth 管理密码与会话，Models 管理密钥密文。 */
 export interface StoredUser extends User {
+  mcpServers?: StoredMcpServer[]
   usageRecords?: UsageRecord[]
   passwordHash: string
   passwordSalt: string

@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { app, shell } from 'electron'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadConfig } from '../infrastructure/config'
@@ -30,6 +30,8 @@ import { registerDesktopController } from '../controllers/desktop-controller'
 import { registerFileChangeController } from '../controllers/file-change-controller'
 import { FileChanges } from '../file/file-changes'
 import { Suggestions } from '../services/suggestion-service'
+import { McpService } from '../services/mcp-service'
+import { registerMcpController } from '../controllers/mcp-controller'
 
 /** 应用装配入口，依次连接 Repository、Service、Controller 和窗口，集中管理 ready、激活和退出。 */
 export async function startApplication(): Promise<void> {
@@ -71,16 +73,17 @@ export async function startApplication(): Promise<void> {
     const auth = new Auth(state, secrets, models)
     await auth.restore()
     const changes = new FileChanges(state, event => windows?.publish(event))
+    const mcp = new McpService(state, secrets, userData, url => shell.openExternal(url))
     await changes.recover()
     const loop = new AgentLoop((config, messages, controller, onDelta, tools) => streamModel(config, messages, controller, onDelta, { tools }))
-    const generation = new AgentSessions(state, () => {
+    const generation = new AgentSessions(state, id => {
       const toolRuntime = new ToolRuntime((turn, path, before, after, write) => changes.record(turn, path, before, after, write))
       const tools = [new ReadTool(), new BashTool(), new EditTool(), new WriteTool()].map(tool => toolRuntime.bind(tool))
-      const agent = new Agent(loop, tools)
+      const agent = new Agent(loop, tools, signal => mcp.tools(id, signal))
       const suggestions = new Suggestions(state, event => windows?.publish(event))
       const session = new AgentSession(state, event => windows?.publish(event), agent, error => reportError('任务收尾失败', error), toolRuntime, suggestions)
-      return { session, dispose: () => { session.cancelSuggestions(); toolRuntime.dispose() } }
-    })
+      return { session, dispose: () => { session.cancelSuggestions(); toolRuntime.dispose(); mcp.release(id) } }
+    }, () => mcp.closeAll())
     app.on('will-quit', () => {
       try { generation.dispose() }
       catch (error) { reportError('临时资源清理失败', error) }
@@ -95,6 +98,7 @@ export async function startApplication(): Promise<void> {
     const router = new IpcRouter(() => mainWindow.current)
     registerAuthController(router, auth, generation)
     registerModelController(router, models)
+    registerMcpController(router, mcp, () => generation.busy)
     registerStateController(router, state, generation)
     registerChatController(router, generation, models, state)
     registerFileChangeController(router, changes, generation)

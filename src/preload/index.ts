@@ -10,6 +10,9 @@ import type { DCodeAPI, StreamEvent } from '../shared/types'
  * 执行contextBridge.exposeInMainWorld后，React 页面里就能使用：window.dcode.getState()然后被ipcrouter捕捉
  */
 const api: DCodeAPI = {
+  listMcpServers: () => ipcRenderer.invoke(channels.listMcpServers),
+  saveMcpServer: input => ipcRenderer.invoke(channels.saveMcpServer, input),
+  mcpAction: input => ipcRenderer.invoke(channels.mcpAction, input),
   /** 向主进程请求 StateService.snapshot，用于首次加载界面。 */
   getState: () => ipcRenderer.invoke(channels.state),
   /** 由 Auth 注册并加密保存保持登录的令牌。 */

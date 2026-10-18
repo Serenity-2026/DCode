@@ -6,6 +6,8 @@ TypeScript + Electron 的 Coding Harness 基础框架。包含本机账号与密
 
 ## 开发与启动
 
+MCP 已支持 stdio、Streamable HTTP 和 OAuth，可在「设置 → MCP 服务器」管理，详见 [MCP 功能说明](doc/SPEC-mcp.md)。
+
 需要 Node.js 22.12+（推荐 Node.js 24 LTS）和 npm。
 
 ```sh

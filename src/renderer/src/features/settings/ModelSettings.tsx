@@ -8,6 +8,7 @@ import { selectionTheme } from '../../components/selection-theme'
 import { defaultTypography, fontFamilies, fontSizes, type Typography } from '../../../../shared/appearance'
 import { findProviderPreset, providerPresets } from './provider-presets'
 import { UsageSettings } from './UsageSettings'
+import { McpSettings } from './McpSettings'
 
 const sections = [
   { key: 'models', label: '模型', icon: <RobotOutlined /> },
@@ -64,7 +65,7 @@ export function ModelSettings({ snapshot, busy, onClose, onSaved, onTheme, onMod
               <footer className="settings-provider-footer"><span><KeyOutlined /> 凭据已保存</span><Button type="text" aria-label={`配置 ${provider.name}`} disabled={busy} onClick={() => setEditing(provider.id)}>配置 <span aria-hidden="true">↗</span></Button></footer>
             </article>)}</div>
             {!snapshot.providers.length && <Empty className="settings-empty" image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有模型服务"><Button type="primary" icon={<PlusOutlined />} disabled={busy} onClick={() => setEditing('new')}>添加第一个 Provider</Button></Empty>}
-          </> : section === 'usage' ? <UsageSettings user={user} records={snapshot.usageRecords || []} /> : section === 'appearance' ? <>
+          </> : section === 'mcp' ? <McpSettings busy={busy} /> : section === 'usage' ? <UsageSettings user={user} records={snapshot.usageRecords || []} /> : section === 'appearance' ? <>
             <div className="settings-appearance"><div><h3>主题</h3></div><Segmented value={snapshot.theme} options={[{ label: '浅色', value: 'light', icon: <SunOutlined /> }, { label: '深色', value: 'dark', icon: <MoonOutlined /> }]} disabled={busy} onChange={value => onTheme(value === 'dark' ? 'dark' : 'light')} /></div>
             <div className="settings-appearance"><h3>字体</h3><Select aria-label="字体" className="settings-font-select" value={typography.fontFamily} disabled={busy} options={Object.entries(fontFamilies).map(([value, font]) => ({ value, label: <span style={{ fontFamily: font.value }}>{font.label}</span> }))} onChange={fontFamily => onTypography({ ...typography, fontFamily })} /></div>
             <div className="settings-appearance"><h3>字号</h3><Select aria-label="字号" className="settings-font-select" value={typography.fontSize} disabled={busy} options={fontSizes.map(value => ({ value, label: `${value} px` }))} onChange={fontSize => onTypography({ ...typography, fontSize })} /></div>

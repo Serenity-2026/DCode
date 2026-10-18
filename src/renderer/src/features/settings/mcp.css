@@ -1,0 +1,11 @@
+.mcp-settings { display: grid; gap: 16px; }
+.mcp-toolbar { display: flex; justify-content: flex-end; }
+.mcp-card { border: 1px solid var(--settings-line); border-radius: 14px; padding: 18px; background: var(--settings-card); }
+.mcp-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.mcp-card-heading h3 { margin: 0 0 6px; overflow-wrap: anywhere; }
+.mcp-card-heading span, .mcp-connections { font-size: 13px; }
+.mcp-connections { margin-top: 14px; display: grid; gap: 8px; }
+.mcp-connections p { margin: 4px 0; }
+.mcp-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.mcp-tool-list { max-height: 55vh; overflow: auto; padding-left: 20px; overflow-wrap: anywhere; }
+.mcp-tool-list p { white-space: pre-wrap; }
