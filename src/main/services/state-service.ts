@@ -16,6 +16,7 @@ export class StateService {
   constructor(private readonly repository: StateRepository) {
     for (const user of this.state.users) {
       for (const profile of user.providers) this.reconcileEfforts(profile)
+      for (const record of user.usageRecords || []) if (!record.finishedAt) record.finishedAt = record.lastActiveAt
     }
     for (const conversation of this.state.conversations) {
       for (const message of conversation.messages) {
@@ -82,6 +83,7 @@ export class StateService {
     const selected = user?.providers.find(p => p.id === user.activeProviderId)
     return structuredClone({
       users: user ? [publicUser(user)] : [], activeUserId: user?.id || null,
+      usageRecords: user?.usageRecords || [],
       activeConversationId: user ? this.state.activeConversationId : null,
       conversations: user ? this.state.conversations.filter(c => c.userId === user.id).map(c => ({ ...c, messages: c.messages.map(message => this.publicMessage(message, c.id)) })) : [],
       theme: user?.theme || 'light',
@@ -213,6 +215,8 @@ export class StateService {
       c.updatedAt = new Date().toISOString()
       const message: Message = { id: randomUUID(), role: 'assistant', content: '', reasoning: '', status: 'streaming', createdAt: new Date().toISOString() }
       c.messages.push(message)
+      const usageRecords = this.requireUser().usageRecords ||= []
+      usageRecords.push({ id: message.id, startedAt: message.createdAt, lastActiveAt: message.createdAt, requests: 0, reportedRequests: 0, days: {}, tools: [] })
       // 重新生成仍属于同一次提问，已发生的文件修改和原始恢复副本随新回复保留。
       for (const change of this.state.fileChanges || []) if (change.messageId === previousMessageId) change.messageId = message.id
       return { conversation: c, message }

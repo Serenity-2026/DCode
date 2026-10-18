@@ -5,6 +5,7 @@ import { isFilePreview, reasoningEfforts, validateAttachments } from '../../shar
 import { modelApis } from '../../shared/model-api'
 import { isTypography } from '../../shared/appearance'
 import { validateManualModels } from '../domain/model-config'
+import { isUsageRecord } from '../../shared/usage'
 
 /** 校验当前磁盘结构、唯一性及账号/会话归属，不转换其他版本的数据。 */
 function validState(value: unknown): boolean {
@@ -21,6 +22,7 @@ function validState(value: unknown): boolean {
     if (typeof u.username !== 'string' || typeof u.passwordHash !== 'string' || typeof u.passwordSalt !== 'string' || usernames.has(u.username)) return false
     usernames.add(u.username)
     if (!Array.isArray(u.providers) || typeof u.fastMode !== 'boolean') return false
+    if (u.usageRecords !== undefined && (!Array.isArray(u.usageRecords) || !u.usageRecords.every(isUsageRecord) || new Set(u.usageRecords.map(r => r.id)).size !== u.usageRecords.length)) return false
     if (u.providers.some(p => !p || ['id', 'name', 'baseUrl', 'encryptedApiKey'].some(key => typeof p[key as keyof typeof p] !== 'string') || !Array.isArray(p.availableModels) || p.availableModels.some(id => typeof id !== 'string' || !id.trim()))) return false
     try {
       if (u.providers.some(p => validateManualModels(p.manualModels).some(id => !p.availableModels.includes(id)))) return false

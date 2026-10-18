@@ -174,7 +174,11 @@ it('reports failed final persistence and retries saving on an idle stop', async 
   const report = vi.fn()
   const session = new AgentSession(store, emit, agent, report)
   session.send({ content: '开始' }, config)
-  const save = vi.spyOn(store, 'save').mockImplementation(() => { throw new Error('磁盘已满') })
+  const originalSave = store.save.bind(store)
+  const save = vi.spyOn(store, 'save').mockImplementation(() => {
+    if (store.state.conversations[0].messages.at(-1)?.status !== 'streaming') throw new Error('磁盘已满')
+    originalSave()
+  })
   await expect(agent.waitForIdle()).rejects.toThrow('磁盘已满')
   expect(agent.state.outcome).toBe('error')
   expect(emit.mock.calls.at(-1)?.[0].message).toMatchObject({ status: 'error', content: '部分正文', error: expect.stringContaining('保存失败：磁盘已满') })
@@ -193,7 +197,12 @@ it('keeps a recovered task failure in the conversation without an extra applicat
   const report = vi.fn()
   const session = new AgentSession(store, () => {}, agent, report)
   session.send({ content: '开始' }, config)
-  vi.spyOn(store, 'save').mockImplementationOnce(() => { throw new Error('暂时无法保存') })
+  const originalSave = store.save.bind(store)
+  let failed = false
+  vi.spyOn(store, 'save').mockImplementation(() => {
+    if (!failed && store.state.conversations[0].messages.at(-1)?.status === 'complete') { failed = true; throw new Error('暂时无法保存') }
+    originalSave()
+  })
   await expect(agent.waitForIdle()).rejects.toThrow('暂时无法保存')
   await Promise.resolve()
   expect(new StateRepository(path).state.conversations[0].messages[1]).toMatchObject({ status: 'error', content: '正文', error: '暂时无法保存' })

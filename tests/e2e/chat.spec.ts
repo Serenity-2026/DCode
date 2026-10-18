@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { AddressInfo } from 'node:net'
 import { anthropicEvents, openAIResponse, testCall } from '../unit/llm-fixtures'
+import { localDay, shiftDay } from '../../src/shared/usage'
 
 let server: Server
 let baseUrl: string
@@ -165,6 +166,7 @@ test.beforeAll(async () => {
       response.write('data: {"choices":[{"delta":{"content":"正在分析…"}}]}\n\n')
       const timer = setTimeout(() => {
         response.write(`data: ${JSON.stringify({ choices: [{ delta: { content: '\n\n这是流式回答。\n\n```typescript\nconst answer = 42\n```\n\n| 项目 | 状态 |\n| --- | --- |\n| 流式 | 完成 |' }, finish_reason: 'stop' }] })}\n\n`)
+        if (prompt.includes('用量统计验证')) response.write(`data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 1200, completion_tokens: 300, total_tokens: 1500 } })}\n\n`)
         response.end('data: [DONE]\n\n')
       }, prompt.includes('并行任务B') ? 6_000 : prompt.includes('停止') ? 15_000 : prompt.includes('导航延续') ? 2_500 : 1_000)
       response.on('close', () => clearTimeout(timer))
@@ -719,7 +721,9 @@ test('settings categories, model selection and permission preview preserve real 
   expect(selectedState.ok && selectedState.value.selectedModel).toBe('gpt-6-sol')
   expect(await page.locator('.model-brand-icon img').evaluateAll(images => images.every(image => (image as HTMLImageElement).complete && (image as HTMLImageElement).naturalWidth > 0))).toBe(true)
   await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('settings-light.png') })
-  for (const category of ['用量统计', '记忆', '沙箱', '插件市场', '电脑操控', '技能', 'MCP 服务器', '已归档']) {
+  await page.getByRole('button', { name: '用量统计', exact: true }).click()
+  await expect(page.getByRole('region', { name: 'Token 活动', exact: true })).toBeVisible()
+  for (const category of ['记忆', '沙箱', '插件市场', '电脑操控', '技能', 'MCP 服务器', '已归档']) {
     await page.getByRole('button', { name: category, exact: true }).click()
     await expect(page.getByText('暂未开放', { exact: true })).toBeVisible()
   }
@@ -1378,6 +1382,16 @@ test('settings groups, account actions, typography and protocol-aware address pr
   await page.getByRole('button', { name: '添加 Provider', exact: true }).click()
   const address = page.getByRole('combobox', { name: '服务地址', exact: true })
   const protocol = page.getByRole('combobox', { name: 'API 协议', exact: true })
+  await address.fill('deep')
+  await expect(page.locator('.provider-address-option')).toHaveCount(1)
+  await expect(page.locator('.provider-address-option')).toContainText('DeepSeek')
+  await address.fill('DASH')
+  await expect(page.locator('.provider-address-option')).toHaveCount(1)
+  await expect(page.locator('.provider-address-option')).toContainText('Qwen')
+  await address.fill('not-a-provider')
+  await expect(page.locator('.provider-address-option:visible')).toHaveCount(0)
+  await address.fill('')
+  await address.press('Escape')
   for (const [brand, openai, anthropic] of [
     ['DeepSeek', 'https://api.deepseek.com/v1', 'https://api.deepseek.com/anthropic'],
     ['Kimi', 'https://api.moonshot.cn/v1', 'https://api.moonshot.cn/anthropic'],
@@ -1400,6 +1414,7 @@ test('settings groups, account actions, typography and protocol-aware address pr
   await protocol.click()
   await page.getByText('Anthropic Messages', { exact: true }).click()
   await expect(address).toHaveValue('https://custom.example/v2')
+  await address.fill('')
   await address.click()
   await expect(page.locator('.ant-select-item-option').filter({ hasText: 'OpenAI / ChatGPT' })).toHaveAttribute('aria-disabled', 'true')
   await page.getByText('OpenAI / ChatGPT', { exact: true }).hover()
@@ -1451,6 +1466,74 @@ test('settings groups, account actions, typography and protocol-aware address pr
   expect(state.ok && state.value.typography).toEqual({ fontFamily: 'serif', fontSize: 18 })
   expect(state.ok && state.value.providers).toHaveLength(1)
   await logout()
+})
+
+test('usage statistics capture actual SSE usage, persist independently, render calendar modes and rankings', async ({}, testInfo) => {
+  await launch()
+  await authenticate('usage-ui', true)
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByRole('button', { name: '用量统计', exact: true }).click()
+  await expect(page.getByRole('region', { name: '常用 MCP', exact: true })).toContainText('暂无调用记录')
+  await expect(page.locator('.usage-overview dd').first()).toHaveText('0')
+  await page.getByRole('button', { name: '关闭', exact: true }).click()
+  await page.getByRole('textbox', { name: '消息', exact: true }).fill('用量统计验证')
+  await page.getByRole('button', { name: '发送消息', exact: true }).click()
+  await expect(page.locator('article[data-status="complete"][data-role="assistant"]')).toBeVisible()
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByRole('button', { name: '用量统计', exact: true }).click()
+  await expect(page.locator('.usage-overview dd').first()).toHaveText('1,500')
+  const today = localDay(new Date())
+  await page.locator(`.usage-cell[data-date="${today}"]`).hover()
+  await expect(page.getByRole('tooltip')).toContainText(`${today} · 1,500 Token`)
+  await application.close()
+  // 隔离测试账号的历史记录，用于验证跨月热力图和排行；不写入任何生产账号。
+  const path = join(directory, 'state.json')
+  const state = JSON.parse(readFileSync(path, 'utf8'))
+  for (let i = 1; i <= 100; i++) if (i % 7 !== 0) {
+    const day = shiftDay(today, -i)
+    state.users[0].usageRecords.push({ id: `history-${i}`, startedAt: `${day}T10:00:00Z`, lastActiveAt: `${day}T10:02:00Z`, finishedAt: `${day}T10:02:00Z`, requests: 1, reportedRequests: 1, days: { [day]: i * 100 }, tools: [{ kind: 'mcp', name: i % 2 ? '文档检索' : '浏览器', count: i % 2 ? 3 : 1 }, { kind: 'skill', name: '代码审查', count: 1 }] })
+  }
+  state.conversations = []; state.activeConversationId = null
+  writeFileSync(path, JSON.stringify(state))
+  await launch()
+  await expect(page.getByRole('button', { name: '切换模型', exact: true })).toBeEnabled()
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByRole('button', { name: '用量统计', exact: true }).click()
+  await expect(page.getByRole('region', { name: '常用 MCP', exact: true }).locator('li').first()).toContainText('文档检索')
+  await expect(page.getByRole('region', { name: '常用 Skill', exact: true })).toContainText('代码审查')
+  await page.locator(`.usage-cell[data-date="${today}"]`).hover()
+  await expect(page.getByRole('tooltip')).toContainText('1,500 Token')
+  await page.screenshot({ path: testInfo.outputPath('usage-light.png'), animations: 'disabled' })
+  await page.getByText('每周', { exact: true }).click()
+  await expect(page.locator('.usage-cell')).toHaveCount(53)
+  await page.locator('.usage-cell').last().focus()
+  await expect(page.getByRole('tooltip')).toContainText('至')
+  await page.getByText('累计总量', { exact: true }).click()
+  await page.locator(`.usage-cell[data-date="${today}"]`).hover()
+  await expect(page.getByRole('tooltip')).toContainText('累计')
+  await page.getByRole('button', { name: '外观', exact: true }).click()
+  await page.getByText('深色', { exact: true }).click()
+  await page.getByRole('button', { name: '用量统计', exact: true }).click()
+  await page.locator(`.usage-cell[data-date="${today}"]`).hover()
+  await expect(page.getByRole('tooltip')).toContainText('1,500 Token')
+  await page.screenshot({ path: testInfo.outputPath('usage-dark.png'), animations: 'disabled' })
+  await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(820, 620))
+  await expect.poll(() => page.locator('.settings-layout').evaluate(element => element.scrollWidth === element.clientWidth)).toBe(true)
+  await page.getByRole('heading', { name: 'Token 活动', exact: true }).hover()
+  await expect(page.getByRole('tooltip')).not.toBeVisible()
+  await page.locator(`.usage-cell[data-date="${today}"]`).focus()
+  await expect(page.getByRole('tooltip')).toContainText('1,500 Token')
+  await expect.poll(async () => {
+    const bounds = await page.getByRole('tooltip').boundingBox()
+    const width = await page.evaluate(() => innerWidth)
+    return Boolean(bounds && bounds.x >= 0 && bounds.x + bounds.width <= width)
+  }).toBe(true)
+  await page.screenshot({ path: testInfo.outputPath('usage-narrow.png'), animations: 'disabled' })
+  await logout()
+  await authenticate('usage-empty', true)
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByRole('button', { name: '用量统计', exact: true }).click()
+  await expect(page.locator('.usage-overview dd').first()).toHaveText('0')
 })
 
 test('manual model entry, catalog choice, actual chat request and restart', async ({}, testInfo) => {

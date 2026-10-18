@@ -15,7 +15,7 @@ export class Agent {
   constructor(private readonly loop: AgentLoop, tools: AgentTool[]) {
     if (new Set(tools.map(tool => tool.name)).size !== tools.length) throw new Error('工具名称重复。')
     this.tools = tools.map(tool => {
-      const copy = { name: tool.name, description: tool.description, parameters: structuredClone(tool.parameters), executionMode: tool.executionMode, execute: tool.execute.bind(tool) }
+      const copy = { name: tool.name, description: tool.description, parameters: structuredClone(tool.parameters), executionMode: tool.executionMode, usageIdentity: tool.usageIdentity && structuredClone(tool.usageIdentity), execute: tool.execute.bind(tool) }
       return { tool: copy, validate: toolValidator(copy) }
     })
     this.current = { tools: this.tools.map(({ tool: { name, description, parameters } }) => ({ name, description, parameters })), messages: [], isStreaming: false, pendingToolCalls: [] }

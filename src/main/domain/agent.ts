@@ -1,5 +1,6 @@
 import type { AgentTool, AssistantMessage, LlmDelta, LlmMessage, ToolDefinition } from './llm'
 import type { ModelConfig } from './model-config'
+import type { ToolUsageIdentity } from '../../shared/usage'
 
 /** 启动时编译的可信工具，循环仅使用 handler 与参数校验函数。 */
 export interface RegisteredTool { tool: AgentTool; validate: (value: unknown) => boolean }
@@ -27,7 +28,7 @@ export type AgentLoopEvent =
   | { type: 'message_start'; message: AssistantMessage }
   | { type: 'message_update'; delta: LlmDelta }
   | { type: 'message_end'; message: AssistantMessage | ToolResultMessage }
-  | { type: 'tool_execution_start'; toolCallId: string; name: string; arguments: Record<string, unknown> }
+  | { type: 'tool_execution_start'; toolCallId: string; name: string; arguments: Record<string, unknown>; usageIdentity?: ToolUsageIdentity }
   | { type: 'tool_execution_end'; toolCallId: string; name: string; result: ToolResultMessage }
   | { type: 'turn_end'; message: AssistantMessage; toolResults: ToolResultMessage[] }
 

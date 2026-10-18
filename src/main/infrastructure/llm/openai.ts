@@ -1,6 +1,7 @@
 import type { AssistantMessage, LlmContent, LlmDelta, LlmMessage, ToolDefinition } from '../../domain/llm'
 import type { ModelConfig } from '../../domain/model-config'
 import { consumeEvents, parseEvent, parseToolArguments } from './sse'
+import { isTokenCount } from '../../../shared/usage'
 
 /** 将统一消息与工具转换为 OpenAI Chat Completions，按配置发送选项并保留同源工具轮次的推理内容。 */
 export function openAIRequest(config: ModelConfig, messages: LlmMessage[], tools: ToolDefinition[], maxTokens: number): object {
@@ -26,7 +27,7 @@ export function openAIRequest(config: ModelConfig, messages: LlmMessage[], tools
   }
   if (images.length) converted.push({ role: 'user', content: images })
   return {
-    model: config.model, stream: true, max_tokens: maxTokens,
+    model: config.model, stream: true, stream_options: { include_usage: true }, max_tokens: maxTokens,
     messages: converted,
     ...(tools.length ? { tools: tools.map(tool => ({ type: 'function', function: tool })), tool_choice: 'auto' } : {}),
     ...(config.fastMode ? { service_tier: 'priority' } : {}),
@@ -58,6 +59,9 @@ export async function consumeSSE(body: ReadableStream<Uint8Array>, onDelta: (del
     if (data.trim() === '[DONE]') return true
     const chunk = parseEvent(data)
     if (chunk.error) throw new Error('模型服务返回错误，请重试。')
+    const usage = chunk.usage
+    const total = isTokenCount(usage?.total_tokens) ? usage.total_tokens : isTokenCount(usage?.prompt_tokens) && isTokenCount(usage?.completion_tokens) ? usage.prompt_tokens + usage.completion_tokens : undefined
+    if (isTokenCount(total)) onDelta({ totalTokens: total })
     if (!Array.isArray(chunk.choices)) throw new Error('模型回复格式无效。')
     const choice = chunk.choices[0]
     const delta = choice?.delta

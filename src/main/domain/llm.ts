@@ -1,5 +1,6 @@
 import type { ModelApi } from '../../shared/types'
 import type { ModelConfig } from './model-config'
+import type { ToolUsageIdentity } from '../../shared/usage'
 
 /** 统一内容块；供应商的 tool_calls/tool_use 字段不进入业务循环。 */
 export type LlmContent =
@@ -54,6 +55,7 @@ export interface ToolDefinition { name: string; description: string; parameters:
 /** 本地调度属性；连续并行调用合组，未声明时按串行处理。 */
 export type ToolExecutionMode = 'parallel' | 'sequential'
 export interface AgentTool<TDetails = unknown> extends ToolDefinition {
+  usageIdentity?: ToolUsageIdentity
   executionMode?: ToolExecutionMode
   execute(argumentsValue: Record<string, unknown>, signal: AbortSignal): Promise<AgentToolResult<TDetails>>
 }
@@ -74,7 +76,7 @@ export interface FileChangeTurn { conversationId: string; messageId: string }
 export type RecordFileChange = (turn: FileChangeTurn, path: string, before: string | null, after: string, write: () => Promise<void>) => Promise<void>
 
 /** AgentSession 只消费文本增量，完整内容块由模型端口返回给循环。 */
-export interface LlmDelta { content?: string; reasoning?: string }
+export interface LlmDelta { content?: string; reasoning?: string; totalTokens?: number }
 export type ModelStream = (config: ModelConfig, messages: LlmMessage[], controller: AbortController, onDelta: (delta: LlmDelta) => void, tools: ToolDefinition[]) => Promise<AssistantMessage>
 
 /** 将现有成功问答上下文转为统一消息；不带历史推理或工具执行记录。 */

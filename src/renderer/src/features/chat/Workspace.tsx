@@ -61,6 +61,7 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
   /** 合并 IPC 返回的 Snapshot 与已收到的 StreamEvent，避免较早的快照覆盖较新的流式文本。 */
   const installSnapshot = useCallback((next: Snapshot): void => {
     for (const c of next.conversations) c.messages = c.messages.map(m => streamEvents.current.get(m.id)?.message || m)
+    next.usageRecords = next.usageRecords?.map(record => streamEvents.current.get(record.id)?.usageRecord || record)
     setSnapshot(next)
   }, [setSnapshot])
 
@@ -106,6 +107,7 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
     streamEvents.current.set(event.message.id, event)
     setSnapshot(previous => previous ? {
       ...previous,
+      usageRecords: event.usageRecord ? [...(previous.usageRecords || []).filter(record => record.id !== event.usageRecord!.id), event.usageRecord] : previous.usageRecords,
       conversations: previous.conversations.map(c => c.id === event.conversationId ? {
         ...c,
         updatedAt: event.message.status === 'streaming' ? c.updatedAt : new Date().toISOString(),

@@ -1,0 +1,47 @@
+.usage-settings { --usage-0: #e9ece8; --usage-1: #bdddf5; --usage-2: #72b7ea; --usage-3: #2c94dc; --usage-4: #086bb7; }
+.settings-layout[data-theme='dark'] .usage-settings { --usage-0: #353832; --usage-1: #123f61; --usage-2: #145c91; --usage-3: #168be0; --usage-4: #6cbaff; }
+.usage-profile { display: flex; flex-direction: column; align-items: center; padding: 24px 0 28px; }
+.usage-avatar { width: 80px; height: 80px; display: grid; place-items: center; border-radius: 50%; background: #21ad64; color: #fff; font-size: 30px; font-weight: 400; }
+.usage-profile h3 { font-size: 20px; font-weight: 550; margin: 16px 0 6px; overflow-wrap: anywhere; }
+.usage-profile > span { color: var(--settings-muted); font-size: 12px; }
+.usage-overview { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); margin: 0 0 28px; padding: 19px 0; border: 1px solid var(--settings-line); border-radius: 16px; }
+.usage-overview > div { text-align: center; padding: 0 6px; }
+.usage-overview > div + div { border-left: 1px solid var(--settings-line); }
+.usage-overview dd { margin: 0 0 8px; font-size: 16px; font-variant-numeric: tabular-nums; }
+.usage-overview dt { color: var(--settings-muted); font-size: 10px; }
+.usage-activity header, .usage-ranking header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+.usage-activity h3, .usage-ranking h3 { font-size: 14px; font-weight: 550; margin: 0; }
+.usage-calendar-scroll { overflow-x: auto; padding: 3px; margin: -3px; }
+.usage-calendar { min-width: 575px; }
+.usage-cells { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 1fr); grid-template-columns: repeat(53, minmax(0, 1fr)); gap: 3px; }
+.usage-cells .usage-cell.ant-btn { padding: 0; width: 100%; min-width: 0; height: auto; aspect-ratio: 1; border-radius: 3px; border: 0; background: var(--cell-color); transition: outline-color 120ms; }
+.usage-cells .usage-cell.ant-btn:hover, .usage-cells .usage-cell.ant-btn:focus-visible { background: var(--cell-color); outline: 2px solid var(--settings-text); outline-offset: 1px; }
+.usage-settings [data-level='0'] { --cell-color: var(--usage-0); }
+.usage-settings [data-level='1'] { --cell-color: var(--usage-1); }
+.usage-settings [data-level='2'] { --cell-color: var(--usage-2); }
+.usage-settings [data-level='3'] { --cell-color: var(--usage-3); }
+.usage-settings [data-level='4'] { --cell-color: var(--usage-4); }
+.usage-calendar-weekly .usage-cells { grid-template-rows: 1fr; }
+.usage-calendar-weekly .usage-cell.ant-btn { aspect-ratio: 1 / 7; }
+.usage-months { display: grid; grid-template-columns: repeat(53, minmax(0, 1fr)); gap: 3px; margin-top: 9px; color: var(--settings-muted); font-size: 10px; white-space: nowrap; }
+.usage-activity footer { display: flex; justify-content: space-between; gap: 12px; color: var(--settings-muted); margin-top: 18px; font-size: 10px; }
+.usage-legend { display: flex; align-items: center; gap: 4px; }
+.usage-legend i { width: 9px; height: 9px; border-radius: 2px; background: var(--cell-color); }
+.usage-note { color: var(--settings-muted); font-size: 10px; margin: 12px 0 0; }
+.usage-rankings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 28px; }
+.usage-ranking { padding: 18px; border-radius: 16px; border: 1px solid var(--settings-line); min-width: 0; }
+.usage-ranking header > span { font-size: 10px; color: var(--settings-muted); }
+.usage-ranking .ant-empty { margin: 20px 0; font-size: 12px; }
+.usage-ranking ol { padding: 0; margin: 0; list-style: none; }
+.usage-ranking li + li { margin-top: 16px; }
+.usage-ranking li > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; }
+.usage-ranking li span { white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+.usage-ranking li strong { font-variant-numeric: tabular-nums; font-weight: 500; }
+.usage-rank-track { height: 4px; margin-top: 8px; border-radius: 2px; background: var(--usage-0); overflow: hidden; }
+.usage-rank-track i { display: block; height: 100%; border-radius: inherit; background: var(--usage-3); }
+@media (max-width: 850px) {
+  .usage-overview { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px 0; }
+  .usage-overview > div:nth-child(4) { border-left: 0; }
+  .usage-rankings { grid-template-columns: 1fr; }
+  .usage-activity header { flex-wrap: wrap; }
+}

@@ -7,6 +7,7 @@ import { ModelIcon } from '../../components/ModelIcon'
 import { selectionTheme } from '../../components/selection-theme'
 import { defaultTypography, fontFamilies, fontSizes, type Typography } from '../../../../shared/appearance'
 import { findProviderPreset, providerPresets } from './provider-presets'
+import { UsageSettings } from './UsageSettings'
 
 const sections = [
   { key: 'models', label: '模型', icon: <RobotOutlined /> },
@@ -63,7 +64,7 @@ export function ModelSettings({ snapshot, busy, onClose, onSaved, onTheme, onMod
               <footer className="settings-provider-footer"><span><KeyOutlined /> 凭据已保存</span><Button type="text" aria-label={`配置 ${provider.name}`} disabled={busy} onClick={() => setEditing(provider.id)}>配置 <span aria-hidden="true">↗</span></Button></footer>
             </article>)}</div>
             {!snapshot.providers.length && <Empty className="settings-empty" image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有模型服务"><Button type="primary" icon={<PlusOutlined />} disabled={busy} onClick={() => setEditing('new')}>添加第一个 Provider</Button></Empty>}
-          </> : section === 'appearance' ? <>
+          </> : section === 'usage' ? <UsageSettings user={user} records={snapshot.usageRecords || []} /> : section === 'appearance' ? <>
             <div className="settings-appearance"><div><h3>主题</h3></div><Segmented value={snapshot.theme} options={[{ label: '浅色', value: 'light', icon: <SunOutlined /> }, { label: '深色', value: 'dark', icon: <MoonOutlined /> }]} disabled={busy} onChange={value => onTheme(value === 'dark' ? 'dark' : 'light')} /></div>
             <div className="settings-appearance"><h3>字体</h3><Select aria-label="字体" className="settings-font-select" value={typography.fontFamily} disabled={busy} options={Object.entries(fontFamilies).map(([value, font]) => ({ value, label: <span style={{ fontFamily: font.value }}>{font.label}</span> }))} onChange={fontFamily => onTypography({ ...typography, fontFamily })} /></div>
             <div className="settings-appearance"><h3>字号</h3><Select aria-label="字号" className="settings-font-select" value={typography.fontSize} disabled={busy} options={fontSizes.map(value => ({ value, label: `${value} px` }))} onChange={fontSize => onTypography({ ...typography, fontSize })} /></div>
@@ -82,13 +83,14 @@ function ProviderEditor({ id, snapshot, busy, testing, onTesting, onSaved, onBac
 }) {
   const [editing, setEditing] = useState(id)
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null)
+  const [addressSearch, setAddressSearch] = useState('')
   const [form] = Form.useForm<ProviderDraft>()
   const profile = snapshot.providers.find(provider => provider.id === editing)
   const api: ModelApi = Form.useWatch('api', form) || resolveModelApi(profile?.baseUrl || '', profile?.api)
   const baseUrl: string = Form.useWatch('baseUrl', form) || ''
   const manualModels: string[] = Form.useWatch('manualModels', form) || []
   const preset = findProviderPreset(baseUrl)
-  const addressOptions = providerPresets.map(item => ({
+  const addressOptions = providerPresets.filter(item => `${item.name} ${Object.values(item.urls).join(' ')}`.toLowerCase().includes(addressSearch.trim().toLowerCase())).map(item => ({
     value: item.urls[api] || item.name, disabled: !item.urls[api],
     label: <span className="provider-address-option"><ModelIcon provider={item.name} /><span><strong>{item.name}</strong><small>{item.urls[api] || '不支持此协议'}</small></span></span>
   }))
@@ -122,7 +124,8 @@ function ProviderEditor({ id, snapshot, busy, testing, onTesting, onSaved, onBac
         <Form.Item name="name" label="配置名称" rules={[{ required: true, message: '请输入配置名称。' }]}><Input aria-label="配置名称" maxLength={40} placeholder="例如：我的模型服务" /></Form.Item>
         <Form.Item name="api" label="API 协议"><Select aria-label="API 协议" onChange={changeProtocol} options={[{ value: 'openai-completions', label: 'OpenAI 兼容' }, { value: 'anthropic-messages', label: 'Anthropic Messages' }]} /></Form.Item>
       </div>
-      <Form.Item name="baseUrl" label="服务地址" rules={[{ required: true, message: '请输入服务地址。' }]}><AutoComplete options={addressOptions} popupMatchSelectWidth filterOption={false} onSelect={value => {
+      <Form.Item name="baseUrl" label="服务地址" rules={[{ required: true, message: '请输入服务地址。' }]}><AutoComplete options={addressOptions} popupMatchSelectWidth filterOption={false} onSearch={setAddressSearch} onSelect={value => {
+        setAddressSearch('')
         const selected = findProviderPreset(value)
         if (!form.getFieldValue('name') && selected) form.setFieldsValue({ name: selected.name })
       }}><Input aria-label="服务地址" prefix={<ModelIcon provider={preset?.name || baseUrl} />} suffix={<DownOutlined />} maxLength={2048} placeholder="选择供应商或输入服务地址" /></AutoComplete></Form.Item>

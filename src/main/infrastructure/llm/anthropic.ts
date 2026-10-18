@@ -1,6 +1,7 @@
 import type { AssistantMessage, LlmContent, LlmDelta, LlmMessage, ToolDefinition } from '../../domain/llm'
 import type { ModelConfig } from '../../domain/model-config'
 import { consumeEvents, parseEvent, parseToolArguments } from './sse'
+import { isTokenCount } from '../../../shared/usage'
 
 /** 转换统一上下文，system 独立发送，同轮 toolResult 合并到紧随 assistant 的 user 消息。 */
 export function anthropicRequest(config: ModelConfig, context: LlmMessage[], tools: ToolDefinition[], maxTokens: number): object {
@@ -34,6 +35,15 @@ export async function consumeAnthropic(body: ReadableStream<Uint8Array>, onDelta
   const ids = new Set<string>()
   let started = false
   let finish: string | null = null
+  const tokens: Record<string, number> = {}
+  const reportUsage = (usage: Record<string, unknown> | undefined): void => {
+    let changed = false
+    for (const key of ['input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens']) if (isTokenCount(usage?.[key])) {
+      tokens[key] = usage[key]; changed = true
+    }
+    const total = Object.values(tokens).reduce((sum, value) => sum + value, 0)
+    if (changed && isTokenCount(total)) onDelta({ totalTokens: total })
+  }
   await consumeEvents(body, data => {
     const event = parseEvent(data)
     if (event.type === 'ping') return false
@@ -41,6 +51,7 @@ export async function consumeAnthropic(body: ReadableStream<Uint8Array>, onDelta
     if (event.type === 'message_start') {
       if (started || event.message?.role !== 'assistant') throw new Error('模型回复格式无效。')
       started = true
+      reportUsage(event.message.usage)
     } else if (!started) throw new Error('模型回复缺少开始标记。')
     else if (event.type === 'content_block_start') {
       if (finish || !Number.isSafeInteger(event.index) || event.index < 0 || event.index >= 32 || blocks.has(event.index)) throw new Error('模型内容块无效。')
@@ -71,6 +82,7 @@ export async function consumeAnthropic(body: ReadableStream<Uint8Array>, onDelta
       if (entry.content.type === 'toolCall' && entry.json !== null) entry.content.arguments = parseToolArguments(entry.json)
       entry.closed = true
     } else if (event.type === 'message_delta') {
+      reportUsage(event.usage)
       if ([...blocks.values()].some(block => !block.closed)) throw new Error('模型内容块尚未结束。')
       if (event.delta?.stop_reason) finish = event.delta.stop_reason
     } else if (event.type === 'message_stop') {

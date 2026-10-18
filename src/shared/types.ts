@@ -1,4 +1,5 @@
 import type { Typography } from './appearance'
+import type { UsageRecord } from './usage'
 
 /** 账号保存的外观偏好，由 Root 映射到 Ant Design 主题。 */
 export type Theme = 'light' | 'dark'
@@ -80,6 +81,7 @@ export interface ProviderDraft { id?: string; name: string; baseUrl: string; api
 
 /** 界面可见状态；未登录时不包含账号、聊天或模型配置。 */
 export interface Snapshot {
+  usageRecords?: UsageRecord[]
   users: User[]
   activeUserId: string | null
   activeConversationId: string | null
@@ -128,7 +130,7 @@ export interface ToolExecution {
 }
 
 /** 流更新携带完整消息及工具记录，Workspace 按消息 ID 合并。 */
-export interface StreamEvent { conversationId: string; message: Message }
+export interface StreamEvent { conversationId: string; message: Message; usageRecord?: UsageRecord }
 
 /** 主进程 IPC 的成功/失败结果，不向界面泄露秘密。 */
 export type Result<T> = { ok: true; value: T } | { ok: false; error: string }
