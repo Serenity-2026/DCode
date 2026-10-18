@@ -1,5 +1,10 @@
 import type { Attachment, Conversation, FilePreview, ModelDetails, ProviderProfile, ReasoningEffort } from './types'
 
+/** 后续提问只保存一句有界纯文本；空建议不写入消息。 */
+export function isSuggestedPrompt(value: unknown): value is string {
+  return typeof value === 'string' && Boolean(value.trim()) && value === value.trim() && value.length <= 160 && !/[\u0000-\u001f\u007f\u2028\u2029]/.test(value)
+}
+
 /** 校验工具提供或磁盘恢复的预览，避免非文本内容进入文件面板。 */
 export function isFilePreview(value: unknown): value is FilePreview {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false

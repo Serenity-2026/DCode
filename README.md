@@ -69,6 +69,7 @@ DeepSeek 模型从账号 `/models` 接口读取，聊天使用官方非思考请
 macOS 默认数据文件：`~/Library/Application Support/DCode/state.json`。Windows 与 Linux 使用 Electron 对应的用户数据目录。账号、会话、主题、服务配置、模型列表与快速模式保存在此文件中，写入使用临时文件原子替换；请在应用关闭后备份数据。当前项目只读写 schema 4 的数据格式，不包含其他版本升级或旧档案关联功能。聊天正文仍是本机 JSON，OS 用户可读取；加密的秘密依赖当前 OS 安全存储，复制数据文件到其他机器不保证可解密。
 
 - `Enter` 发送，`Shift + Enter` 换行；中文输入法组词时不会发送。
+- 回答完成后，后台生成后续提问建议，在空输入框中以灰色显示；按 `Tab` 采纳后可编辑、发送。建议请求的 Token 计入用量，失败时保留默认提示。详见 [后续提问建议](doc/SPEC-suggested-prompts.md)。
 - `Cmd/Ctrl + N` 新对话。
 - 不同对话可同时运行任务；切换对话时后台任务继续，侧栏显示运行图标。同一对话一次运行一个任务，停止按钮只停止当前对话并保留部分回复；可重新生成最后一个回答。退出账号或关闭窗口会统一停止任务并保存。详见 [doc/SPEC-concurrent-conversations.md](doc/SPEC-concurrent-conversations.md)。
 - 搜索匹配标题与消息正文。每个账号只展示自己的会话、模型配置和主题。

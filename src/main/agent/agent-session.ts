@@ -6,14 +6,16 @@ import type { ModelConfig } from '../domain/model-config'
 import { Agent } from './agent'
 import { StateService } from '../services/state-service'
 import { isTokenCount, localDay } from '../../shared/usage'
+import type { Suggestions } from '../services/suggestion-service'
 
 /** 应用会话层：准备上下文、保存正文和推送界面；运行控制由独立 Agent 负责。 */
 export class AgentSession {
+  private suggestionVersion = 0
   // 用 ID 定位当前仓库对象，其他会话的事务回滚不会使流式更新写到旧引用。
   private target?: { conversationId: string; messageId: string; lastSave: number; lastEmit: number; requestTokens: number; reported: boolean }
 
   /** 订阅 Agent 事件并注入应用报告回调；本层只恢复会话状态，不持有取消控制器。 */
-  constructor(private store: StateService, private emit: (event: StreamEvent) => void, private readonly agent: Agent, private readonly reportError: (error: unknown) => void, private readonly workspace?: ToolWorkspace) {
+  constructor(private store: StateService, private emit: (event: StreamEvent) => void, private readonly agent: Agent, private readonly reportError: (error: unknown) => void, private readonly workspace?: ToolWorkspace, private readonly suggestions?: Suggestions) {
     //Agent 有事件时，调用该函数；这个函数再把事件交给 onEvent() 处理。
     this.agent.subscribe(event => this.onEvent(event))
   }
@@ -28,6 +30,9 @@ export class AgentSession {
     if (!input || typeof input !== 'object' || (input.retry !== undefined && typeof input.retry !== 'boolean')) throw new Error('无效请求。')
     if (!config.apiKey) throw new Error('请先配置模型 API 密钥。')
     const { conversation, message } = this.store.begin(input.content, Boolean(input.retry), config.model, input.attachments, input.conversationId)
+    const version = ++this.suggestionVersion
+    const suggestionConfig = { ...config }
+    this.suggestions?.cancel()
     const target = this.target = { conversationId: conversation.id, messageId: message.id, lastSave: Date.now(), lastEmit: 0, requestTokens: 0, reported: false }
     try {
       this.workspace?.setDirectory(conversation.directory)
@@ -37,6 +42,7 @@ export class AgentSession {
       this.agent.replaceMessages(context)
       // 常规运行错误由 agent_end 保存；启动或收尾异常也必须投影到固定回复。
       void this.agent.prompt(config, prompt)
+        .then(() => { if (version === this.suggestionVersion) this.suggestions?.start(conversation.id, message.id, suggestionConfig) })
         .catch(error => this.finishFailure(target, error))
         .catch(error => this.reportError(error))
     } catch (error) {
@@ -46,8 +52,15 @@ export class AgentSession {
     return this.store.snapshot()
   }
 
+  /** 释放后台建议，并阻止刚结束的 Agent 在停止或删除后重新启动建议请求。 */
+  cancelSuggestions(): void {
+    this.suggestionVersion++
+    this.suggestions?.cancel()
+  }
+
   /** 取消并等待 Agent 终止事件保存完成，再向界面返回最终快照。 */
   async stop(): Promise<Snapshot> {
+    this.cancelSuggestions()
     this.agent.abort()
     await this.agent.waitForIdle()
     await this.workspace?.waitForChanges?.()

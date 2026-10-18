@@ -56,6 +56,8 @@ export interface Message {
   attachments?: Attachment[]
   toolExecutions?: ToolExecution[]
   fileChanges?: FileChange[]
+  /** 后台生成的后续提问；用户采纳前不作为输入或模型上下文。 */
+  suggestedPrompt?: string
 }
 
 /** 属于一个账号的完整对话，StateService 持久化，AgentSession 构建模型上下文。 */
@@ -129,8 +131,8 @@ export interface ToolExecution {
   preview?: FilePreview
 }
 
-/** 流更新携带完整消息及工具记录，Workspace 按消息 ID 合并。 */
-export interface StreamEvent { conversationId: string; message: Message; usageRecord?: UsageRecord }
+/** 流更新携带完整消息及工具记录；后台建议更新不改变会话排序。 */
+export interface StreamEvent { conversationId: string; message: Message; usageRecord?: UsageRecord; background?: boolean }
 
 /** 主进程 IPC 的成功/失败结果，不向界面泄露秘密。 */
 export type Result<T> = { ok: true; value: T } | { ok: false; error: string }

@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, isAbsolute } from 'node:path'
 import type { StoredState } from '../domain/state'
-import { isFilePreview, reasoningEfforts, validateAttachments } from '../../shared/context'
+import { isFilePreview, isSuggestedPrompt, reasoningEfforts, validateAttachments } from '../../shared/context'
 import { modelApis } from '../../shared/model-api'
 import { isTypography } from '../../shared/appearance'
 import { validateManualModels } from '../domain/model-config'
@@ -44,6 +44,7 @@ function validState(value: unknown): boolean {
     conversationIds.add(c.id)
     if (c.messages.some(m => !m || typeof m.id !== 'string' || !['user', 'assistant'].includes(m.role) || typeof m.content !== 'string' || typeof m.reasoning !== 'string' || !['complete', 'streaming', 'stopped', 'error'].includes(m.status) || typeof m.createdAt !== 'string' || (m.error !== undefined && typeof m.error !== 'string'))) return false
     if (new Set(c.messages.map(m => m.id)).size !== c.messages.length) return false
+    if (c.messages.some(m => m.suggestedPrompt !== undefined && (m.role !== 'assistant' || m.status !== 'complete' || !isSuggestedPrompt(m.suggestedPrompt)))) return false
     for (const message of c.messages) if (message.toolExecutions !== undefined) {
       const tools = message.toolExecutions
       if (!Array.isArray(tools) || tools.some(tool => !tool || typeof tool.id !== 'string' || !tool.id || typeof tool.name !== 'string' || !tool.name || !['running', 'complete', 'error', 'stopped'].includes(tool.status))) return false

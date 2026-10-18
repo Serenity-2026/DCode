@@ -16,6 +16,9 @@ let failDiscovery = false
 const discoveries: { path: string; authorization?: string }[] = []
 const requests: { model: string; max_tokens: number; service_tier?: string; reasoning_effort?: string; messages: { role: string; content: string }[]; authorization?: string }[] = []
 const nativeRequests: { system: string; model: string; messages: { role: string; content: { type: string; tool_use_id?: string; is_error?: boolean }[] }[] }[] = []
+const suggestionRequests: { model: string; tools?: unknown; max_tokens: number }[] = []
+let suggestionText = ''
+let suggestionDelay = 0
 
 /** 使用隔离的数据目录启动真实 Electron，live 模式改用本地环境里的服务配置。 */
 async function launch(live = false): Promise<void> {
@@ -107,6 +110,19 @@ test.beforeAll(async () => {
     request.on('data', chunk => { body += chunk })
     request.on('end', () => {
       const payload = JSON.parse(body)
+      // 后台建议不携带工具，单独记录，避免与主聊天的请求顺序断言混用。
+      if (!payload.tools) {
+        suggestionRequests.push(payload)
+        const text = JSON.stringify({ suggestion: suggestionText })
+        const events = request.url === '/anthropic/v1/messages' ? anthropicEvents(text) : [
+          { choices: [{ delta: { content: text }, finish_reason: 'stop' }] },
+          { choices: [], usage: { total_tokens: suggestionText ? 25 : 0 } }
+        ]
+        response.writeHead(200, { 'Content-Type': 'text/event-stream' })
+        const timer = setTimeout(() => response.end(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join('') + (request.url === '/anthropic/v1/messages' ? '' : 'data: [DONE]\n\n')), suggestionDelay)
+        response.on('close', () => clearTimeout(timer))
+        return
+      }
       if (request.url === '/anthropic/v1/messages') {
         if (request.headers['x-api-key'] !== 'e2e-anthropic-key' || request.headers['anthropic-version'] !== '2023-06-01') { response.writeHead(401); response.end(); return }
         nativeRequests.push(payload)
@@ -176,7 +192,7 @@ test.beforeAll(async () => {
   baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
 })
 
-test.beforeEach(() => { failDiscovery = false; discoveries.length = 0; requests.length = 0; nativeRequests.length = 0; directory = realpathSync(mkdtempSync(join(tmpdir(), 'dcode-e2e-'))) })
+test.beforeEach(() => { failDiscovery = false; discoveries.length = 0; requests.length = 0; nativeRequests.length = 0; suggestionRequests.length = 0; suggestionText = ''; suggestionDelay = 0; directory = realpathSync(mkdtempSync(join(tmpdir(), 'dcode-e2e-'))) })
 test.afterEach(async () => {
   await application?.close().catch(() => undefined)
   rmSync(directory, { recursive: true, force: true })
@@ -1600,6 +1616,103 @@ test('native protocol selection, safe tool failure loop and restart', async () =
   await launch()
   await expect(page.getByRole('button', { name: '切换模型', exact: true })).toContainText('native-model')
   await expect(page.locator('article[data-role="assistant"]')).toContainText('Anthropic 循环完成')
+})
+
+test('suggested prompts stay out of drafts until Tab, preserve typing, isolate conversations and restore after restart', async ({}, testInfo) => {
+  suggestionText = '为刚才的函数补充边界测试，只运行相关测试。'
+  suggestionDelay = 750
+  await launch()
+  await authenticate('suggestions-ui', true)
+  const input = page.getByRole('textbox', { name: '消息', exact: true })
+  const fallback = '描述你的想法，或粘贴代码…'
+  await input.fill('实现推荐问题验证')
+  await input.press('Enter')
+  await expect(input).toBeEnabled()
+  await input.fill('正在输入自己的问题')
+  await expect.poll(async () => {
+    const state = await page.evaluate(() => window.dcode.getState())
+    return state.ok && state.value.conversations[0].messages.at(-1)?.suggestedPrompt
+  }).toBe(suggestionText)
+  await expect(input).toHaveValue('正在输入自己的问题')
+  await expect(page.getByText('Tab 采纳建议', { exact: true })).toHaveCount(0)
+  await input.fill('')
+  await expect(input).toHaveAttribute('placeholder', suggestionText)
+  await expect(input).toHaveValue('')
+  await expect(page.getByRole('button', { name: '发送消息', exact: true })).toBeDisabled()
+  await input.press('Enter')
+  expect(requests).toHaveLength(1)
+  await input.press('Shift+Tab')
+  await expect(input).toHaveValue('')
+  await input.dispatchEvent('keydown', { key: 'Tab', code: 'Tab', isComposing: true })
+  await expect(input).toHaveValue('')
+  await input.press('Tab')
+  await expect(input).toHaveValue(suggestionText)
+  await expect(input).toBeFocused()
+  expect(requests).toHaveLength(1)
+  await input.fill(`${suggestionText} 验证编辑。`)
+  await input.press('Enter')
+  await expect(input).toHaveAttribute('placeholder', suggestionText)
+  expect(requests).toHaveLength(2)
+  expect(requests.at(-1)?.messages.at(-1)?.content).toBe(`${suggestionText} 验证编辑。`)
+  expect(suggestionRequests).toHaveLength(2)
+  expect(suggestionRequests[0]).toMatchObject({ model: requests[0].model, max_tokens: 512 })
+  expect(suggestionRequests[0]).not.toHaveProperty('tools')
+
+  await page.getByRole('button', { name: '新对话', exact: true }).click()
+  await expect(input).toHaveAttribute('placeholder', fallback)
+  await page.getByRole('button', { name: '实现推荐问题验证', exact: true }).click()
+  await expect(input).toHaveAttribute('placeholder', suggestionText)
+  const attachment = join(directory, 'suggestion.txt')
+  writeFileSync(attachment, '附件示例')
+  await application.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }) }, attachment)
+  await page.getByRole('button', { name: '添加附件', exact: true }).click()
+  await page.getByRole('menuitem', { name: /添加文件$/ }).click()
+  await expect(input).toHaveAttribute('placeholder', fallback)
+  await input.press('Tab')
+  await expect(input).toHaveValue('')
+  await page.getByRole('button', { name: '移除附件 suggestion.txt', exact: true }).click()
+  await expect(input).toHaveAttribute('placeholder', suggestionText)
+  await page.screenshot({ path: testInfo.outputPath('suggestion-light.png'), animations: 'disabled' })
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByRole('button', { name: '外观', exact: true }).click()
+  await page.getByText('深色', { exact: true }).click()
+  await page.getByRole('button', { name: '关闭', exact: true }).click()
+  await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(820, 620))
+  await expect(input).toHaveAttribute('placeholder', suggestionText)
+  await expect.poll(() => input.evaluate(element => element.getBoundingClientRect().right <= innerWidth)).toBe(true)
+  await page.screenshot({ path: testInfo.outputPath('suggestion-dark-narrow.png'), animations: 'disabled' })
+  await application.close()
+  await launch()
+  await expect(page.getByRole('textbox', { name: '消息', exact: true })).toHaveAttribute('placeholder', suggestionText)
+  expect(suggestionRequests).toHaveLength(2)
+  const state = await page.evaluate(() => window.dcode.getState())
+  expect(state.ok && state.value.usageRecords?.reduce((total, record) => total + Object.values(record.days).reduce((sum, count) => sum + count, 0), 0)).toBe(50)
+})
+
+test('suggested prompts are cancelled by retry and logout, while empty suggestions keep the normal placeholder', async () => {
+  suggestionText = '这条建议应该被取消。'
+  suggestionDelay = 10_000
+  await launch()
+  await authenticate('suggestion-cancel', true)
+  const input = page.getByRole('textbox', { name: '消息', exact: true })
+  await input.fill('生成建议取消验证')
+  await input.press('Enter')
+  await expect.poll(() => suggestionRequests.length).toBe(1)
+  await expect(input).toBeEnabled()
+  suggestionText = ''; suggestionDelay = 0
+  await page.getByRole('button', { name: '重新生成', exact: true }).click()
+  await expect.poll(() => suggestionRequests.length).toBe(2)
+  await expect(input).toBeEnabled()
+  await expect(input).toHaveAttribute('placeholder', '描述你的想法，或粘贴代码…')
+  await expect(page.getByText('Tab 采纳建议', { exact: true })).toHaveCount(0)
+  suggestionText = '退出后的建议'; suggestionDelay = 10_000
+  await input.fill('验证退出取消建议')
+  await input.press('Enter')
+  await expect.poll(() => suggestionRequests.length).toBe(3)
+  await logout()
+  await authenticate('suggestion-other', true)
+  await expect(input).toHaveAttribute('placeholder', '描述你的想法，或粘贴代码…')
+  expect((await page.evaluate(() => window.dcode.getState()))).toMatchObject({ ok: true, value: { conversations: [], usageRecords: [] } })
 })
 
 test('live DeepSeek model test and streaming smoke', async () => {

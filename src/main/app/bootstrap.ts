@@ -29,6 +29,7 @@ import { registerStateController } from '../controllers/state-controller'
 import { registerDesktopController } from '../controllers/desktop-controller'
 import { registerFileChangeController } from '../controllers/file-change-controller'
 import { FileChanges } from '../file/file-changes'
+import { Suggestions } from '../services/suggestion-service'
 
 /** 应用装配入口，依次连接 Repository、Service、Controller 和窗口，集中管理 ready、激活和退出。 */
 export async function startApplication(): Promise<void> {
@@ -76,7 +77,9 @@ export async function startApplication(): Promise<void> {
       const toolRuntime = new ToolRuntime((turn, path, before, after, write) => changes.record(turn, path, before, after, write))
       const tools = [new ReadTool(), new BashTool(), new EditTool(), new WriteTool()].map(tool => toolRuntime.bind(tool))
       const agent = new Agent(loop, tools)
-      return { session: new AgentSession(state, event => windows?.publish(event), agent, error => reportError('任务收尾失败', error), toolRuntime), dispose: () => toolRuntime.dispose() }
+      const suggestions = new Suggestions(state, event => windows?.publish(event))
+      const session = new AgentSession(state, event => windows?.publish(event), agent, error => reportError('任务收尾失败', error), toolRuntime, suggestions)
+      return { session, dispose: () => { session.cancelSuggestions(); toolRuntime.dispose() } }
     })
     app.on('will-quit', () => {
       try { generation.dispose() }

@@ -236,6 +236,7 @@ button { -webkit-app-region: no-drag; }
 .composer:focus-within { border-color: #a5b5a8; box-shadow: 0 5px 20px #00000006; }
 .composer textarea { padding: 0 2px; color: var(--text); font-size: var(--app-font-size, 14px); line-height: 1.75; outline: none !important; box-shadow: none !important; }
 .composer-input { position: relative; }
+.suggestion-hint { display: block; padding: 0 2px 4px; color: var(--muted); font-size: 12px; text-align: right; }
 .composer-input[data-generating='true'], .composer-input[data-generating='true'] textarea { cursor: none !important; }
 .generation-cursor { position: absolute; z-index: 1; left: var(--cursor-x, 50%); top: var(--cursor-y, 50%); width: 18px; height: 18px; transform: translate(-50%, -50%); opacity: 0; pointer-events: none; }
 .generation-cursor::after { content: ''; position: absolute; inset: 0; border: 2px solid var(--line); border-top-color: var(--text); border-right-color: var(--muted); border-radius: 50%; animation: generation-spin 800ms linear infinite; animation-play-state: paused; }
