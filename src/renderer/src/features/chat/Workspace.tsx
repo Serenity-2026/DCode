@@ -38,7 +38,7 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
   const [previewSelection, setPreviewSelection] = useState<{ messageId: string; toolId?: string; changeId?: string } | null>(null)
   const [modelsLoading, setModelsLoading] = useState(snapshot.providers.length > 0)
   const initialRefresh = useRef<Promise<Result<ModelRefresh>> | null>(null)
-  const [edit, setEdit] = useState<{ type: 'user' | 'conversation'; id: string; value: string } | null>(null)
+  const [edit, setEdit] = useState<{ type: 'user' | 'conversation'; id: string; value: string; closing?: boolean } | null>(null)
   const [selectingConversation, setSelectingConversation] = useState<string | null>(null)
   const nameInput = useRef<React.ComponentRef<typeof Input>>(null)
   const streamEvents = useRef(new Map<string, StreamEvent>())
@@ -161,10 +161,10 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
   }, [installSnapshot, toast, snapshot.activeConversationId])
 
   async function saveName(): Promise<void> {
-    if (!edit || busy || !edit.value.trim()) return
+    if (!edit || edit.closing || busy || !edit.value.trim()) return
     const value = edit.value.trim()
     const ok = await act(edit.type === 'user' ? { type: 'user:rename', id: edit.id, name: value } : { type: 'conversation:rename', id: edit.id, title: value })
-    if (ok) setEdit(null)
+    if (ok) setEdit(previous => previous ? { ...previous, closing: true } : null)
   }
 
   /** 新建时选择目录，文件夹菜单则复用已有会话目录；后台任务继续运行。 */
@@ -429,10 +429,12 @@ export function Workspace({ snapshot, setSnapshot }: { snapshot: Snapshot; setSn
     </WorkspaceLayout>
     {settingsOpen && <ModelSettings snapshot={snapshot} busy={busy} onClose={() => setSettingsOpen(false)} onSaved={installSnapshot} onTheme={value => void act({ type: 'theme', theme: value })} onModel={(providerId, model) => void act({ type: 'model:select', providerId, model })} />}
     {projectOpen && <ProjectDialog onClose={() => setProjectOpen(false)} onCreated={next => { enterConversation(next); setProjectOpen(false) }} />}
-    <Modal title={edit?.type === 'user' ? '编辑用户名称' : '重命名聊天'} open={Boolean(edit)} centered={edit?.type === 'conversation'} width={edit?.type === 'conversation' ? 480 : undefined}
+    <Modal title={edit?.type === 'user' ? '编辑用户名称' : '重命名聊天'} open={Boolean(edit && !edit.closing)} centered={edit?.type === 'conversation'} width={edit?.type === 'conversation' ? 480 : undefined}
       className={edit?.type === 'conversation' ? `rename-chat-modal rename-chat-${snapshot.theme}` : undefined}
       classNames={{ container: 'rename-chat-container', header: 'rename-chat-header', title: 'rename-chat-title', footer: 'rename-chat-footer' }}
-      onCancel={() => { if (!pending) setEdit(null) }} closable={!pending} keyboard={!pending} mask={{ closable: !pending }}
+      onCancel={() => { if (!pending) setEdit(previous => previous ? { ...previous, closing: true } : null) }} closable={!pending} keyboard={!pending} mask={{ closable: !pending }}
+      // 保留布局和内容直到收回动画结束，避免缩放途中跳位或变形。
+      afterClose={() => setEdit(null)}
       afterOpenChange={open => { if (open) nameInput.current?.focus({ cursor: 'all' }) }}
       okText="保存" cancelText="取消" okButtonProps={{ disabled: busy || !edit?.value.trim(), className: 'rename-chat-save' }} cancelButtonProps={{ disabled: pending, className: 'rename-chat-cancel' }} confirmLoading={pending} onOk={() => void saveName()}>
       {edit?.type === 'conversation' && <p className="rename-chat-description">保持简短且易于识别</p>}

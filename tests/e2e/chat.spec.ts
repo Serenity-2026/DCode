@@ -610,6 +610,37 @@ test('double-click renames the intended chat, preserves drafts and persists afte
   const composer = page.getByRole('textbox', { name: '消息', exact: true })
   const dialog = page.getByRole('dialog', { name: '重命名聊天', exact: true })
   const name = dialog.getByRole('textbox', { name: '名称', exact: true })
+  async function cancelWithMotion(title: string): Promise<void> {
+    await expect(name).toBeFocused()
+    const source = await history.getByRole('button', { name: title, exact: true }).boundingBox()
+    const origin = await dialog.evaluate(element => {
+      const rect = element.getBoundingClientRect()
+      const [x, y] = getComputedStyle(element).transformOrigin.split(' ').map(parseFloat)
+      return { x: rect.left + x, y: rect.top + y }
+    })
+    expect(origin.x).toBeGreaterThanOrEqual(source!.x)
+    expect(origin.x).toBeLessThanOrEqual(source!.x + source!.width)
+    expect(origin.y).toBeGreaterThanOrEqual(source!.y)
+    expect(origin.y).toBeLessThanOrEqual(source!.y + source!.height)
+    const frames = await dialog.evaluate(element => new Promise<{ before: unknown; closing: unknown }>(resolve => {
+      const read = () => {
+        const panel = element as HTMLElement
+        return {
+          left: panel.offsetLeft, top: panel.offsetTop, width: panel.offsetWidth, height: panel.offsetHeight,
+          origin: getComputedStyle(panel).transformOrigin,
+          background: getComputedStyle(panel.querySelector('.rename-chat-container')!).backgroundColor,
+          text: panel.textContent, value: panel.querySelector('input')!.value
+        }
+      }
+      const before = read()
+      element.addEventListener('animationstart', event => {
+        if (event.target === element) resolve({ before, closing: read() })
+      }, { once: true })
+      ;(element.querySelector('.rename-chat-cancel') as HTMLButtonElement).click()
+    }))
+    expect(frames.closing).toEqual(frames.before)
+    await expect(dialog).not.toBeVisible()
+  }
   await composer.fill('重命名时保留的草稿')
   await history.getByRole('button', { name: '新对话', exact: true }).dblclick()
   await expect(name).toHaveValue('新对话')
@@ -631,7 +662,7 @@ test('double-click renames the intended chat, preserves drafts and persists afte
   await expect(composer).toHaveValue('重命名时保留的草稿')
   await history.getByRole('button', { name: '设计锁', exact: true }).dblclick()
   await name.fill('取消的名称')
-  await dialog.getByRole('button', { name: '取消', exact: true }).click()
+  await cancelWithMotion('设计锁')
   await expect(history.getByRole('button', { name: '设计锁', exact: true })).toBeVisible()
   await history.getByRole('button', { name: '设计锁', exact: true }).dblclick()
   await name.press('Escape')
@@ -657,7 +688,7 @@ test('double-click renames the intended chat, preserves drafts and persists afte
   await history.getByRole('button', { name: '设计锁定稿', exact: true }).dblclick()
   await expect(name).toBeFocused()
   await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('rename-dark.png') })
-  await name.press('Escape')
+  await cancelWithMotion('设计锁定稿')
   await application.close()
   await launch()
   await expect(page.getByRole('navigation', { name: '会话列表' }).getByRole('button', { name: '设计锁定稿', exact: true })).toBeVisible()
