@@ -13,6 +13,7 @@ export function McpSettings({ busy }: { busy: boolean }) {
   const [inspecting, setInspecting] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [pending, setPending] = useState(false)
+  const [connectingId, setConnectingId] = useState<string | null>(null)
   const revision = useRef(0)
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
@@ -47,7 +48,12 @@ export function McpSettings({ busy }: { busy: boolean }) {
     } catch { if (mounted.current) setError('MCP 操作失败，请重试。'); return false }
     finally { if (mounted.current) setPending(false) }
   }
-  const act = (id: string, action: McpAction['action']) => run(() => window.dcode.mcpAction({ id, action }))
+  async function act(id: string, action: McpAction['action']) {
+    if (pending || busy) return false
+    if (action === 'connect') setConnectingId(id)
+    try { return await run(() => window.dcode.mcpAction({ id, action })) }
+    finally { if (mounted.current && action === 'connect') setConnectingId(null) }
+  }
   const selected = servers.find(s => s.id === inspecting)
   const tools = [...new Map(selected?.connections.flatMap(c => c.tools).map(t => [t.name, t]) || []).values()]
 
@@ -55,18 +61,21 @@ export function McpSettings({ busy }: { busy: boolean }) {
     <div className="mcp-toolbar"><Button type="primary" disabled={pending || busy} onClick={() => { setError(''); setEditing('new') }}>添加 MCP 服务器</Button></div>
     {error && <Alert type="error" showIcon title={error} />}
     {!servers.length && <p>尚未添加 MCP 服务器</p>}
-    {servers.map(server => <article className="mcp-card" key={server.id} aria-label={`MCP ${server.name}`}>
-      <div className="mcp-card-heading"><div><h3>{server.name}</h3><span>{server.transport === 'stdio' ? '本地进程 · stdio' : '远程服务 · Streamable HTTP'}</span></div><Switch aria-label={`启用 ${server.name}`} checked={server.enabled} disabled={pending || busy} onChange={value => void act(server.id, value ? 'enable' : 'disable')} /></div>
+    {servers.map(server => {
+      const connecting = connectingId === server.id || server.connections.some(c => c.status === 'connecting')
+      const disabled = pending || busy || connecting
+      return <article className="mcp-card" key={server.id} aria-label={`MCP ${server.name}`}>
+      <div className="mcp-card-heading"><div><h3>{server.name}</h3><span>{server.transport === 'stdio' ? '本地进程 · stdio' : '远程服务 · Streamable HTTP'}</span></div><Switch aria-label={`启用 ${server.name}`} checked={server.enabled} disabled={disabled} onChange={value => void act(server.id, value ? 'enable' : 'disable')} /></div>
       <div className="mcp-connections">{!server.connections.length ? <span>{server.enabled ? '未连接' : '已停用'}</span> : server.connections.map((c, i) => <div key={i}><span>{c.context} · {statuses[c.status]} · {c.tools.length} 个工具</span>{c.error && <p role="status">{c.error}</p>}</div>)}</div>
       <div className="mcp-actions">
-        <Button disabled={pending || busy || !server.enabled} onClick={() => void act(server.id, 'connect')}>连接 / 重连</Button>
-        <Button disabled={pending || busy || !server.connections.length} onClick={() => void act(server.id, 'disconnect')}>断开</Button>
-        {server.auth === 'oauth' && <><Button disabled={pending || busy || !server.enabled} onClick={() => void act(server.id, 'login')}>登录</Button><Button disabled={pending || busy} onClick={() => void act(server.id, 'logout')}>清除授权</Button></>}
+        <Button aria-label="连接 / 重连" loading={connecting} disabled={disabled || !server.enabled} onClick={() => void act(server.id, 'connect')}>连接 / 重连</Button>
+        <Button disabled={disabled || !server.connections.length} onClick={() => void act(server.id, 'disconnect')}>断开</Button>
+        {server.auth === 'oauth' && <><Button disabled={disabled || !server.enabled} onClick={() => void act(server.id, 'login')}>登录</Button><Button disabled={disabled} onClick={() => void act(server.id, 'logout')}>清除授权</Button></>}
         <Button disabled={!server.connections.some(c => c.tools.length)} onClick={() => setInspecting(server.id)}>查看工具</Button>
-        <Button disabled={pending || busy} onClick={() => { setError(''); setEditing(server) }}>编辑</Button>
-        <Button danger disabled={pending || busy} onClick={() => modal.confirm({ centered: true, title: `删除 ${server.name}？`, okText: '删除', cancelText: '取消', okButtonProps: { danger: true }, onOk: async () => { await act(server.id, 'delete') } })}>删除</Button>
+        <Button disabled={disabled} onClick={() => { setError(''); setEditing(server) }}>编辑</Button>
+        <Button danger disabled={disabled} onClick={() => modal.confirm({ centered: true, title: `删除 ${server.name}？`, okText: '删除', cancelText: '取消', okButtonProps: { danger: true }, onOk: async () => { await act(server.id, 'delete') } })}>删除</Button>
       </div>
-    </article>)}
+    </article>})}
     {editing && <McpEditor key={editing === 'new' ? 'new' : editing.id} server={editing === 'new' ? undefined : editing} pending={pending} busy={busy} error={error} onClose={() => setEditing(null)} onSave={async input => { if (await run(() => window.dcode.saveMcpServer(input))) setEditing(null) }} />}
     <Modal open={Boolean(selected)} centered title={`${selected?.name || ''} 的工具`} footer={null} onCancel={() => setInspecting(null)}><ul className="mcp-tool-list">{tools.map(tool => <li key={tool.name}><strong>{tool.name}</strong><p>{tool.description}</p></li>)}</ul></Modal>
   </div>

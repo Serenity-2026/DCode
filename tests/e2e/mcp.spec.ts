@@ -12,7 +12,9 @@ test('manages MCP settings, persists encrypted headers, calls tools through the 
   const directory = mkdtempSync(join(tmpdir(), 'dcode-mcp-e2e-'))
   const workspace = join(directory, 'workspace')
   mkdirSync(workspace)
-  const mcp = await mcpHttp()
+  let releaseTools!: () => void
+  const toolsReady = new Promise<void>(resolve => { releaseTools = resolve })
+  const mcp = await mcpHttp({ beforeListTools: () => toolsReady })
   mcp.state.auth = true; mcp.state.bearer = 'e2e-mcp-private-token'
   const model = createServer(async (request, response) => {
     if (request.method === 'GET') { response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ data: [{ id: 'mcp-test-model' }] })); return }
@@ -54,6 +56,25 @@ test('manages MCP settings, persists encrypted headers, calls tools through the 
     await expect(card).toBeVisible()
     expect(readFileSync(join(directory, 'state.json'), 'utf8')).not.toContain('e2e-mcp-private-token')
     await card.getByRole('button', { name: '连接 / 重连', exact: true }).click()
+    await expect.poll(() => mcp.requests.some(r => r.method === 'tools/list')).toBe(true)
+    await expect(card).toContainText('连接中')
+    const connect = card.getByRole('button', { name: '连接 / 重连', exact: true })
+    await expect(connect).toBeDisabled()
+    await expect(connect.getByRole('img', { name: 'loading' })).toBeVisible()
+    for (const name of ['断开', '编辑', '删除']) await expect(card.getByRole('button', { name, exact: true })).toBeDisabled()
+    releaseTools()
+    await expect(card).toContainText('已连接')
+    await expect(connect).toBeEnabled()
+    await expect(connect.getByRole('img', { name: 'loading' })).toHaveCount(0)
+    for (const name of ['断开', '编辑', '删除']) await expect(card.getByRole('button', { name, exact: true })).toBeEnabled()
+    mcp.state.bearer = 'changed-token'
+    await connect.click()
+    await expect(card).toContainText('需要认证')
+    await expect(connect).toBeEnabled()
+    await expect(connect.getByRole('img', { name: 'loading' })).toHaveCount(0)
+    for (const name of ['断开', '编辑', '删除']) await expect(card.getByRole('button', { name, exact: true })).toBeEnabled()
+    mcp.state.bearer = 'e2e-mcp-private-token'
+    await connect.click()
     await expect(card).toContainText('已连接')
     await card.getByRole('button', { name: '查看工具' }).click()
     await expect(page.getByText('Echo MCP input', { exact: true })).toBeVisible()
@@ -87,6 +108,7 @@ test('manages MCP settings, persists encrypted headers, calls tools through the 
     await page.getByRole('dialog').filter({ hasText: '删除 docs？' }).getByRole('button', { name: '删除', exact: true }).click()
     await expect(page.getByRole('article', { name: 'MCP docs' })).toHaveCount(0)
   } finally {
+    releaseTools()
     await application?.close().catch(() => undefined)
     await mcp.close()
     model.closeAllConnections(); await new Promise<void>(resolve => model.close(() => resolve()))

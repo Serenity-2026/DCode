@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net'
 import { createHash } from 'node:crypto'
 
 /** 真实 HTTP 测试服务器；覆盖分页、认证、取消和工具错误，不依赖付费服务。 */
-export async function mcpHttp() {
+export async function mcpHttp(options: { beforeListTools?: () => Promise<void> } = {}) {
   const requests: { method?: string; params?: Record<string, unknown>; authorization?: string }[] = []
   const state = { auth: false, bearer: '', failCalls: false, failInitialize: false, holdInitialize: false, challenge: '', verifier: '', registrations: 0, tokens: 0, closed: 0 }
   let url = ''
@@ -33,6 +33,7 @@ export async function mcpHttp() {
     const message = JSON.parse(body)
     requests.push({ ...message, authorization: request.headers.authorization })
     if (message.id === undefined) { response.writeHead(202).end(); return }
+    if (message.method === 'tools/list') await options.beforeListTools?.()
     let result: unknown = {}
     if (message.method === 'initialize') {
       if (state.holdInitialize) return
