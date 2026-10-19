@@ -11,11 +11,14 @@ export class Agent {
   private readonly current: AgentState
   private active?: { controller: AbortController; done: Promise<void> }
 
-  /** 装配循环和可信工具，启动时复制声明并编译参数校验。 */
+  /** 第三个参数为本次运行还可以使用哪些动态工具 */
   constructor(private readonly loop: AgentLoop, tools: AgentTool[], private readonly additionalTools?: (signal: AbortSignal) => Promise<AgentTool[]>) {
-    if (new Set(tools.map(tool => tool.name)).size !== tools.length) throw new Error('工具名称重复。')
+    if (new Set(tools.map(tool => tool.name)).size !== tools.length)
+      throw new Error('工具名称重复。')
     this.tools = tools.map(tool => {
-      const copy = { name: tool.name, description: tool.description, parameters: structuredClone(tool.parameters), executionMode: tool.executionMode, usageIdentity: tool.usageIdentity && structuredClone(tool.usageIdentity), execute: tool.execute.bind(tool) }
+      const copy = { name: tool.name, description: tool.description,
+        parameters: structuredClone(tool.parameters), executionMode: tool.executionMode,
+        usageIdentity: tool.usageIdentity && structuredClone(tool.usageIdentity), execute: tool.execute.bind(tool) }
       return { tool: copy, validate: toolValidator(copy) }
     })
     this.current = { tools: this.tools.map(({ tool: { name, description, parameters } }) => ({ name, description, parameters })), messages: [], isStreaming: false, pendingToolCalls: [] }
@@ -60,16 +63,23 @@ export class Agent {
         controller.signal.throwIfAborted()
         const dynamic = await this.additionalTools?.(controller.signal) || []
         controller.signal.throwIfAborted()
-        const tools = [...this.tools, ...dynamic.map(tool => ({ tool, validate: toolValidator(tool, true) }))]
-        if (new Set(tools.map(t => t.tool.name)).size !== tools.length) throw new Error('工具名称重复。')
-        this.current.tools = tools.map(({ tool: { name, description, parameters } }) => ({ name, description, parameters: structuredClone(parameters) }))
-        await this.loop.run(selected, { messages: this.current.messages, tools }, controller, event => this.publish(event))
+        const tools = [...this.tools, ...dynamic.map(tool => (
+            { tool, validate: toolValidator(tool, true) }))]
+        if (new Set(tools.map(t => t.tool.name)).size !== tools.length)
+          throw new Error('工具名称重复。')
+        this.current.tools = tools.map((
+            { tool: { name, description, parameters } }) => (
+                { name, description, parameters: structuredClone(parameters) }))
+        await this.loop.run(selected, { messages: this.current.messages, tools },
+            controller, event => this.publish(event))
       } catch (cause) {
         error = cause instanceof Error ? cause.message : '生成失败，请重试。'
         outcome = controller.signal.aborted && !error.includes('超时') ? 'stopped' : 'error'
         if (outcome === 'stopped') error = undefined
       } finally {
-        try { this.publish({ type: 'agent_end', outcome, error }) }
+        try {
+          this.publish({ type: 'agent_end', outcome, error })
+        }
         catch (cause) {
           const endingError = cause instanceof Error ? cause.message : '任务收尾失败。'
           this.current.outcome = 'error'
